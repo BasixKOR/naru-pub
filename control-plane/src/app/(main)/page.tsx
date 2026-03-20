@@ -114,14 +114,14 @@ export default async function Home() {
             buttonHref="https://commu.ng"
           />
           <AdCard
-            icon="👀"
-            title="광고주를 찾고 있습니다"
-            label="당신의 광고"
+            icon="🐱"
+            title="고양이 두부"
+            label="두부"
             imageSrc="/ad/0c88af5cb6aee0da1e19b8c7f75ee6a1fc11cda46729b5734f4cf2e45c65bede.png"
-            imageAlt="귀여운 고양이"
-            description="이 자리에 들어갈 광고를 찾고 있습니다"
-            subtitle="광고 문의는 DM으로 부탁드립니다!"
-            buttonText="광고 문의하러 가기 →"
+            imageAlt="두부"
+            description="나루 메인에 걸린줄도 모르는 고양이를 만나보세요"
+            subtitle="두부는 가끔 나루 서버 위에 올라와서 놀기도 합니다."
+            buttonText="나루와 두부 응원하러 가기 →"
             buttonHref="https://x.com/naru_pub"
           />
         </div>

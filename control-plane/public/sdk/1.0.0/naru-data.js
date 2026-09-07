@@ -454,8 +454,35 @@ export function createDatabase({
           options,
         );
       },
-      collection(collectionName) {
+      collection(collectionName, { parse } = {}) {
         const path = `${root}/${segment(collectionName)}`;
+        if (parse !== undefined && typeof parse !== "function")
+          throw new TypeError("parse must be a synchronous function.");
+        const readDocument = (document) => {
+          if (parse === undefined) return document;
+          try {
+            const data = parse(document.data);
+            if (
+              data !== null &&
+              data !== undefined &&
+              typeof data.then === "function"
+            ) {
+              Promise.resolve(data).catch(() => {});
+              throw new TypeError("parse must return synchronously.");
+            }
+            return { ...document, data };
+          } catch (cause) {
+            const error = new NaruDataError(
+              200,
+              `Document ${collectionName}/${document.id} failed read validation.`,
+              "DOCUMENT_VALIDATION_FAILED",
+            );
+            error.collection = collectionName;
+            error.documentId = document.id;
+            error.cause = cause;
+            throw error;
+          }
+        };
         const query = ({ where, orderBy, direction }) => {
           const parameters = new URLSearchParams();
           if (where !== undefined) parameters.set("where", filterJson(where));
@@ -468,13 +495,22 @@ export function createDatabase({
           parameters.set("limit", String(options.limit ?? 50));
           if (options.after !== undefined)
             parameters.set("after", options.after);
-          return send(`${path}?${parameters}`, "GET", undefined, options);
+          return send(`${path}?${parameters}`, "GET", undefined, options).then(
+            (page) =>
+              parse === undefined
+                ? page
+                : {
+                    ...page,
+                    documents: page.documents.map(readDocument),
+                  },
+          );
         };
         return {
           async get(id, options) {
-            return (
-              await send(`${path}/${segment(id)}`, "GET", undefined, options)
-            ).document;
+            return readDocument(
+              (await send(`${path}/${segment(id)}`, "GET", undefined, options))
+                .document,
+            );
           },
           list,
           async count(options = {}) {

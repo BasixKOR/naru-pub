@@ -1494,3 +1494,182 @@ test("full writes reject asynchronous and invalid schema results before sending"
     globalThis.window = oldWindow;
   }
 });
+
+test("optional read parsers infer usable data without changing server metadata or raw handles", async () => {
+  const oldFetch = globalThis.fetch,
+    oldWindow = globalThis.window;
+  try {
+    const owner = await restoreTestOwner();
+    const stored = documentFixture("one", { title: "hello", legacy: true });
+    globalThis.fetch = async () =>
+      Response.json({
+        document: stored,
+        documents: [stored],
+        nextCursor: null,
+      });
+    for (const db of [createDatabase({ site: "alice" }), owner]) {
+      let calls = 0;
+      const posts = db.collection("posts", {
+        parse: (data) => {
+          calls++;
+          return { title: data.title.toUpperCase() };
+        },
+      });
+      assert.deepEqual(await posts.get("one"), {
+        ...stored,
+        data: { title: "HELLO" },
+      });
+      assert.deepEqual((await posts.list()).documents[0].data, {
+        title: "HELLO",
+      });
+      const values = [];
+      for await (const document of posts.all()) values.push(document.data);
+      assert.deepEqual(values, [{ title: "HELLO" }]);
+      assert.equal(calls, 3);
+      assert.deepEqual(
+        (await db.collection("posts").get("one")).data,
+        stored.data,
+      );
+      for (const value of [false, null, undefined])
+        assert.equal(
+          (await db.collection("posts", { parse: () => value }).get("one"))
+            .data,
+          value,
+        );
+    }
+  } finally {
+    globalThis.fetch = oldFetch;
+    globalThis.window = oldWindow;
+  }
+});
+
+test("read parser failures identify the document and reject the entire failing page", async () => {
+  const oldFetch = globalThis.fetch;
+  try {
+    const failure = new Error("title must be a string");
+    const posts = createDatabase({ site: "alice" }).collection("posts", {
+      parse: (data) => {
+        if (typeof data.title !== "string") throw failure;
+        return data;
+      },
+    });
+    const good = documentFixture("good", { title: "hello" }),
+      bad = documentFixture("bad", { title: 42 });
+    const check = (error) => {
+      assert.ok(error instanceof NaruDataError);
+      assert.equal(error.code, "DOCUMENT_VALIDATION_FAILED");
+      assert.equal(error.collection, "posts");
+      assert.equal(error.documentId, "bad");
+      assert.equal(error.cause, failure);
+      return true;
+    };
+    globalThis.fetch = async () =>
+      Response.json({
+        document: bad,
+        documents: [good, bad],
+        nextCursor: null,
+      });
+    await assert.rejects(posts.get("bad"), check);
+    await assert.rejects(posts.list(), check);
+    await assert.rejects(posts.all().next(), check);
+    let calls = 0;
+    globalThis.fetch = async () =>
+      Response.json(
+        ++calls === 1
+          ? { documents: [good], nextCursor: "next" }
+          : { documents: [good, bad], nextCursor: "more" },
+      );
+    const iterator = posts.all();
+    assert.equal((await iterator.next()).value.id, "good");
+    await assert.rejects(iterator.next(), check);
+    assert.equal(calls, 2);
+    assert.equal((await iterator.next()).done, true);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("read parsers reject async results and invalid configuration without masking transport errors", async () => {
+  const oldFetch = globalThis.fetch;
+  try {
+    const db = createDatabase({ site: "alice" });
+    assert.throws(() => db.collection("posts", { parse: true }), TypeError);
+    globalThis.fetch = async () =>
+      Response.json({ document: documentFixture("one", {}) });
+    for (const parse of [
+      async () => ({}),
+      async () => {
+        throw new Error("async failure");
+      },
+      () => ({
+        then(resolve) {
+          resolve({});
+        },
+      }),
+    ])
+      await assert.rejects(
+        db.collection("posts", { parse }).get("one"),
+        (error) =>
+          error.code === "DOCUMENT_VALIDATION_FAILED" &&
+          error.documentId === "one" &&
+          error.cause instanceof TypeError,
+      );
+    await new Promise((resolve) => setImmediate(resolve));
+    let invoked = false;
+    const posts = db.collection("posts", {
+      parse: () => {
+        invoked = true;
+      },
+    });
+    for (const [response, code] of [
+      [
+        () => Response.json({ error: "missing" }, { status: 404 }),
+        "REQUEST_FAILED",
+      ],
+      [() => Response.json({ document: {} }), "INVALID_RESPONSE"],
+    ]) {
+      globalThis.fetch = async () => response();
+      await assert.rejects(posts.get("one"), { code });
+    }
+    assert.equal(invoked, false);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("read parsers are handle-local and do not run for counts or writes", async () => {
+  const oldFetch = globalThis.fetch;
+  try {
+    const options = {
+      parse: () => {
+        throw new Error("read only");
+      },
+    };
+    const posts = createDatabase({ site: "alice" }).collection(
+      "posts",
+      options,
+    );
+    options.parse = () => true;
+    globalThis.fetch = async (_url, options) =>
+      Response.json(
+        options.method === "DELETE"
+          ? { success: true }
+          : {
+              id: "one",
+              version: 1,
+              count: 2,
+              document: documentFixture("one", {}),
+            },
+      );
+    assert.equal(await posts.count(), 2);
+    await posts.add({});
+    await posts.set("one", {});
+    await posts.update("one", {});
+    await posts.delete("one");
+    await assert.rejects(posts.get("one"), {
+      code: "DOCUMENT_VALIDATION_FAILED",
+    });
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});

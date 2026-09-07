@@ -45,7 +45,7 @@ export type Json =
 export interface Document<T = Json> {
   /** ASCII 영문자, 숫자, 밑줄, 하이픈 1~64자입니다. */
   id: string;
-  /** 저장한 JSON입니다. `T`는 선언일 뿐 검증된 형태가 아닙니다. */
+  /** 저장한 JSON 또는 parse의 반환값입니다. parse 없이 지정한 T는 검증되지 않습니다. */
   data: T;
   /** 서버가 매기는 ISO 8601 생성 시각이며, `set`으로 교체해도 유지됩니다. */
   created_at: string;
@@ -110,20 +110,24 @@ export class NaruDataError extends Error {
   fileId?: string;
   /** 업로드 실패 뒤 정리 요청도 실패했을 때의 오류입니다. */
   cleanupError?: unknown;
+  /** 읽기 검사에 실패한 컬렉션 이름입니다. */
+  collection?: string;
+  /** 읽기 검사에 실패한 문서 ID입니다. */
+  documentId?: string;
   constructor(status: number, message: string, code?: string);
 }
 
 /** 범위 비교는 JSONB 타입 안에서만 이루어집니다. 문자열 경계는 수 필드와 절대
  * 맞지 않고, 그 필드가 없는 문서는 결과에서 빠집니다. */
-export interface RangeFilter {
+export interface RangeFilter<T extends string | number = string | number> {
   /** 초과. */
-  gt?: string | number;
+  gt?: T;
   /** 이상. */
-  gte?: string | number;
+  gte?: T;
   /** 미만. */
-  lt?: string | number;
+  lt?: T;
   /** 이하. */
-  lte?: string | number;
+  lte?: T;
 }
 
 /** 최상위 필드에 조건을 최대 5개까지 걸고 AND로 묶습니다. 스칼라 값은 정확히
@@ -133,6 +137,9 @@ export interface RangeFilter {
  * 같은지 보는 기준은 엄격합니다. `1`은 `"1"`과 다르고, 문자열은 대소문자를
  * 가리며, `null`은 저장된 null과 맞을 뿐 필드가 없는 문서와는 맞지 않습니다.
  * 중첩 경로, 배열 포함 여부, OR, 부분 문자열 검색은 지원하지 않습니다.
+ *
+ * Collection<T>에서는 T의 필드 이름과 값 타입을 검사합니다. 타입을 생략하면
+ * 임의의 필드 이름을 사용할 수 있습니다.
  *
  * 필터는 주소 질의 문자열에 실려 가므로, 비밀 값으로는 거르지 마세요.
  *
@@ -145,10 +152,37 @@ export interface RangeFilter {
  * });
  * ```
  */
-export type Filter = Record<
-  string,
-  string | number | boolean | null | RangeFilter
->;
+export type Filter<T = Json> = Json extends T
+  ? Record<string, string | number | boolean | null | RangeFilter>
+  : [FieldNames<T>] extends [never]
+    ? Record<string, never>
+    : { [K in FieldNames<T>]?: FilterValue<FieldValue<T, K>> };
+
+/** 문서 객체의 최상위 문자열 키입니다. 타입을 생략하면 모든 필드 이름을 받습니다.
+ * 유니온 문서는 각 형태의 키를 합치고 배열 인덱스는 포함하지 않습니다. */
+export type FieldNames<T = Json> = Json extends T
+  ? string
+  : T extends readonly unknown[]
+    ? never
+    : T extends object
+      ? Extract<keyof T, string>
+      : never;
+
+/** 유니온 문서에서 해당 필드가 가질 수 있는 값입니다. */
+export type FieldValue<T, K extends string> = Json extends T
+  ? Json
+  : T extends unknown
+    ? K extends keyof T
+      ? T[K]
+      : never
+    : never;
+
+/** 같은지 비교할 때는 필드 값의 타입을, 범위 비교에는 문자열 또는 숫자를 씁니다.
+ * 객체와 배열 비교는 지원하지 않습니다. 한 범위의 경계는 같은 타입이어야 합니다. */
+export type FilterValue<T> =
+  | Extract<T, string | number | boolean | null>
+  | (Extract<T, string> extends never ? never : RangeFilter<string>)
+  | (Extract<T, number> extends never ? never : RangeFilter<number>);
 
 /** `data.<필드>`는 문서의 최상위 필드로 정렬합니다. 값이 없는 필드는 JSON
  * null로 취급되어 문자열보다 아래에, 문자열은 수보다 아래에 놓입니다.
@@ -157,20 +191,24 @@ export type Filter = Record<
  * 같은 방향의 ID 순으로 갈립니다. 목록에는 바뀌지 않는 `created_at`을
  * 권합니다. 넘겨보는 도중에 값이 바뀌는 필드로 정렬하면 문서가 빠지거나 두 번
  * 나올 수 있습니다. */
-export type OrderBy = "id" | "created_at" | "updated_at" | `data.${string}`;
+export type OrderBy<T = Json> =
+  | "id"
+  | "created_at"
+  | "updated_at"
+  | `data.${FieldNames<T>}`;
 
 /** `list`, `all`, `count`가 함께 쓰는 거르기와 정렬 옵션입니다. */
-export interface QueryOptions extends RequestOptions {
+export interface QueryOptions<T = Json> extends RequestOptions {
   /** 거르지 않으려면 생략하거나 `{}`를 넘기세요. */
-  where?: Filter;
+  where?: Filter<T>;
   /** 기본값은 `id`입니다. */
-  orderBy?: OrderBy;
+  orderBy?: OrderBy<T>;
   /** 기본값은 `asc`입니다. */
   direction?: "asc" | "desc";
 }
 
 /** 컬렉션의 한 쪽입니다. */
-export interface ListOptions extends QueryOptions {
+export interface ListOptions<T = Json> extends QueryOptions<T> {
   /** 한 쪽에 담을 문서 수로 1~100입니다. 기본값은 50입니다. */
   limit?: number;
   /** 같은 컬렉션, 같은 정렬, 같은 필터에서 받은 커서입니다. */
@@ -213,7 +251,7 @@ export interface Collection<T = Json> {
    * ```
    */
   list(
-    options?: ListOptions,
+    options?: ListOptions<T>,
   ): Promise<{ documents: Document<T>[]; nextCursor: string | null }>;
   /** 조건에 맞는 모든 문서를 필요할 때마다 한 쪽씩 가져옵니다. `limit`은 쪽
    * 크기입니다.
@@ -229,9 +267,11 @@ export interface Collection<T = Json> {
    * }
    * ```
    */
-  all(options?: Omit<ListOptions, "after">): AsyncIterableIterator<Document<T>>;
+  all(
+    options?: Omit<ListOptions<T>, "after">,
+  ): AsyncIterableIterator<Document<T>>;
   /** 조건에 맞는 문서 수를 서버가 쪽 나눔 없이 세어 돌려줍니다. */
-  count(options?: RequestOptions & { where?: Filter }): Promise<number>;
+  count(options?: RequestOptions & { where?: Filter<T> }): Promise<number>;
   /**
    * 서버가 매긴 UUID로 문서를 새로 만듭니다.
    *
@@ -279,8 +319,39 @@ export interface Collection<T = Json> {
 /** `createDatabase`가 돌려주는 공개 클라이언트입니다. 인증 없이 요청하므로
  * 컬렉션의 공개 범위가 허용한 곳까지만 닿습니다. */
 export interface Database {
-  /** 타입은 애플리케이션의 형태를 적어 둔 것일 뿐, 읽은 값을 검증하지 않습니다. */
-  collection<T = Json>(name: string): Collection<T>;
+  /** T만 지정하면 읽은 값을 검증하지 않습니다. parse를 지정하면 반환 타입에서
+   * T를 추론하고 get, list, all로 읽는 각 문서의 data에 실행합니다. */
+  collection<T = Json>(
+    name: string,
+    options?: CollectionOptions<T>,
+  ): Collection<T>;
+}
+
+/** 선택적인 읽기 검사입니다. 서버의 스키마나 쓰기 검사를 바꾸지 않습니다. */
+export interface CollectionOptions<T> {
+  /** JSON을 검사한 뒤 사용할 값을 반환하는 동기 함수입니다. 검사에 실패하면
+   * 오류를 던지세요. false나 undefined도 정상 반환값이며 실패 신호가 아닙니다.
+   * 반환값이 문서의 data가 되고 ID, 시각, 버전은 서버 값 그대로 유지됩니다.
+   *
+   * 오류나 Promise를 반환하면 DOCUMENT_VALIDATION_FAILED 오류가 납니다.
+   * 오류의 collection, documentId, cause에서 실패 위치와 원인을 확인하세요.
+   * list와 all은 한 쪽을 전부 검사한 뒤 반환하므로 잘못된 문서를 건너뛰지 않습니다.
+   * count와 쓰기에는 실행되지 않습니다. 변환된 값도 저장하려면 JSON이어야 합니다.
+   *
+   * ```ts
+   * const posts = db.collection("posts", {
+   *   parse(data) {
+   *     if (!data || typeof data !== "object" || Array.isArray(data) ||
+   *         typeof data.title !== "string") throw new Error("title must be a string");
+   *     return { title: data.title };
+   *   },
+   * });
+   * const post = await posts.get("hello"); // post.data.title: string
+   * ```
+   */
+  parse?: (
+    data: Json,
+  ) => T & (T extends PromiseLike<unknown> ? never : unknown);
 }
 
 /** `OwnerDatabase.batch`에 담기는 작업 하나입니다. 문서 하나를 다루는 메서드와
@@ -295,6 +366,19 @@ export type BatchOperation =
         | { type: "update"; data: Json; unset?: string[] }
         | { type: "delete" }
       ));
+
+/** 삭제는 success, 나머지 쓰기는 id와 version을 돌려줍니다. */
+export type BatchResult<T extends BatchOperation = BatchOperation> = T extends {
+  type: "delete";
+}
+  ? { success: true }
+  : Written;
+
+/** 입력 작업의 순서와 길이를 유지하는 결과입니다. 일반 배열은 결과 유니온의
+ * 배열로, 튜플은 각 위치의 작업에 맞는 결과 튜플로 돌아옵니다. */
+export type BatchResults<T extends readonly BatchOperation[]> = {
+  -readonly [K in keyof T]: BatchResult<T[K]>;
+};
 
 /** 사이트 미디어 라이브러리에 있는 파일입니다. */
 export interface StoredFile {
@@ -397,7 +481,9 @@ export interface OwnerDatabase extends Database {
    *
    * 서버 트랜잭션 하나로 처리되므로, 두 컬렉션을 어긋나지 않게 지키는 방법입니다.
    * 글을 공개하면서 초고를 지우는 일이 둘 다 일어나거나 둘 다 일어나지 않습니다.
-   * 결과는 넘긴 작업과 같은 순서로 돌아옵니다.
+   * 결과는 넘긴 작업과 같은 순서로 돌아옵니다. TypeScript 5 이상에서는 직접
+   * 넘긴 배열의 각 위치마다 결과 타입을 추론합니다. 일반 BatchOperation[]은
+   * Written과 { success: true }의 유니온 배열이므로 사용 전에 구분하세요.
    *
    * ```js
    * await owner.batch([
@@ -406,11 +492,11 @@ export interface OwnerDatabase extends Database {
    * ]);
    * ```
    */
-  batch(
-    operations: BatchOperation[],
+  batch<const T extends readonly BatchOperation[]>(
+    operations: T,
     options?: RequestOptions,
   ): Promise<{
-    results: Array<{ id?: string; version?: number; success?: true }>;
+    results: BatchResults<T>;
   }>;
   /** 이 클라이언트를 무효로 만들고, 서버에 폐기를 요청하기 전에 저장된 자격
    * 증명을 지웁니다. 연결이 끊겨 있으면 서버 폐기는 실패할 수 있습니다. */

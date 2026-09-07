@@ -17,7 +17,7 @@ const VERSIONS = ["1.0.0"];
 
 // Parenthesise only where TypeScript's own precedence would otherwise change
 // meaning: `&` binds tighter than `|`, and both bind looser than `[]`.
-const PRECEDENCE = { union: 1, intersection: 2 };
+const PRECEDENCE = { conditional: 0, union: 1, intersection: 2 };
 const UNION_MEMBER = 2;
 const INTERSECTION_MEMBER = 3;
 const ELEMENT = 4;
@@ -49,15 +49,35 @@ function renderType(type) {
     case "array":
       return `${atom(type.elementType, ELEMENT)}[]`;
     case "union":
-      return type.types
-        .map((inner) => atom(inner, UNION_MEMBER))
-        .join(" | ");
+      return type.types.map((inner) => atom(inner, UNION_MEMBER)).join(" | ");
     case "intersection":
       return type.types
         .map((inner) => atom(inner, INTERSECTION_MEMBER))
         .join(" & ");
     case "typeOperator":
       return `${type.operator} ${atom(type.target, INTERSECTION_MEMBER)}`;
+    case "conditional":
+      return `${atom(type.checkType, UNION_MEMBER)} extends ${atom(type.extendsType, UNION_MEMBER)} ? ${renderType(type.trueType)} : ${renderType(type.falseType)}`;
+    case "indexedAccess":
+      return `${atom(type.objectType, ELEMENT)}[${renderType(type.indexType)}]`;
+    case "tuple":
+      return `[${type.elements.map(renderType).join(", ")}]`;
+    case "mapped": {
+      const readonly =
+        type.readonlyModifier === "+"
+          ? "readonly "
+          : type.readonlyModifier === "-"
+            ? "-readonly "
+            : "";
+      const optional =
+        type.optionalModifier === "+"
+          ? "?"
+          : type.optionalModifier === "-"
+            ? "-?"
+            : "";
+      const rename = type.nameType ? ` as ${renderType(type.nameType)}` : "";
+      return `{ ${readonly}[${type.parameter} in ${renderType(type.parameterType)}${rename}]${optional}: ${renderType(type.templateType)} }`;
+    }
     case "templateLiteral": {
       const tail = type.tail
         .map(([inner, literal]) => `\${${renderType(inner)}}${literal}`)
@@ -111,7 +131,9 @@ const renderTypeParameters = (holder) =>
     ? `<${holder.typeParameters
         .map(
           (parameter) =>
+            (parameter.flags?.isConst ? "const " : "") +
             parameter.name +
+            (parameter.type ? ` extends ${renderType(parameter.type)}` : "") +
             (parameter.default ? ` = ${renderType(parameter.default)}` : ""),
         )
         .join(", ")}>`
@@ -126,7 +148,10 @@ function renderComment(comment) {
   const blocks = [];
   let spans = [];
   const flush = () => {
-    const text = spans.map((span) => span.value).join("").trim();
+    const text = spans
+      .map((span) => span.value)
+      .join("")
+      .trim();
     if (text) blocks.push({ type: "paragraph", spans: trim(spans) });
     spans = [];
   };

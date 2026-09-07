@@ -12,6 +12,7 @@
     "sdk-reference:check": "node scripts/generate-sdk-reference.mjs --check",
     "test": "jest",
     "test:node": "node --experimental-vm-modules --test \"tests/*.test.mjs\" \"tests/*.test.ts\"",
+    "test:sdk:integration": "bash scripts/test-data-sdk.sh",
     "test:data": "jest --config jest.data.config.cjs --runInBand",
     "test:payments": "jest --config jest.payment.config.cjs --runInBand",
     "test:watch": "jest --watch",

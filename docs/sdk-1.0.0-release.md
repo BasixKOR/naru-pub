@@ -50,3 +50,34 @@ if the network also fails, a copied token can remain usable until expiration or
 control-plane revocation. The SDK cannot guarantee remote logout while offline.
 An admin session is scoped to a browser tab and callback path; sessionStorage
 may be copied by the browser when a tab is duplicated. It is not an XSS defense.
+
+## SDK/API integration checks
+
+From `control-plane`, with PostgreSQL tools (`initdb`, `pg_ctl`, `createdb`)
+installed locally:
+
+```sh
+pnpm test:sdk:integration
+# If pg_config is not on PATH, select the PostgreSQL bin directory:
+NARU_TEST_PG_BIN=/opt/homebrew/opt/postgresql@18/bin bash scripts/test-data-sdk.sh
+```
+
+The runner initializes a fresh temporary PostgreSQL cluster and the guarded
+`naru_data_test` database, applies the shared test migrations, and stops and removes
+the cluster on exit. It overrides `DATABASE_URL`; it does not use the application's
+database. PostgreSQL listens only on a private Unix socket. The HTTP listener binds
+to an ephemeral loopback port.
+
+The published SDK sends real HTTP requests to the actual data/auth route handlers
+and PostgreSQL. No service or response mocks are used. Coverage includes JSON and
+server metadata, conditional writes, filtered cursor pagination and counts, owner
+batch results and rollback, optional read parsing, and token revocation. Browser
+Origin and sessionStorage are supplied by a small shim, and owner credentials are
+issued through the real authorization service during setup. This is a contract
+test, not an end-to-end browser login or object-storage upload test.
+
+To run all data suites against the same disposable cluster instead:
+
+```sh
+bash scripts/test-data-sdk.sh src/lib/site-data/__tests__
+```

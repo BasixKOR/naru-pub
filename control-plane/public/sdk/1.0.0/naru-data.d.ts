@@ -302,7 +302,7 @@ export interface Collection<T = Json> {
   update(
     id: string,
     patch: Partial<T>,
-    options?: RequestOptions & Conditional & { unset?: (keyof T & string)[] },
+    options?: RequestOptions & Conditional & { unset?: FieldNames<T>[] },
   ): Promise<Written>;
   /**
    * 문서를 지웁니다.

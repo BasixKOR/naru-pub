@@ -446,7 +446,7 @@
         {
           "name": "update",
           "optional": false,
-          "signature": "update(\n  id: string,\n  patch: Partial<T>,\n  options?: RequestOptions &\n    Conditional & { unset?: (keyof T & string)[] },\n): Promise<Written>",
+          "signature": "update(\n  id: string,\n  patch: Partial<T>,\n  options?: RequestOptions & Conditional & { unset?: FieldNames<T>[] },\n): Promise<Written>",
           "summary": [
             {
               "type": "paragraph",

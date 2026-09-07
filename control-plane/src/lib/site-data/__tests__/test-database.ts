@@ -36,6 +36,10 @@ import {
   up as versionUp,
   down as versionDown,
 } from "@/migrations/1788299234629_add_site_data_document_version";
+import {
+  up as featureUseUp,
+  down as featureUseDown,
+} from "@/migrations/1788473207664_add_supporter_feature_uses";
 
 export async function setupTestDatabase() {
   process.env.FEATURE_ACCESS_MODE = "preview";
@@ -60,8 +64,10 @@ export async function setupTestDatabase() {
   await lifetimeUp(db);
   await filesUp(db);
   await versionUp(db);
+  await featureUseUp(db);
 }
 export async function teardownTestDatabase() {
+  await featureUseDown(db);
   await versionDown(db);
   await filesDown(db);
   await lifetimeDown(db);

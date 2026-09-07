@@ -256,3 +256,8 @@ db.collection("flags", { parse: () => false })
   .then((document) => {
     const flag: boolean = document.data;
   });
+
+// Untyped collections may remove arbitrary top-level JSON fields.
+db.collection("schemaless").update("one", {}, { unset: ["legacy"] });
+// @ts-expect-error Typed collections still reject unknown field names in unset.
+posts.update("one", {}, { unset: ["legacy"] });

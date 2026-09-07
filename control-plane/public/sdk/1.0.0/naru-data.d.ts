@@ -53,8 +53,6 @@ export interface Document<T = Json> {
   updated_at: string;
   /** 쓰기가 반영될 때마다 증가합니다. `ifVersion`으로 되돌려 주세요. */
   version: number;
-  /** 서버가 채우는 자리입니다. 직접 쓴 문서에는 `{}`가 들어 있습니다. */
-  metadata: Json;
 }
 
 /** 쓰기가 성공했을 때 돌아오는 값입니다. */
@@ -63,6 +61,17 @@ export interface Written {
   id: string;
   /** 이 쓰기가 만든 버전입니다. 새로 만든 문서는 `1`입니다. */
   version: number;
+}
+
+/** 요청 취소와 시간 제한입니다. 취소나 시간 초과 뒤에도 서버에 쓰기가
+ * 반영됐을 수 있으므로 쓰기를 자동으로 재시도하지 않습니다. */
+export interface RequestOptions {
+  /** 취소하면 REQUEST_ABORTED 오류가 납니다. */
+  signal?: AbortSignal;
+  /** 응답 본문을 읽기까지의 제한 시간입니다. 기본 30초, 0은 제한 없음입니다.
+   * 업로드는 승인·전송·마무리를 합쳐 기본 120초이며, all은 쪽마다 적용됩니다.
+   * 시간 초과는 REQUEST_TIMEOUT 오류입니다. */
+  timeoutMs?: number;
 }
 
 /** 문서 하나를 쓰는 모든 작업에 섞어 쓰는 낙관적 동시성 제어입니다. */
@@ -97,6 +106,10 @@ export class NaruDataError extends Error {
   code: string;
   /** 원인이 된 네트워크 오류나 파싱 오류입니다. */
   cause?: unknown;
+  /** 실패한 업로드의 파일 ID입니다. 승인을 받지 못했으면 없을 수 있습니다. */
+  fileId?: string;
+  /** 업로드 실패 뒤 정리 요청도 실패했을 때의 오류입니다. */
+  cleanupError?: unknown;
   constructor(status: number, message: string, code?: string);
 }
 
@@ -147,7 +160,7 @@ export type Filter = Record<
 export type OrderBy = "id" | "created_at" | "updated_at" | `data.${string}`;
 
 /** `list`, `all`, `count`가 함께 쓰는 거르기와 정렬 옵션입니다. */
-export interface QueryOptions {
+export interface QueryOptions extends RequestOptions {
   /** 거르지 않으려면 생략하거나 `{}`를 넘기세요. */
   where?: Filter;
   /** 기본값은 `id`입니다. */
@@ -178,7 +191,7 @@ export interface Collection<T = Json> {
    *
    * @throws 문서가 없으면 `status: 404`인 NaruDataError.
    */
-  get(id: string): Promise<Document<T>>;
+  get(id: string, options?: RequestOptions): Promise<Document<T>>;
   /**
    * 한 쪽을 가져옵니다.
    *
@@ -205,6 +218,9 @@ export interface Collection<T = Json> {
   /** 조건에 맞는 모든 문서를 필요할 때마다 한 쪽씩 가져옵니다. `limit`은 쪽
    * 크기입니다.
    *
+   * 커서가 반복되면 INVALID_PAGINATION, 응답 형태가 잘못되면 INVALID_RESPONSE
+   * 오류가 납니다.
+   *
    * 반복자가 그 쪽에 닿을 때 비로소 요청하므로, 중간에 멈추면 요청도 멈춥니다.
    *
    * ```js
@@ -215,21 +231,25 @@ export interface Collection<T = Json> {
    */
   all(options?: Omit<ListOptions, "after">): AsyncIterableIterator<Document<T>>;
   /** 조건에 맞는 문서 수를 서버가 쪽 나눔 없이 세어 돌려줍니다. */
-  count(options?: { where?: Filter }): Promise<number>;
+  count(options?: RequestOptions & { where?: Filter }): Promise<number>;
   /**
    * 서버가 매긴 UUID로 문서를 새로 만듭니다.
    *
    * 새로 만들기만 하므로 기존 문서를 덮어쓰지 않습니다. 읽기 권한도 필요 없어서,
    * 아무도 목록을 볼 수 없는 컬렉션에도 방명록을 만들 수 있습니다.
    */
-  add(data: T): Promise<Written>;
+  add(data: T, options?: RequestOptions): Promise<Written>;
   /**
    * 문서 전체를 바꾸고, 없으면 새로 만듭니다.
    *
    * 합치기가 아니라 교체입니다. `data`에 없는 필드는 사라집니다. 문서의 일부만
    * 바꾸려면 `Collection.update`를 쓰세요. 교체해도 `created_at`은 남습니다.
    */
-  set(id: string, data: T, options?: Conditional): Promise<Written>;
+  set(
+    id: string,
+    data: T,
+    options?: RequestOptions & Conditional,
+  ): Promise<Written>;
   /** 얕은 합치기입니다. 패치에 있는 필드가 저장된 필드를 대신하고, `unset`에
    * 적은 이름은 지워집니다. 문서가 이미 있고 JSON 객체를 담고 있어야 합니다.
    * 패치는 조각이라 문서 전체를 보는 schemas 검사기는 실행되지 않습니다.
@@ -242,7 +262,7 @@ export interface Collection<T = Json> {
   update(
     id: string,
     patch: Partial<T>,
-    options?: Conditional & { unset?: (keyof T & string)[] },
+    options?: RequestOptions & Conditional & { unset?: (keyof T & string)[] },
   ): Promise<Written>;
   /**
    * 문서를 지웁니다.
@@ -250,7 +270,10 @@ export interface Collection<T = Json> {
    * 여러 번 해도 같습니다. 없는 문서를 지워도 성공합니다. 이미 읽어 둔 그 문서만
    * 지우려면 `ifVersion`을 넘기세요.
    */
-  delete(id: string, options?: Conditional): Promise<{ success: true }>;
+  delete(
+    id: string,
+    options?: RequestOptions & Conditional,
+  ): Promise<{ success: true }>;
 }
 
 /** `createDatabase`가 돌려주는 공개 클라이언트입니다. 인증 없이 요청하므로
@@ -310,17 +333,19 @@ export interface MediaUsage {
 /** 관리자 세션에서만 닿을 수 있는 미디어 라이브러리입니다. */
 export interface FileStore {
   /** @throws 파일이 없으면 `status: 404`인 NaruDataError. */
-  get(id: string): Promise<StoredFile>;
+  get(id: string, options?: RequestOptions): Promise<StoredFile>;
   /** 이 사이트의 준비된 파일 전부입니다. 쪽 나눔은 없습니다. */
-  list(): Promise<StoredFile[]>;
+  list(options?: RequestOptions): Promise<StoredFile[]>;
   /** 이 사이트의 미디어 한도에서 쓰고 있는 양입니다. */
-  usage(): Promise<MediaUsage>;
+  usage(options?: RequestOptions): Promise<MediaUsage>;
   /**
    * 파일 하나를 올리고 서버가 확인할 때까지 기다립니다.
    *
    * 바이트는 제어판을 거치지 않고 짧게 유효한 서명 주소로 저장소에 바로
-   * 갑니다. 그래서 업로드가 실패해도 남는 것이 없습니다. SDK가 오류를 던지기
-   * 전에 잡아 둔 자리를 되돌립니다.
+   * 갑니다. 승인 뒤 실패하면 취소 신호와 별개로 최대 10초 동안 정리를 시도한
+   * 뒤 오류를 던집니다. 오류의 fileId와 cleanupError로 정리 실패를 확인하세요.
+   * 승인 응답을 받지 못하면 ID를 알 수 없어 즉시 정리할 수 없습니다. 서버는
+   * 오래된 pending 항목을 정리하지만 네트워크 실패 시 즉시 삭제는 보장되지 않습니다.
    *
    * 이미지, 오디오, PDF, ZIP, 일반 텍스트를 받습니다. HTML과 SVG는 미디어
    * 출처에서 실행될 수 있어 거부합니다. 문서에는 바이트가 아니라 돌아온 `id`나
@@ -339,12 +364,10 @@ export interface FileStore {
    */
   upload(
     file: File | Blob,
-    options?: {
+    options?: RequestOptions & {
       /** 바이트가 나가는 동안 불립니다. 전송 길이를 알 수 없으면 파일 크기를
        * total로 알려 줍니다. */
       onProgress?: (progress: { loaded: number; total: number }) => void;
-      /** 전송을 멈추고 잡아 둔 자리를 되돌립니다. */
-      signal?: AbortSignal;
       /** 대체 텍스트나 이 파일을 쓰는 문서 목록처럼 애플리케이션이 정하는
        * 값입니다. */
       metadata?: Json;
@@ -352,7 +375,7 @@ export interface FileStore {
   ): Promise<StoredFile>;
   /** 저장된 파일과 그 정보를 지웁니다. 이 파일을 쓰는 문서는 그대로 남으니
    * 먼저 확인하세요. */
-  delete(id: string): Promise<{ success: true }>;
+  delete(id: string, options?: RequestOptions): Promise<{ success: true }>;
 }
 
 /**
@@ -383,12 +406,15 @@ export interface OwnerDatabase extends Database {
    * ]);
    * ```
    */
-  batch(operations: BatchOperation[]): Promise<{
+  batch(
+    operations: BatchOperation[],
+    options?: RequestOptions,
+  ): Promise<{
     results: Array<{ id?: string; version?: number; success?: true }>;
   }>;
   /** 이 클라이언트를 무효로 만들고, 서버에 폐기를 요청하기 전에 저장된 자격
    * 증명을 지웁니다. 연결이 끊겨 있으면 서버 폐기는 실패할 수 있습니다. */
-  signOut(): Promise<void>;
+  signOut(options?: RequestOptions): Promise<void>;
 }
 
 /** SDK가 실제 서비스에서 이야기하는 유일한 제어판입니다. */
@@ -416,7 +442,11 @@ export function createDatabase(options: {
   /** 개발용 우회 설정입니다. HTTP 루프백 출처만 받습니다. */
   controlPlaneOrigin?: string;
   /** 컬렉션에 쓰기 전에 실행되는 동기 검사기입니다. false를 돌려주거나 오류를
-   * 던지면 그 문서를 거부합니다. */
+   * 던지면 그 문서를 거부합니다. 반환값은 boolean 또는 undefined여야 하며,
+   * Promise와 다른 반환값은 요청 전에 TypeError로 거부합니다.
+   * 클라이언트를 만들 때 직접 정의된 함수 속성을 검사하고 복사합니다.
+   * 상속된 속성은 무시하고 getter와 함수가 아닌 속성은 거부합니다.
+   * 이후 원본 schemas를 바꿔도 이미 만든 클라이언트에는 영향을 주지 않습니다. */
   schemas?: Record<string, (data: Json) => boolean | void>;
 }): Database & {
   /** 화면을 전환합니다. 등록해 둔 콜백 페이지에서 completeOwnerSignIn()을
@@ -429,15 +459,17 @@ export function createDatabase(options: {
    * 문자열·조각·자격 증명이 붙어 있거나 다른 출처면 TypeError.
    * @throws 콜백을 제어판에 등록하지 않았으면 코드가
    * `UNREGISTERED_REDIRECT_URI`인 NaruDataError. */
-  signInAsOwner(options: {
-    /** 보통은 등록된 콜백 주소에서 찾아냅니다. */
-    clientId?: string;
-    /** 기본값은 지금 페이지의 출처와 경로입니다. 등록해 둔 값과 정확히 같아야
-     * 합니다. */
-    redirectUri?: string;
-    /** 이 세션이 닿을 컬렉션입니다. 등록에 적어 둔 목록 안에 있어야 합니다. */
-    collections: string[];
-  }): Promise<void>;
+  signInAsOwner(
+    options: RequestOptions & {
+      /** 보통은 등록된 콜백 주소에서 찾아냅니다. */
+      clientId?: string;
+      /** 기본값은 지금 페이지의 출처와 경로입니다. 등록해 둔 값과 정확히 같아야
+       * 합니다. */
+      redirectUri?: string;
+      /** 이 세션이 닿을 컬렉션입니다. 등록에 적어 둔 목록 안에 있어야 합니다. */
+      collections: string[];
+    },
+  ): Promise<void>;
   /** 승인을 마무리하거나, 이 탭·페이지의 sessionStorage에 있던 토큰을
    * 되살립니다. 서버 폐기 여부는 데이터 요청마다 확인합니다. 토큰이 없거나 이미
    * 만료됐으면 null을 돌려줍니다.
@@ -445,6 +477,7 @@ export function createDatabase(options: {
    * 페이지를 열 때마다 불러도 되고, 되살릴 것이 없으면 값싸게 끝납니다. 주소에서
    * `code`와 `state`를 먼저 지우므로 무엇을 그리기 전에 부르세요. 되살린다고
    * 만료 시각이 늘어나지는 않으며, 갱신 토큰도 없습니다. 세션이 끝나면 다시
-   * 로그인해야 합니다. */
-  completeOwnerSignIn(): Promise<OwnerDatabase | null>;
+   * 로그인해야 합니다. 동시에 호출하면 첫 호출의 요청 옵션을 공유합니다.
+   * 취소나 시간 초과로 토큰 교환에 실패하면 다시 로그인하세요. */
+  completeOwnerSignIn(options?: RequestOptions): Promise<OwnerDatabase | null>;
 };

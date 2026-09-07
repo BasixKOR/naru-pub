@@ -5,6 +5,14 @@ import {
   NaruDataError,
 } from "../public/sdk/1.0.0/naru-data.js";
 
+const documentFixture = (id, data = null) => ({
+  id,
+  data,
+  version: 1,
+  created_at: "2026-01-01T00:00:00.000Z",
+  updated_at: "2026-01-01T00:00:00.000Z",
+});
+
 test("SDK sends cross-origin CRUD requests without credentials", async () => {
   const original = globalThis.fetch;
   const calls = [];
@@ -12,7 +20,9 @@ test("SDK sends cross-origin CRUD requests without credentials", async () => {
     calls.push({ url, options });
     return Response.json({
       id: "one",
-      document: { id: "one", data: null },
+      version: 1,
+      success: true,
+      document: documentFixture("one"),
       documents: [],
       nextCursor: null,
     });
@@ -22,7 +32,7 @@ test("SDK sends cross-origin CRUD requests without credentials", async () => {
       site: "alice",
       baseUrl: "https://naru.pub/",
     }).collection("guestbook");
-    assert.deepEqual(await entries.get("one"), { id: "one", data: null });
+    assert.deepEqual(await entries.get("one"), documentFixture("one"));
     await entries.list({ limit: 2, after: "one" });
     await entries.add({ message: "hi" });
     await entries.set("one", null);
@@ -76,6 +86,9 @@ test("owner file upload authorizes, uploads directly, finalizes and exposes meta
         contentType: "image/png",
         size: 3,
         status: "ready",
+        metadata: {},
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
         url: "https://media.naru.pub/1/file_one.png",
       },
     });
@@ -166,7 +179,12 @@ test("owner redirect uses PKCE; callback exchanges once and keeps public calls a
         expiresAt: Date.now() + 24 * 3600000,
         tokenType: "Bearer",
       });
-    return Response.json({ documents: [], id: "one" });
+    return Response.json({
+      documents: [],
+      nextCursor: null,
+      id: "one",
+      version: 1,
+    });
   };
   try {
     const db = createDatabase({ site: "alice", baseUrl: "https://naru.pub" });
@@ -271,7 +289,13 @@ test("schemas reject invalid writes and owner batch snapshots valid operations",
   let body;
   globalThis.fetch = async (_url, options) => {
     body = options.body;
-    return Response.json({ results: [{ id: "one" }] });
+    return Response.json({
+      results: JSON.parse(body).operations.map((op) =>
+        op.type === "delete"
+          ? { success: true }
+          : { id: op.id ?? "one", version: 1 },
+      ),
+    });
   };
   try {
     const db = createDatabase({
@@ -323,11 +347,9 @@ test("schemas reject invalid writes and owner batch snapshots valid operations",
     ])
       assert.throws(() => owner.batch([operation]), TypeError);
     // A patch is a fragment, so the whole-document schema must not judge it.
-    assert.doesNotThrow(() =>
-      owner.batch([
-        { type: "update", collection: "posts", id: "one", data: { body: "x" } },
-      ]),
-    );
+    await owner.batch([
+      { type: "update", collection: "posts", id: "one", data: { body: "x" } },
+    ]);
   } finally {
     globalThis.window = oldWindow;
     globalThis.fetch = oldFetch;
@@ -500,8 +522,11 @@ test("count queries the server without paging and all() follows cursors", async 
   const original = globalThis.fetch;
   const urls = [];
   const pages = [
-    { documents: [{ id: "a" }, { id: "b" }], nextCursor: "v1.one" },
-    { documents: [{ id: "c" }], nextCursor: null },
+    {
+      documents: [documentFixture("a"), documentFixture("b")],
+      nextCursor: "v1.one",
+    },
+    { documents: [documentFixture("c")], nextCursor: null },
   ];
   globalThis.fetch = async (url) => {
     const parsed = new URL(url);
@@ -537,12 +562,15 @@ test("count queries the server without paging and all() follows cursors", async 
   }
 });
 
-test("all() stops instead of paging forever on a repeated cursor", async () => {
+test("all() rejects a repeated cursor before yielding the repeated page", async () => {
   const original = globalThis.fetch;
   let requests = 0;
   globalThis.fetch = async () => {
     requests += 1;
-    return Response.json({ documents: [{ id: "a" }], nextCursor: "v1.stuck" });
+    return Response.json({
+      documents: [documentFixture("a")],
+      nextCursor: "v1.stuck",
+    });
   };
   try {
     const posts = createDatabase({
@@ -550,8 +578,13 @@ test("all() stops instead of paging forever on a repeated cursor", async () => {
       baseUrl: "https://naru.pub",
     }).collection("posts");
     const ids = [];
-    for await (const document of posts.all()) ids.push(document.id);
-    assert.deepEqual(ids, ["a", "a"]);
+    await assert.rejects(
+      async () => {
+        for await (const document of posts.all()) ids.push(document.id);
+      },
+      { code: "INVALID_PAGINATION" },
+    );
+    assert.deepEqual(ids, ["a"]);
     assert.equal(requests, 2);
   } finally {
     globalThis.fetch = original;
@@ -563,7 +596,11 @@ test("merge patches and conditional writes travel as PATCH and ifVersion", async
   const calls = [];
   globalThis.fetch = async (url, options) => {
     calls.push({ url: new URL(url), options });
-    return Response.json({ id: "one", version: 2 });
+    return Response.json(
+      options.method === "DELETE"
+        ? { success: true }
+        : { id: "one", version: 2 },
+    );
   };
   try {
     const posts = createDatabase({
@@ -610,7 +647,7 @@ test("SDK pins the control plane even when copied or given an old baseUrl option
   const urls = [];
   globalThis.fetch = async (url) => {
     urls.push(url);
-    return Response.json({ documents: [] });
+    return Response.json({ documents: [], nextCursor: null });
   };
   try {
     await createDatabase({ site: "alice", baseUrl: "https://evil.example" })
@@ -642,7 +679,7 @@ test("one token restores after reload without network calls and retains its orig
   const calls = [];
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options });
-    return Response.json({ documents: [] });
+    return Response.json({ documents: [], nextCursor: null });
   };
   try {
     const owner = await createDatabase({ site: "alice" }).completeOwnerSignIn();
@@ -768,7 +805,7 @@ test("writes reject lossy JSON without requests and snapshot valid shared refere
   const bodies = [];
   globalThis.fetch = async (_url, options) => {
     bodies.push(JSON.parse(options.body));
-    return Response.json({ id: "one" });
+    return Response.json({ id: "one", version: 1 });
   };
   const entries = createDatabase({ site: "alice" }).collection("posts");
   const cyclic = {};
@@ -906,5 +943,554 @@ test("failed token persistence revokes the new token and concurrent completions 
   } finally {
     globalThis.window = oldWindow;
     globalThis.fetch = oldFetch;
+  }
+});
+
+function restoreTestOwner() {
+  const browser = fakeBrowser();
+  globalThis.window = browser;
+  browser.storage.set(
+    "naru:owner:https://naru.pub:alice:session:https://alice.example/admin.html",
+    JSON.stringify({
+      accessToken: "t".repeat(43),
+      expiresAt: Date.now() + 3600000,
+      redirectUri: browser.location.href,
+    }),
+  );
+  return createDatabase({ site: "alice" }).completeOwnerSignIn();
+}
+const uploadAuthorization = () => ({
+  file: { id: "file_one", status: "pending" },
+  uploadUrl: "https://upload.example/signed",
+  method: "PUT",
+  headers: { "Content-Type": "image/png" },
+});
+const storedFileFixture = () => ({
+  id: "file_one",
+  name: "upload",
+  contentType: "image/png",
+  size: 3,
+  status: "ready",
+  metadata: {},
+  url: "https://media.naru.pub/1/file_one.png",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+});
+const untilAborted = (signal) =>
+  new Promise((_, reject) => {
+    if (signal.aborted) reject(signal.reason);
+    else
+      signal.addEventListener("abort", () => reject(signal.reason), {
+        once: true,
+      });
+  });
+
+test("every data operation forwards cancellation and rejects before a request when already aborted", async () => {
+  const oldFetch = globalThis.fetch,
+    oldWindow = globalThis.window;
+  try {
+    const owner = await restoreTestOwner();
+    const posts = owner.collection("posts");
+    const operations = [
+      (options) => posts.get("one", options),
+      (options) => posts.list(options),
+      (options) => posts.count(options),
+      (options) => posts.all(options).next(),
+      (options) => posts.add({}, options),
+      (options) => posts.set("one", {}, options),
+      (options) => posts.update("one", {}, options),
+      (options) => posts.delete("one", options),
+      (options) =>
+        owner.batch(
+          [{ type: "delete", collection: "posts", id: "one" }],
+          options,
+        ),
+      (options) => owner.files.get("one", options),
+      (options) => owner.files.list(options),
+      (options) => owner.files.usage(options),
+      (options) => owner.files.delete("one", options),
+    ];
+    let calls = 0;
+    for (const operation of operations) {
+      const controller = new AbortController();
+      globalThis.fetch = (_url, options) => {
+        calls++;
+        const promise = untilAborted(options.signal);
+        controller.abort("cancelled by caller");
+        return promise;
+      };
+      await assert.rejects(
+        operation({ signal: controller.signal }),
+        (error) =>
+          error.code === "REQUEST_ABORTED" &&
+          error.status === 0 &&
+          error.cause === "cancelled by caller",
+      );
+      const before = calls;
+      await assert.rejects(operation({ signal: controller.signal }), {
+        code: "REQUEST_ABORTED",
+      });
+      assert.equal(calls, before);
+    }
+    assert.equal(calls, operations.length);
+  } finally {
+    globalThis.fetch = oldFetch;
+    globalThis.window = oldWindow;
+  }
+});
+
+test("timeouts include response body reads, validate options, and release caller listeners", async () => {
+  const oldFetch = globalThis.fetch;
+  try {
+    const posts = createDatabase({ site: "alice" }).collection("posts");
+    for (const bodyStalls of [false, true]) {
+      globalThis.fetch = async (_url, { signal }) =>
+        bodyStalls
+          ? { status: 200, ok: true, json: () => untilAborted(signal) }
+          : untilAborted(signal);
+      await assert.rejects(posts.get("one", { timeoutMs: 5 }), {
+        code: "REQUEST_TIMEOUT",
+        status: 0,
+      });
+    }
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls++;
+      return Response.json({ document: documentFixture("one") });
+    };
+    for (const timeoutMs of [-1, NaN, Infinity, 0.1, "10", 2147483648])
+      await assert.rejects(posts.get("one", { timeoutMs }), TypeError);
+    await assert.rejects(posts.get("one", { signal: {} }), TypeError);
+    assert.equal(calls, 0);
+    const signal = new AbortController().signal;
+    let listeners = 0;
+    const add = signal.addEventListener.bind(signal),
+      remove = signal.removeEventListener.bind(signal);
+    signal.addEventListener = (...args) => {
+      listeners++;
+      return add(...args);
+    };
+    signal.removeEventListener = (...args) => {
+      listeners--;
+      return remove(...args);
+    };
+    await posts.get("one", { signal, timeoutMs: 0 });
+    assert.equal(listeners, 0);
+    globalThis.fetch = async () => {
+      throw new TypeError("offline");
+    };
+    await assert.rejects(posts.get("one", { signal }), {
+      code: "REQUEST_FAILED",
+    });
+    assert.equal(listeners, 0);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("malformed successful envelopes reject instead of returning values outside the declared types", async () => {
+  const oldFetch = globalThis.fetch,
+    oldWindow = globalThis.window;
+  try {
+    const owner = await restoreTestOwner(),
+      posts = owner.collection("posts");
+    const cases = [
+      [() => posts.get("one"), {}],
+      [
+        () => posts.get("one"),
+        { document: { ...documentFixture("one"), version: "1" } },
+      ],
+      [() => posts.list(), { documents: [] }],
+      [() => posts.list(), { documents: [{}], nextCursor: null }],
+      [() => posts.list(), { documents: [], nextCursor: 7 }],
+      [() => posts.count(), { count: -1 }],
+      [() => posts.add({}), { id: "one" }],
+      [() => posts.set("one", {}), { id: "one", version: 0 }],
+      [() => posts.update("one", {}), {}],
+      [() => posts.delete("one"), { success: false }],
+      [
+        () => owner.batch([{ type: "delete", collection: "posts", id: "one" }]),
+        { results: [] },
+      ],
+      [
+        () => owner.batch([{ type: "add", collection: "posts", data: {} }]),
+        { results: [{ success: true }] },
+      ],
+      [
+        () => owner.files.get("one"),
+        { file: { ...storedFileFixture(), status: "pending" } },
+      ],
+      [() => owner.files.list(), { files: [], usage: {} }],
+      [() => owner.files.delete("one"), {}],
+      [
+        () => owner.files.upload(new Blob(["abc"])),
+        { ...uploadAuthorization(), uploadUrl: "javascript:alert(1)" },
+      ],
+    ];
+    for (const [call, body] of cases) {
+      globalThis.fetch = async () => Response.json(body);
+      await assert.rejects(call(), { code: "INVALID_RESPONSE", status: 200 });
+    }
+  } finally {
+    globalThis.fetch = oldFetch;
+    globalThis.window = oldWindow;
+  }
+});
+
+test("all rejects longer cursor cycles and honours cancellation within a page", async () => {
+  const oldFetch = globalThis.fetch;
+  try {
+    let calls = 0;
+    globalThis.fetch = async () =>
+      Response.json({
+        documents: [documentFixture("one")],
+        nextCursor: ["a", "b", "a"][calls++],
+      });
+    const posts = createDatabase({ site: "alice" }).collection("posts");
+    await assert.rejects(
+      async () => {
+        for await (const _ of posts.all()) {
+          /* consume */
+        }
+      },
+      { code: "INVALID_PAGINATION" },
+    );
+    assert.equal(calls, 3);
+    const controller = new AbortController();
+    globalThis.fetch = async () =>
+      Response.json({
+        documents: [documentFixture("one"), documentFixture("two")],
+        nextCursor: null,
+      });
+    const iterator = posts.all({ signal: controller.signal });
+    assert.equal((await iterator.next()).value.id, "one");
+    controller.abort();
+    await assert.rejects(iterator.next(), { code: "REQUEST_ABORTED" });
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("upload failures at transfer or finalization await independent cleanup and expose cleanup failures", async () => {
+  const oldFetch = globalThis.fetch,
+    oldWindow = globalThis.window;
+  try {
+    const owner = await restoreTestOwner();
+    for (const stage of [
+      "transfer",
+      "finalize",
+      "malformed-finalize",
+      "abort",
+      "timeout",
+      "cleanup-fails",
+    ]) {
+      const controller = new AbortController();
+      let cleaned = false;
+      const calls = [];
+      globalThis.fetch = async (url, options) => {
+        calls.push([String(url), options.method]);
+        if (options.method === "POST")
+          return Response.json(uploadAuthorization());
+        if (options.method === "DELETE") {
+          assert.equal(options.signal.aborted, false);
+          await new Promise((resolve) => setTimeout(resolve, 2));
+          if (stage === "cleanup-fails") throw new TypeError("cleanup offline");
+          cleaned = true;
+          return Response.json({ success: true });
+        }
+        if (String(url).startsWith("https://upload.example")) {
+          if (stage === "abort") {
+            controller.abort();
+            return untilAborted(options.signal);
+          }
+          if (stage === "timeout") return untilAborted(options.signal);
+          if (stage === "transfer" || stage === "cleanup-fails")
+            throw new TypeError("transfer offline");
+          return new Response(null, { status: 200 });
+        }
+        return stage === "malformed-finalize"
+          ? Response.json({})
+          : Response.json({ error: "finalization failed" }, { status: 409 });
+      };
+      await assert.rejects(
+        owner.files.upload(new Blob(["abc"]), {
+          signal: controller.signal,
+          timeoutMs: stage === "timeout" ? 5 : 1000,
+        }),
+        (error) => {
+          assert.equal(error.fileId, "file_one");
+          assert.equal(cleaned, stage !== "cleanup-fails");
+          assert.equal(Boolean(error.cleanupError), stage === "cleanup-fails");
+          if (stage === "abort") assert.equal(error.code, "REQUEST_ABORTED");
+          if (stage === "timeout") assert.equal(error.code, "REQUEST_TIMEOUT");
+          return true;
+        },
+      );
+      assert.equal(calls.at(-1)[1], "DELETE");
+    }
+  } finally {
+    globalThis.fetch = oldFetch;
+    globalThis.window = oldWindow;
+  }
+});
+
+test("XHR upload checks cancellation before send and removes transfer listeners after success or failure", async () => {
+  const oldFetch = globalThis.fetch,
+    oldWindow = globalThis.window,
+    oldXHR = globalThis.XMLHttpRequest;
+  try {
+    const owner = await restoreTestOwner();
+    for (const mode of [
+      "before-send",
+      "during-send",
+      "success",
+      "progress-throws",
+      "send-throws",
+    ]) {
+      const controller = new AbortController();
+      let sent = false,
+        cleaned = false,
+        xhr;
+      globalThis.XMLHttpRequest = class {
+        constructor() {
+          xhr = this;
+          this.upload = {};
+          if (mode === "before-send") controller.abort();
+        }
+        open() {}
+        setRequestHeader() {}
+        abort() {
+          this.onabort?.();
+        }
+        send() {
+          sent = true;
+          if (mode === "send-throws") throw new Error("send failed");
+          if (mode === "during-send") {
+            controller.abort();
+            return;
+          }
+          this.upload.onprogress?.({
+            loaded: 3,
+            total: 3,
+            lengthComputable: true,
+          });
+          this.status = 200;
+          this.onload?.();
+        }
+      };
+      globalThis.fetch = async (_url, options) => {
+        if (options.method === "POST")
+          return Response.json(uploadAuthorization());
+        if (options.method === "DELETE") {
+          cleaned = true;
+          return Response.json({ success: true });
+        }
+        return Response.json({ file: storedFileFixture() });
+      };
+      const upload = owner.files.upload(new Blob(["abc"]), {
+        signal: controller.signal,
+        onProgress: () => {
+          if (mode === "progress-throws") throw new Error("callback failed");
+        },
+      });
+      if (mode === "success") assert.equal((await upload).id, "file_one");
+      else
+        await assert.rejects(
+          upload,
+          mode.includes("send") && mode !== "send-throws"
+            ? { code: "REQUEST_ABORTED" }
+            : NaruDataError,
+        );
+      assert.equal(sent, mode !== "before-send");
+      assert.equal(cleaned, mode !== "success");
+      assert.equal(xhr.onload, null);
+      assert.equal(xhr.upload.onprogress, null);
+    }
+  } finally {
+    globalThis.fetch = oldFetch;
+    globalThis.window = oldWindow;
+    globalThis.XMLHttpRequest = oldXHR;
+  }
+});
+
+test("authentication accepts cancellation without navigating or consuming a callback when already aborted", async () => {
+  const oldFetch = globalThis.fetch,
+    oldWindow = globalThis.window;
+  try {
+    const browser = fakeBrowser();
+    globalThis.window = browser;
+    const controller = new AbortController();
+    controller.abort();
+    const db = createDatabase({ site: "alice" });
+    const before = browser.location.href;
+    globalThis.fetch = () => {
+      assert.fail("must not send");
+    };
+    await assert.rejects(
+      db.signInAsOwner({
+        clientId: "registered",
+        collections: ["posts"],
+        signal: controller.signal,
+      }),
+      { code: "REQUEST_ABORTED" },
+    );
+    await assert.rejects(
+      db.completeOwnerSignIn({ signal: controller.signal }),
+      { code: "REQUEST_ABORTED" },
+    );
+    assert.equal(browser.location.href, before);
+    const owner = await restoreTestOwner();
+    await assert.rejects(owner.signOut({ signal: controller.signal }), {
+      code: "REQUEST_ABORTED",
+    });
+    await assert.rejects(owner.collection("posts").list(), {
+      code: "OWNER_SESSION_EXPIRED",
+    });
+  } finally {
+    globalThis.fetch = oldFetch;
+    globalThis.window = oldWindow;
+  }
+});
+
+test("schema registries validate own properties eagerly without invoking getters", () => {
+  for (const schemas of [
+    null,
+    [],
+    { posts: undefined },
+    { posts: true },
+    { "bad/name": () => true },
+    { [Symbol("posts")]: () => true },
+  ])
+    assert.throws(() => createDatabase({ site: "alice", schemas }), TypeError);
+  let invoked = false;
+  assert.throws(
+    () =>
+      createDatabase({
+        site: "alice",
+        schemas: {
+          get posts() {
+            invoked = true;
+            return () => true;
+          },
+        },
+      }),
+    TypeError,
+  );
+  assert.equal(invoked, false);
+  const hidden = Object.defineProperty({}, "posts", { value: false });
+  assert.throws(
+    () => createDatabase({ site: "alice", schemas: hidden }),
+    TypeError,
+  );
+});
+
+test("schemas ignore inherited names and retain a snapshot of own validators", async () => {
+  const oldFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => Response.json({ id: "one", version: 1 });
+    const schemas = Object.create({
+      posts: () => {
+        throw new Error("inherited validator ran");
+      },
+    });
+    schemas.notes = () => false;
+    const db = createDatabase({ site: "alice", schemas });
+    schemas.notes = () => true;
+    await db.collection("posts").add({});
+    await db.collection("constructor").add({});
+    await db.collection("toString").add({});
+    assert.throws(() => db.collection("notes").add({}), TypeError);
+    const own = Object.create(null);
+    own.constructor = () => false;
+    assert.throws(
+      () =>
+        createDatabase({ site: "alice", schemas: own })
+          .collection("constructor")
+          .add({}),
+      TypeError,
+    );
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("full writes reject asynchronous and invalid schema results before sending", async () => {
+  const oldFetch = globalThis.fetch,
+    oldWindow = globalThis.window;
+  try {
+    await restoreTestOwner();
+    let requests = 0;
+    globalThis.fetch = async () => {
+      requests++;
+      return Response.json({ id: "one", version: 1 });
+    };
+    for (const validator of [
+      async () => false,
+      async () => {
+        throw new Error("async validation failed");
+      },
+      () => Promise.resolve(true),
+      () => ({
+        then(resolve) {
+          resolve(false);
+        },
+      }),
+      () => null,
+      () => "yes",
+      () => 1,
+      function* () {
+        yield true;
+      },
+      (data) => {
+        data.lost = undefined;
+      },
+    ]) {
+      const db = createDatabase({
+        site: "alice",
+        schemas: { posts: validator },
+      });
+      const posts = db.collection("posts");
+      assert.throws(() => posts.add({}), TypeError);
+      assert.throws(() => posts.set("one", {}), TypeError);
+      const owner = await db.completeOwnerSignIn();
+      for (const type of ["add", "set"])
+        assert.throws(
+          () =>
+            owner.batch([
+              {
+                type,
+                collection: "posts",
+                ...(type === "set" ? { id: "one" } : {}),
+                data: {},
+              },
+            ]),
+          TypeError,
+        );
+    }
+    // Give rejected async validators time to report any unhandled rejection.
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(requests, 0);
+    for (const validator of [() => true, () => undefined])
+      await createDatabase({ site: "alice", schemas: { posts: validator } })
+        .collection("posts")
+        .add({});
+    const failure = new Error("schema detail");
+    assert.throws(
+      () =>
+        createDatabase({
+          site: "alice",
+          schemas: {
+            posts: () => {
+              throw failure;
+            },
+          },
+        })
+          .collection("posts")
+          .add({}),
+      (error) => error === failure,
+    );
+  } finally {
+    globalThis.fetch = oldFetch;
+    globalThis.window = oldWindow;
   }
 });

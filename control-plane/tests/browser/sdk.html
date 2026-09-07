@@ -11,6 +11,13 @@
 <pre id="results" role="status">Ready</pre>
 <script type="module">
   import { createDatabase, NaruDataError } from "/sdk/1.0.0/naru-data.js";
+  const documentFixture = (id) => ({
+    id,
+    data: null,
+    version: 1,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  });
   const output = document.querySelector("#results");
   const reloadKey = "naru-sdk-fixture-reload";
   const sessionKey = `naru:owner:https://naru.pub:sdk-browser-test:session:${location.origin}${location.pathname}`;
@@ -74,7 +81,12 @@
       const calls = [];
       window.fetch = async (url, options) => {
         calls.push({ url, options });
-        return Response.json({ documents: [], nextCursor: null, id: "one" });
+        return Response.json({
+          documents: [],
+          nextCursor: null,
+          id: "one",
+          version: 1,
+        });
       };
       await owner.collection("posts").set("one", { title: "브라우저 테스트" });
       await db.collection("posts").list({
@@ -114,8 +126,11 @@
           return Response.json({ count: 7 });
         return Response.json(
           modern.length === 2
-            ? { documents: [{ id: "a" }, { id: "b" }], nextCursor: "v1.next" }
-            : { documents: [{ id: "c" }], nextCursor: null },
+            ? {
+                documents: [documentFixture("a"), documentFixture("b")],
+                nextCursor: "v1.next",
+              }
+            : { documents: [documentFixture("c")], nextCursor: null },
         );
       };
       const month = { gte: "2026-09-01", lt: "2026-10-01" };
@@ -146,7 +161,11 @@
       );
       window.fetch = async (url, options) => {
         modern.push({ url: new URL(url), options });
-        return Response.json({ id: "one", version: 3 });
+        return Response.json(
+          options.method === "DELETE"
+            ? { success: true }
+            : { id: "one", version: 3 },
+        );
       };
       await owner
         .collection("posts")
@@ -168,6 +187,77 @@
           modern[4].options.body === undefined,
         "conditional delete carries no body",
       );
+      window.fetch = (_url, options) => original("/slow", options);
+      let timedOut = false;
+      try {
+        await db.collection("posts").list({ timeoutMs: 10 });
+      } catch (error) {
+        timedOut = error.code === "REQUEST_TIMEOUT";
+      }
+      check(timedOut, "native fetch respects the SDK deadline");
+      const controller = new AbortController();
+      const pending = db
+        .collection("posts")
+        .list({ signal: controller.signal });
+      controller.abort();
+      let aborted = false;
+      try {
+        await pending;
+      } catch (error) {
+        aborted = error.code === "REQUEST_ABORTED";
+      }
+      check(aborted, "native fetch cancellation has a distinct error code");
+      const file = {
+        id: "browser_file",
+        name: "upload",
+        contentType: "text/plain",
+        size: 3,
+        status: "ready",
+        metadata: {},
+        url: `${location.origin}/upload`,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      };
+      for (const cancel of [false, true]) {
+        const uploadController = new AbortController();
+        let cleaned = false,
+          progressed = false;
+        window.fetch = async (_url, options) => {
+          if (options.method === "POST")
+            return Response.json({
+              file: { id: file.id, status: "pending" },
+              method: "PUT",
+              uploadUrl: `${location.origin}/upload`,
+              headers: { "Content-Type": "text/plain" },
+            });
+          if (options.method === "DELETE") {
+            cleaned = true;
+            return Response.json({ success: true });
+          }
+          return Response.json({ file });
+        };
+        let uploadError;
+        try {
+          await owner.files.upload(new Blob(["abc"], { type: "text/plain" }), {
+            signal: uploadController.signal,
+            onProgress: () => {
+              progressed = true;
+              if (cancel) uploadController.abort();
+            },
+          });
+        } catch (error) {
+          uploadError = error;
+        }
+        check(
+          progressed &&
+            (cancel
+              ? uploadError?.code === "REQUEST_ABORTED" && cleaned
+              : !uploadError && !cleaned),
+          cancel
+            ? "native XHR abort waits for cleanup"
+            : "native XHR progress upload finalizes successfully",
+        );
+      }
       window.fetch = async () =>
         new Response("<html>Unauthorized</html>", { status: 401 });
       let revoked = false;

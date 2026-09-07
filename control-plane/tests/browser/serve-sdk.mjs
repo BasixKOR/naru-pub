@@ -9,6 +9,20 @@ const routes = new Map([
   ],
 ]);
 createServer(async (req, res) => {
+  if (req.url === "/slow" || req.url === "/upload") {
+    req.resume();
+    const timer = setTimeout(
+      () =>
+        res
+          .writeHead(200, {
+            "Content-Type": "application/json",
+          })
+          .end(JSON.stringify({ documents: [], nextCursor: null })),
+      100,
+    );
+    res.on("close", () => clearTimeout(timer));
+    return;
+  }
   const file = routes.get(req.url);
   if (!file) {
     res.writeHead(404).end();

@@ -86,7 +86,7 @@
           }
         ]
       ],
-      "signature": "createDatabase(options: {\n  controlPlaneOrigin?: string;\n  schemas?: Record<string, (data: Json) => boolean | void>;\n  site: string;\n}): Database & {\n  completeOwnerSignIn(): Promise<OwnerDatabase | null>;\n  signInAsOwner(options: {\n    clientId?: string;\n    collections: string[];\n    redirectUri?: string;\n  }): Promise<void>;\n}",
+      "signature": "createDatabase(options: {\n  controlPlaneOrigin?: string;\n  schemas?: Record<string, (data: Json) => boolean | void>;\n  site: string;\n}): Database & {\n  completeOwnerSignIn(\n    options?: RequestOptions,\n  ): Promise<OwnerDatabase | null>;\n  signInAsOwner(\n    options: RequestOptions & {\n      clientId?: string;\n      collections: string[];\n      redirectUri?: string;\n    },\n  ): Promise<void>;\n}",
       "parameters": [
         {
           "name": "options",
@@ -146,7 +146,7 @@
         {
           "name": "add",
           "optional": false,
-          "signature": "add(data: T): Promise<Written>",
+          "signature": "add(data: T, options?: RequestOptions): Promise<Written>",
           "summary": [
             {
               "type": "paragraph",
@@ -196,6 +196,15 @@
               "spans": [
                 {
                   "type": "text",
+                  "value": "커서가 반복되면 INVALID_PAGINATION, 응답 형태가 잘못되면 INVALID_RESPONSE 오류가 납니다."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
                   "value": "반복자가 그 쪽에 닿을 때 비로소 요청하므로, 중간에 멈추면 요청도 멈춥니다."
                 }
               ]
@@ -211,7 +220,7 @@
         {
           "name": "count",
           "optional": false,
-          "signature": "count(options?: { where?: Filter }): Promise<number>",
+          "signature": "count(options?: RequestOptions & { where?: Filter }): Promise<number>",
           "summary": [
             {
               "type": "paragraph",
@@ -228,7 +237,7 @@
         {
           "name": "delete",
           "optional": false,
-          "signature": "delete(id: string, options?: Conditional): Promise<{ success: true }>",
+          "signature": "delete(\n  id: string,\n  options?: RequestOptions & Conditional,\n): Promise<{ success: true }>",
           "summary": [
             {
               "type": "paragraph",
@@ -262,7 +271,7 @@
         {
           "name": "get",
           "optional": false,
-          "signature": "get(id: string): Promise<Document<T>>",
+          "signature": "get(id: string, options?: RequestOptions): Promise<Document<T>>",
           "summary": [
             {
               "type": "paragraph",
@@ -387,7 +396,7 @@
         {
           "name": "set",
           "optional": false,
-          "signature": "set(id: string, data: T, options?: Conditional): Promise<Written>",
+          "signature": "set(\n  id: string,\n  data: T,\n  options?: RequestOptions & Conditional,\n): Promise<Written>",
           "summary": [
             {
               "type": "paragraph",
@@ -437,7 +446,7 @@
         {
           "name": "update",
           "optional": false,
-          "signature": "update(\n  id: string,\n  patch: Partial<T>,\n  options?: Conditional & { unset?: (keyof T & string)[] },\n): Promise<Written>",
+          "signature": "update(\n  id: string,\n  patch: Partial<T>,\n  options?: RequestOptions &\n    Conditional & { unset?: (keyof T & string)[] },\n): Promise<Written>",
           "summary": [
             {
               "type": "paragraph",
@@ -670,31 +679,6 @@
           "throws": []
         },
         {
-          "name": "metadata",
-          "optional": false,
-          "signature": "metadata: Json",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "서버가 채우는 자리입니다. 직접 쓴 문서에는 "
-                },
-                {
-                  "type": "code",
-                  "value": "{}"
-                },
-                {
-                  "type": "text",
-                  "value": "가 들어 있습니다."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
           "name": "updated_at",
           "optional": false,
           "signature": "updated_at: string",
@@ -759,7 +743,7 @@
         {
           "name": "delete",
           "optional": false,
-          "signature": "delete(id: string): Promise<{ success: true }>",
+          "signature": "delete(id: string, options?: RequestOptions): Promise<{ success: true }>",
           "summary": [
             {
               "type": "paragraph",
@@ -776,7 +760,7 @@
         {
           "name": "get",
           "optional": false,
-          "signature": "get(id: string): Promise<StoredFile>",
+          "signature": "get(id: string, options?: RequestOptions): Promise<StoredFile>",
           "summary": [],
           "throws": [
             [
@@ -803,7 +787,7 @@
         {
           "name": "list",
           "optional": false,
-          "signature": "list(): Promise<StoredFile[]>",
+          "signature": "list(options?: RequestOptions): Promise<StoredFile[]>",
           "summary": [
             {
               "type": "paragraph",
@@ -820,7 +804,7 @@
         {
           "name": "upload",
           "optional": false,
-          "signature": "upload(\n  file: Blob | File,\n  options?: {\n    metadata?: Json;\n    onProgress?: (progress: { loaded: number; total: number }) => void;\n    signal?: AbortSignal;\n  },\n): Promise<StoredFile>",
+          "signature": "upload(\n  file: Blob | File,\n  options?: RequestOptions & {\n    metadata?: Json;\n    onProgress?: (progress: { loaded: number; total: number }) => void;\n  },\n): Promise<StoredFile>",
           "summary": [
             {
               "type": "paragraph",
@@ -836,7 +820,7 @@
               "spans": [
                 {
                   "type": "text",
-                  "value": "바이트는 제어판을 거치지 않고 짧게 유효한 서명 주소로 저장소에 바로 갑니다. 그래서 업로드가 실패해도 남는 것이 없습니다. SDK가 오류를 던지기 전에 잡아 둔 자리를 되돌립니다."
+                  "value": "바이트는 제어판을 거치지 않고 짧게 유효한 서명 주소로 저장소에 바로 갑니다. 승인 뒤 실패하면 취소 신호와 별개로 최대 10초 동안 정리를 시도한 뒤 오류를 던집니다. 오류의 fileId와 cleanupError로 정리 실패를 확인하세요. 승인 응답을 받지 못하면 ID를 알 수 없어 즉시 정리할 수 없습니다. 서버는 오래된 pending 항목을 정리하지만 네트워크 실패 시 즉시 삭제는 보장되지 않습니다."
                 }
               ]
             },
@@ -888,7 +872,7 @@
         {
           "name": "usage",
           "optional": false,
-          "signature": "usage(): Promise<MediaUsage>",
+          "signature": "usage(options?: RequestOptions): Promise<MediaUsage>",
           "summary": [
             {
               "type": "paragraph",
@@ -1142,7 +1126,7 @@
         {
           "name": "batch",
           "optional": false,
-          "signature": "batch(\n  operations: BatchOperation[],\n): Promise<{\n  results: { id?: string; success?: true; version?: number }[];\n}>",
+          "signature": "batch(\n  operations: BatchOperation[],\n  options?: RequestOptions,\n): Promise<{\n  results: { id?: string; success?: true; version?: number }[];\n}>",
           "summary": [
             {
               "type": "paragraph",
@@ -1173,7 +1157,7 @@
         {
           "name": "signOut",
           "optional": false,
-          "signature": "signOut(): Promise<void>",
+          "signature": "signOut(options?: RequestOptions): Promise<void>",
           "summary": [
             {
               "type": "paragraph",
@@ -1224,8 +1208,10 @@
         }
       ],
       "throws": [],
-      "signature": "interface QueryOptions",
-      "extends": [],
+      "signature": "interface QueryOptions extends RequestOptions",
+      "extends": [
+        "RequestOptions"
+      ],
       "members": [
         {
           "name": "direction",
@@ -1384,6 +1370,60 @@
                 {
                   "type": "text",
                   "value": "이하."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        }
+      ]
+    },
+    {
+      "name": "RequestOptions",
+      "kind": "interface",
+      "summary": [
+        {
+          "type": "paragraph",
+          "spans": [
+            {
+              "type": "text",
+              "value": "요청 취소와 시간 제한입니다. 취소나 시간 초과 뒤에도 서버에 쓰기가 반영됐을 수 있으므로 쓰기를 자동으로 재시도하지 않습니다."
+            }
+          ]
+        }
+      ],
+      "throws": [],
+      "signature": "interface RequestOptions",
+      "extends": [],
+      "members": [
+        {
+          "name": "signal",
+          "optional": true,
+          "signature": "signal?: AbortSignal",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "취소하면 REQUEST_ABORTED 오류가 납니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "timeoutMs",
+          "optional": true,
+          "signature": "timeoutMs?: number",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "응답 본문을 읽기까지의 제한 시간입니다. 기본 30초, 0은 제한 없음입니다. 업로드는 승인·전송·마무리를 합쳐 기본 120초이며, all은 쪽마다 적용됩니다. 시간 초과는 REQUEST_TIMEOUT 오류입니다."
                 }
               ]
             }
@@ -1689,6 +1729,23 @@
           "throws": []
         },
         {
+          "name": "cleanupError",
+          "optional": true,
+          "signature": "cleanupError?: unknown",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "업로드 실패 뒤 정리 요청도 실패했을 때의 오류입니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
           "name": "code",
           "optional": false,
           "signature": "code: string",
@@ -1739,6 +1796,23 @@
                 {
                   "type": "text",
                   "value": "입니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "fileId",
+          "optional": true,
+          "signature": "fileId?: string",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "실패한 업로드의 파일 ID입니다. 승인을 받지 못했으면 없을 수 있습니다."
                 }
               ]
             }

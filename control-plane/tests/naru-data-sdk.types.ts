@@ -38,3 +38,54 @@ async function owner() {
   }
 }
 const error: Error = new NaruDataError(0, "Network failure");
+
+const requestOptions = {
+  signal: new AbortController().signal,
+  timeoutMs: 1000,
+};
+posts.get("one", requestOptions);
+posts.list(requestOptions);
+posts.count(requestOptions);
+posts.all(requestOptions);
+posts.add({ title: "hello", published: true }, requestOptions);
+posts.set(
+  "one",
+  { title: "hello", published: true },
+  { ...requestOptions, ifVersion: 1 },
+);
+posts.update(
+  "one",
+  { title: "hello" },
+  { ...requestOptions, unset: ["published"] },
+);
+posts.delete("one", requestOptions);
+db.signInAsOwner({ ...requestOptions, collections: ["posts"] });
+db.completeOwnerSignIn(requestOptions).then((admin) => {
+  if (!admin) return;
+  admin.files.get("one", requestOptions);
+  admin.files.list(requestOptions);
+  admin.files.usage(requestOptions);
+  admin.files.upload(new Blob(["hello"]), {
+    ...requestOptions,
+    onProgress: ({ loaded }) => void loaded,
+  });
+  admin.files.delete("one", requestOptions);
+  admin.batch(
+    [{ type: "delete", collection: "posts", id: "one" }],
+    requestOptions,
+  );
+  admin.signOut(requestOptions);
+});
+// @ts-expect-error Timeouts are milliseconds, not duration strings.
+posts.get("one", { timeoutMs: "1s" });
+// @ts-expect-error A controller is not a signal.
+posts.list({ signal: new AbortController() });
+
+createDatabase({
+  site: "alice",
+  schemas: { posts: () => true, notes: () => {} },
+});
+// @ts-expect-error Validators must finish synchronously.
+createDatabase({ site: "alice", schemas: { posts: async () => true } });
+// @ts-expect-error Validator results are boolean or undefined.
+createDatabase({ site: "alice", schemas: { posts: () => "valid" } });

@@ -8,6 +8,143 @@ export class NaruDataError extends Error {
       code || (status === 401 ? "OWNER_SESSION_EXPIRED" : "REQUEST_FAILED");
   }
 }
+// One scope keeps the deadline active until the response body has been read.
+function requestScope({ signal, timeoutMs = 30000 } = {}) {
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > 2147483647)
+    throw new TypeError(
+      "timeoutMs must be an integer between 0 and 2147483647.",
+    );
+  if (signal !== undefined && !(signal instanceof AbortSignal))
+    throw new TypeError("signal must be an AbortSignal.");
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal.reason);
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
+  const timer = timeoutMs
+    ? setTimeout(
+        () =>
+          controller.abort(
+            new DOMException("Request timed out.", "TimeoutError"),
+          ),
+        timeoutMs,
+      )
+    : undefined;
+  return {
+    signal: controller.signal,
+    check() {
+      if (!controller.signal.aborted) return;
+      const cause = controller.signal.reason;
+      const timeout = cause?.name === "TimeoutError";
+      const error = new NaruDataError(
+        0,
+        timeout ? "Request timed out." : "Request aborted.",
+        timeout ? "REQUEST_TIMEOUT" : "REQUEST_ABORTED",
+      );
+      error.cause = cause;
+      throw error;
+    },
+    close() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+    },
+  };
+}
+const object = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+const idValue = (value) =>
+  typeof value === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(value);
+const timestamp = (value) =>
+  typeof value === "string" && Number.isFinite(Date.parse(value));
+const written = (value) =>
+  object(value) &&
+  idValue(value.id) &&
+  Number.isSafeInteger(value.version) &&
+  value.version > 0;
+const documentValue = (value) =>
+  written(value) &&
+  Object.hasOwn(value, "data") &&
+  timestamp(value.created_at) &&
+  timestamp(value.updated_at);
+const fileValue = (value) =>
+  object(value) &&
+  idValue(value.id) &&
+  value.status === "ready" &&
+  typeof value.name === "string" &&
+  typeof value.contentType === "string" &&
+  Number.isSafeInteger(value.size) &&
+  value.size > 0 &&
+  typeof value.url === "string" &&
+  Object.hasOwn(value, "metadata") &&
+  timestamp(value.created_at) &&
+  timestamp(value.updated_at);
+const success = (value) => object(value) && value.success === true;
+function invalidResponse(status) {
+  return new NaruDataError(
+    status,
+    "Invalid response from the database.",
+    "INVALID_RESPONSE",
+  );
+}
+function validateResponse(url, method, body, result, status) {
+  const path = url.pathname.split("/").slice(4);
+  let valid;
+  if (path[0] === "_batch") {
+    valid =
+      Array.isArray(result.results) &&
+      result.results.length === body.operations.length &&
+      result.results.every((item, index) =>
+        body.operations[index].type === "delete"
+          ? success(item)
+          : written(item),
+      );
+  } else if (path[0] === "_files") {
+    if (method === "DELETE") valid = success(result);
+    else if (method === "POST") {
+      let upload;
+      try {
+        upload = new URL(result.uploadUrl);
+      } catch {
+        /* invalid */
+      }
+      valid =
+        object(result.file) &&
+        idValue(result.file.id) &&
+        result.file.status === "pending" &&
+        result.method === "PUT" &&
+        object(result.headers) &&
+        Object.values(result.headers).every(
+          (value) => typeof value === "string",
+        ) &&
+        upload &&
+        !upload.username &&
+        !upload.password &&
+        (upload.protocol === "https:" ||
+          (upload.protocol === "http:" &&
+            ["localhost", "127.0.0.1", "[::1]"].includes(upload.hostname)));
+    } else if (path.length > 1) valid = fileValue(result.file);
+    else
+      valid =
+        Array.isArray(result.files) &&
+        result.files.every(fileValue) &&
+        object(result.usage) &&
+        ["bytes", "count", "pending", "maxBytes", "maxFiles"].every(
+          (key) =>
+            Number.isSafeInteger(result.usage[key]) && result.usage[key] >= 0,
+        );
+  } else if (method === "DELETE") valid = success(result);
+  else if (method !== "GET") valid = written(result);
+  else if (path.length > 1) valid = documentValue(result.document);
+  else if (url.searchParams.get("count") === "1")
+    valid = Number.isSafeInteger(result.count) && result.count >= 0;
+  else
+    valid =
+      Array.isArray(result.documents) &&
+      result.documents.every(documentValue) &&
+      (result.nextCursor === null ||
+        (typeof result.nextCursor === "string" &&
+          result.nextCursor.length > 0));
+  if (!valid) throw invalidResponse(status);
+}
 // Reject values JSON.stringify would silently discard or coerce.
 function validateJson(value, ancestors = new Set()) {
   if (value === null || typeof value === "string" || typeof value === "boolean")
@@ -148,80 +285,118 @@ export function createDatabase({
   const storageKey = `naru:owner:${base.origin}:${site}`;
   if (!schemas || typeof schemas !== "object" || Array.isArray(schemas))
     throw new TypeError("schemas must be an object of validator functions.");
+  // Snapshot own data properties without executing registry getters. Later
+  // mutations of the caller's registry must not change a client's validators.
+  const validators = new Map();
+  for (const name of Reflect.ownKeys(schemas)) {
+    segment(name);
+    const descriptor = Object.getOwnPropertyDescriptor(schemas, name);
+    if (!("value" in descriptor) || typeof descriptor.value !== "function")
+      throw new TypeError(`Schema for ${name} must be a function property.`);
+    validators.set(name, descriptor.value);
+  }
   function validateDocument(collectionName, data) {
     validateJson(data);
-    const validator = schemas[collectionName];
+    const validator = validators.get(collectionName);
     if (validator === undefined) return;
-    if (typeof validator !== "function")
-      throw new TypeError(`Schema for ${collectionName} must be a function.`);
-    if (validator(data) === false)
+    const result = validator(data);
+    if (result !== undefined && typeof result !== "boolean") {
+      if (result !== null && typeof result.then === "function") {
+        // An async validator may already have rejected. Observe that rejection
+        // while rejecting the write synchronously, before any request is sent.
+        Promise.resolve(result).catch(() => {});
+      }
+      throw new TypeError(
+        `Schema for ${collectionName} must return a boolean or undefined synchronously.`,
+      );
+    }
+    if (result === false)
       throw new TypeError(
         `Document does not match the ${collectionName} schema.`,
       );
+    // Validators can mutate their argument; retain the lossless JSON contract.
+    validateJson(data);
   }
-  async function request(url, method = "GET", body, token) {
-    // Serialize before awaiting so later caller mutations cannot change the write.
-    const serialized = body === undefined ? undefined : JSON.stringify(body);
-    let response;
+  async function request(url, method = "GET", body, token, options) {
+    const scope = requestScope(options);
     try {
-      response = await fetch(url, {
-        method,
-        credentials: "omit",
-        cache: "no-store",
-        redirect: "error",
-        headers: {
-          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: serialized,
-      });
-    } catch (cause) {
-      const error = new NaruDataError(
-        0,
-        "Network request failed. Check your connection before retrying.",
-      );
-      error.cause = cause;
-      throw error;
+      scope.check();
+      // Serialize before awaiting so later caller mutations cannot change the write.
+      const serialized = body === undefined ? undefined : JSON.stringify(body);
+      let response;
+      try {
+        response = await fetch(url, {
+          method,
+          credentials: "omit",
+          cache: "no-store",
+          redirect: "error",
+          headers: {
+            ...(body === undefined
+              ? {}
+              : { "Content-Type": "application/json" }),
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: serialized,
+          signal: scope.signal,
+        });
+      } catch (cause) {
+        scope.check();
+        const error = new NaruDataError(
+          0,
+          "Network request failed. Check your connection before retrying.",
+        );
+        error.cause = cause;
+        throw error;
+      }
+      let result;
+      try {
+        result = await response.json();
+      } catch (cause) {
+        scope.check();
+        const error = new NaruDataError(
+          response.status,
+          response.ok
+            ? "Invalid JSON response from the database."
+            : `Database request failed (HTTP ${response.status}).`,
+          response.ok ? "INVALID_RESPONSE" : undefined,
+        );
+        error.cause = cause;
+        throw error;
+      }
+      scope.check();
+      if (!response.ok)
+        throw new NaruDataError(
+          response.status,
+          typeof result?.error === "string"
+            ? result.error
+            : `Database request failed (HTTP ${response.status}).`,
+          typeof result?.code === "string" ? result.code : undefined,
+        );
+      if (!object(result)) throw invalidResponse(response.status);
+      if (String(url).startsWith(`${root}/`))
+        validateResponse(
+          new URL(url),
+          method,
+          serialized === undefined ? undefined : JSON.parse(serialized),
+          result,
+          response.status,
+        );
+      return result;
+    } finally {
+      scope.close();
     }
-    let result;
-    try {
-      result = await response.json();
-    } catch (cause) {
-      const error = new NaruDataError(
-        response.status,
-        response.ok
-          ? "Invalid JSON response from the database."
-          : `Database request failed (HTTP ${response.status}).`,
-      );
-      error.cause = cause;
-      throw error;
-    }
-    if (!response.ok)
-      throw new NaruDataError(
-        response.status,
-        typeof result?.error === "string"
-          ? result.error
-          : `Database request failed (HTTP ${response.status}).`,
-        typeof result?.code === "string" ? result.code : undefined,
-      );
-    if (!result || typeof result !== "object" || Array.isArray(result))
-      throw new NaruDataError(
-        response.status,
-        "Invalid response from the database.",
-      );
-    return result;
   }
   function client(getToken = () => undefined, unauthorized = () => {}) {
-    const send = async (url, method, body) => {
+    const send = async (url, method, body, options) => {
       try {
-        return await request(url, method, body, getToken());
+        return await request(url, method, body, getToken(), options);
       } catch (error) {
         if (error.status === 401) unauthorized();
         throw error;
       }
     };
     return {
-      batch(operations) {
+      batch(operations, options) {
         if (
           !Array.isArray(operations) ||
           !operations.length ||
@@ -272,7 +447,12 @@ export function createDatabase({
             );
           return { ...base, type: "delete" };
         });
-        return send(`${root}/_batch`, "POST", { operations: snapshot });
+        return send(
+          `${root}/_batch`,
+          "POST",
+          { operations: snapshot },
+          options,
+        );
       },
       collection(collectionName) {
         const path = `${root}/${segment(collectionName)}`;
@@ -288,41 +468,62 @@ export function createDatabase({
           parameters.set("limit", String(options.limit ?? 50));
           if (options.after !== undefined)
             parameters.set("after", options.after);
-          return send(`${path}?${parameters}`);
+          return send(`${path}?${parameters}`, "GET", undefined, options);
         };
         return {
-          async get(id) {
-            return (await send(`${path}/${segment(id)}`)).document;
+          async get(id, options) {
+            return (
+              await send(`${path}/${segment(id)}`, "GET", undefined, options)
+            ).document;
           },
           list,
           async count(options = {}) {
             const parameters = query(options);
             parameters.set("count", "1");
-            return (await send(`${path}?${parameters}`)).count;
+            return (
+              await send(`${path}?${parameters}`, "GET", undefined, options)
+            ).count;
           },
           async *all(options = {}) {
             let after;
+            const seen = new Set();
             do {
               const page = await list({ limit: 100, ...options, after });
-              yield* page.documents;
-              // A repeated cursor would page forever; stop instead.
-              if (page.nextCursor === after) return;
+              if (page.nextCursor !== null && seen.has(page.nextCursor))
+                throw new NaruDataError(
+                  200,
+                  "Pagination cursor repeated.",
+                  "INVALID_PAGINATION",
+                );
+              if (page.nextCursor !== null) seen.add(page.nextCursor);
+              for (const document of page.documents) {
+                if (options.signal?.aborted) {
+                  const scope = requestScope(options);
+                  try {
+                    scope.check();
+                  } finally {
+                    scope.close();
+                  }
+                }
+                yield document;
+              }
               after = page.nextCursor ?? undefined;
             } while (after);
           },
-          add(data) {
+          add(data, options) {
             validateDocument(collectionName, data);
-            return send(path, "POST", { data });
+            return send(path, "POST", { data }, options);
           },
-          set(id, data, { ifVersion } = {}) {
+          set(id, data, { ifVersion, ...options } = {}) {
             validateDocument(collectionName, data);
             return send(
               `${path}/${segment(id)}${condition(ifVersion)}`,
               "PUT",
               { data },
+              options,
             );
           },
-          update(id, patch, { ifVersion, unset } = {}) {
+          update(id, patch, { ifVersion, unset, ...options } = {}) {
             // A patch is a fragment, so whole-document schemas cannot judge it.
             validateJson(patch);
             checkPatch(patch);
@@ -333,119 +534,183 @@ export function createDatabase({
                 data: patch,
                 ...(unset === undefined ? {} : { unset: checkUnset(unset) }),
               },
+              options,
             );
           },
-          delete(id, { ifVersion } = {}) {
+          delete(id, { ifVersion, ...options } = {}) {
             return send(
               `${path}/${segment(id)}${condition(ifVersion)}`,
               "DELETE",
+              undefined,
+              options,
             );
           },
         };
       },
       files: {
-        async get(id) {
-          return (await send(`${root}/_files/${segment(id)}`)).file;
+        async get(id, options) {
+          return (
+            await send(
+              `${root}/_files/${segment(id)}`,
+              "GET",
+              undefined,
+              options,
+            )
+          ).file;
         },
-        async list() {
-          return (await send(`${root}/_files`)).files;
+        async list(options) {
+          return (await send(`${root}/_files`, "GET", undefined, options))
+            .files;
         },
-        async usage() {
-          return (await send(`${root}/_files`)).usage;
+        async usage(options) {
+          return (await send(`${root}/_files`, "GET", undefined, options))
+            .usage;
         },
-        async upload(file, { onProgress, signal, metadata = {} } = {}) {
+        async upload(file, { onProgress, metadata = {}, ...options } = {}) {
           if (!(file instanceof Blob))
             throw new TypeError("upload requires a File or Blob.");
           if (onProgress !== undefined && typeof onProgress !== "function")
             throw new TypeError("onProgress must be a function.");
-          if (signal?.aborted)
-            throw (
-              signal.reason || new DOMException("Upload aborted.", "AbortError")
-            );
           validateJson(metadata);
           if (!file.size || file.size > 25 * 1024 * 1024)
             throw new TypeError("File must be between 1 byte and 25 MiB.");
-          const name =
-            typeof file.name === "string" && file.name ? file.name : "upload";
-          const contentType = file.type || "application/octet-stream";
-          const authorization = await send(`${root}/_files`, "POST", {
-            name,
-            contentType,
-            size: file.size,
-            metadata,
-          });
-          let response;
+          const scope = requestScope({ timeoutMs: 120000, ...options });
+          const transferOptions = { signal: scope.signal, timeoutMs: 0 };
+          let authorization;
           try {
+            scope.check();
+            authorization = await send(
+              `${root}/_files`,
+              "POST",
+              {
+                name:
+                  typeof file.name === "string" && file.name
+                    ? file.name
+                    : "upload",
+                contentType: file.type || "application/octet-stream",
+                size: file.size,
+                metadata,
+              },
+              transferOptions,
+            );
+            scope.check();
+            let response;
             if (onProgress && typeof XMLHttpRequest !== "undefined") {
               response = await new Promise((resolve, reject) => {
                 const xhr = new XMLHttpRequest();
-                xhr.open(authorization.method, authorization.uploadUrl);
-                for (const [key, value] of Object.entries(
-                  authorization.headers,
-                ))
-                  xhr.setRequestHeader(key, value);
-                xhr.upload.onprogress = (event) =>
-                  onProgress({
-                    loaded: event.loaded,
-                    total: event.lengthComputable ? event.total : file.size,
-                  });
-                xhr.onload = () =>
-                  resolve({
-                    ok: xhr.status >= 200 && xhr.status < 300,
-                    status: xhr.status,
-                  });
-                xhr.onerror = () =>
-                  reject(new TypeError("Network request failed."));
-                xhr.onabort = () =>
-                  reject(
-                    signal?.reason ||
+                const abort = () => {
+                  xhr.abort();
+                  finish(reject, scope.signal.reason);
+                };
+                const finish = (settle, value) => {
+                  scope.signal.removeEventListener("abort", abort);
+                  xhr.onload =
+                    xhr.onerror =
+                    xhr.onabort =
+                    xhr.upload.onprogress =
+                      null;
+                  settle(value);
+                };
+                try {
+                  xhr.open(authorization.method, authorization.uploadUrl);
+                  for (const [key, value] of Object.entries(
+                    authorization.headers,
+                  ))
+                    xhr.setRequestHeader(key, value);
+                  xhr.upload.onprogress = (event) => {
+                    try {
+                      onProgress({
+                        loaded: event.loaded,
+                        total: event.lengthComputable ? event.total : file.size,
+                      });
+                    } catch (error) {
+                      finish(reject, error);
+                      xhr.abort();
+                    }
+                  };
+                  xhr.onload = () =>
+                    finish(resolve, {
+                      ok: xhr.status >= 200 && xhr.status < 300,
+                      status: xhr.status,
+                    });
+                  xhr.onerror = () =>
+                    finish(reject, new TypeError("Network request failed."));
+                  xhr.onabort = () =>
+                    finish(
+                      reject,
                       new DOMException("Upload aborted.", "AbortError"),
-                  );
-                signal?.addEventListener("abort", () => xhr.abort(), {
-                  once: true,
-                });
-                xhr.send(file);
+                    );
+                  scope.signal.addEventListener("abort", abort, { once: true });
+                  scope.check();
+                  xhr.send(file);
+                } catch (error) {
+                  finish(reject, error);
+                }
               });
             } else {
               response = await fetch(authorization.uploadUrl, {
                 method: authorization.method,
                 headers: authorization.headers,
+                credentials: "omit",
+                redirect: "error",
                 body: file,
-                signal,
+                signal: scope.signal,
               });
             }
+            scope.check();
+            if (!response.ok)
+              throw new NaruDataError(
+                response.status,
+                `File upload failed (HTTP ${response.status}).`,
+              );
+            return (
+              await send(
+                `${root}/_files/${segment(authorization.file.id)}`,
+                "PUT",
+                {},
+                transferOptions,
+              )
+            ).file;
           } catch (cause) {
-            send(
-              `${root}/_files/${segment(authorization.file.id)}`,
-              "DELETE",
-            ).catch(() => {});
-            const error = new NaruDataError(
-              0,
-              "File upload failed. Check your connection before retrying.",
-            );
-            error.cause = cause;
+            let error = cause;
+            try {
+              scope.check();
+            } catch (aborted) {
+              error = aborted;
+            }
+            if (!(error instanceof NaruDataError)) {
+              error = new NaruDataError(
+                0,
+                "File upload failed. Check your connection before retrying.",
+              );
+              error.cause = cause;
+            }
+            if (authorization) {
+              error.fileId = authorization.file.id;
+              // Cleanup gets its own bounded request, independent of cancellation.
+              try {
+                await send(
+                  `${root}/_files/${segment(error.fileId)}`,
+                  "DELETE",
+                  undefined,
+                  { timeoutMs: 10000 },
+                );
+              } catch (cleanupError) {
+                error.cleanupError = cleanupError;
+              }
+            }
             throw error;
+          } finally {
+            scope.close();
           }
-          if (!response.ok) {
-            send(
-              `${root}/_files/${segment(authorization.file.id)}`,
-              "DELETE",
-            ).catch(() => {});
-            throw new NaruDataError(
-              response.status,
-              `File upload failed (HTTP ${response.status}).`,
-            );
-          }
-          return (
-            await send(
-              `${root}/_files/${segment(authorization.file.id)}`,
-              "PUT",
-              {},
-            )
-          ).file;
         },
-        delete(id) {
-          return send(`${root}/_files/${segment(id)}`, "DELETE");
+        delete(id, options) {
+          return send(
+            `${root}/_files/${segment(id)}`,
+            "DELETE",
+            undefined,
+            options,
+          );
         },
       },
     };
@@ -492,7 +757,7 @@ export function createDatabase({
         return token;
       }, clear),
       expiresAt,
-      async signOut() {
+      async signOut(options) {
         const current = token;
         clear();
         if (current)
@@ -501,6 +766,7 @@ export function createDatabase({
             "POST",
             undefined,
             current,
+            options,
           );
       },
     };
@@ -540,96 +806,115 @@ export function createDatabase({
       clientId,
       redirectUri = window.location.origin + window.location.pathname,
       collections,
+      ...options
     }) {
-      if (
-        clientId !== undefined &&
-        (typeof clientId !== "string" || !clientId || clientId.length > 64)
-      )
-        throw new TypeError(
-          "clientId must be a non-empty string when provided.",
-        );
-      if (
-        !Array.isArray(collections) ||
-        !collections.length ||
-        collections.length > 100 ||
-        new Set(collections).size !== collections.length
-      )
-        throw new TypeError("Choose 1–100 unique collections.");
-      collections.forEach(segment);
-      const callback = new URL(redirectUri);
-      if (
-        callback.origin !== window.location.origin ||
-        callback.search ||
-        callback.hash ||
-        callback.username ||
-        callback.password
-      )
-        throw new TypeError(
-          "Callback must be a registered URL on this origin without query or fragment.",
-        );
-      if (!clientId) {
-        const discovery = new URL("/api/data-auth/discover", base.origin);
-        discovery.search = new URLSearchParams({
-          site,
-          redirectUri: callback.href,
-        }).toString();
-        try {
-          clientId = (await request(discovery.href)).clientId;
-        } catch (error) {
-          if (error instanceof NaruDataError && error.status === 404) {
-            error.code = "UNREGISTERED_REDIRECT_URI";
-            error.message = `Register ${callback.href} as an administrator callback in Naru.`;
-          }
-          throw error;
-        }
-        if (typeof clientId !== "string" || !clientId || clientId.length > 64)
-          throw new NaruDataError(
-            502,
-            "Invalid owner client discovery response.",
-            "INVALID_CLIENT_DISCOVERY",
+      const scope = requestScope(options);
+      try {
+        scope.check();
+        if (
+          clientId !== undefined &&
+          (typeof clientId !== "string" || !clientId || clientId.length > 64)
+        )
+          throw new TypeError(
+            "clientId must be a non-empty string when provided.",
           );
-      }
-      const verifier = random(),
-        state = random();
-      const challenge = base64url(
-        new Uint8Array(
-          await crypto.subtle.digest(
-            "SHA-256",
-            new TextEncoder().encode(verifier),
+        if (
+          !Array.isArray(collections) ||
+          !collections.length ||
+          collections.length > 100 ||
+          new Set(collections).size !== collections.length
+        )
+          throw new TypeError("Choose 1–100 unique collections.");
+        collections.forEach(segment);
+        const callback = new URL(redirectUri);
+        if (
+          callback.origin !== window.location.origin ||
+          callback.search ||
+          callback.hash ||
+          callback.username ||
+          callback.password
+        )
+          throw new TypeError(
+            "Callback must be a registered URL on this origin without query or fragment.",
+          );
+        if (!clientId) {
+          const discovery = new URL("/api/data-auth/discover", base.origin);
+          discovery.search = new URLSearchParams({
+            site,
+            redirectUri: callback.href,
+          }).toString();
+          try {
+            clientId = (
+              await request(discovery.href, "GET", undefined, undefined, {
+                signal: scope.signal,
+                timeoutMs: 0,
+              })
+            ).clientId;
+          } catch (error) {
+            if (error instanceof NaruDataError && error.status === 404) {
+              error.code = "UNREGISTERED_REDIRECT_URI";
+              error.message = `Register ${callback.href} as an administrator callback in Naru.`;
+            }
+            throw error;
+          }
+          if (typeof clientId !== "string" || !clientId || clientId.length > 64)
+            throw new NaruDataError(
+              502,
+              "Invalid owner client discovery response.",
+              "INVALID_CLIENT_DISCOVERY",
+            );
+        }
+        const verifier = random(),
+          state = random();
+        const challenge = base64url(
+          new Uint8Array(
+            await crypto.subtle.digest(
+              "SHA-256",
+              new TextEncoder().encode(verifier),
+            ),
           ),
-        ),
-      );
-      // Persist the short-lived PKCE transaction across the approval redirect.
-      window.sessionStorage.setItem(
-        storageKey,
-        JSON.stringify({
+        );
+        scope.check();
+        // Persist the short-lived PKCE transaction across the approval redirect.
+        window.sessionStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            clientId,
+            redirectUri: callback.href,
+            verifier,
+            state,
+            startedAt: Date.now(),
+          }),
+        );
+        const url = new URL("/database/authorize", base.origin);
+        url.search = new URLSearchParams({
+          site,
           clientId,
           redirectUri: callback.href,
-          verifier,
+          challenge,
           state,
-          startedAt: Date.now(),
-        }),
-      );
-      const url = new URL("/database/authorize", base.origin);
-      url.search = new URLSearchParams({
-        site,
-        clientId,
-        redirectUri: callback.href,
-        challenge,
-        state,
-        collections: collections.join(","),
-      }).toString();
-      window.location.assign(url.href);
+          collections: collections.join(","),
+        }).toString();
+        window.location.assign(url.href);
+      } finally {
+        scope.close();
+      }
     },
-    completeOwnerSignIn() {
+    completeOwnerSignIn(options) {
       if (!completing)
-        completing = complete().finally(() => {
+        completing = complete(options).finally(() => {
           completing = null;
         });
       return completing;
     },
   };
-  async function complete() {
+  async function complete(options) {
+    const scope = requestScope(options);
+    try {
+      scope.check();
+    } finally {
+      scope.close();
+    }
     const url = new URL(window.location.href);
     if (!url.searchParams.has("code") && !url.searchParams.has("error"))
       return restoreOwner();
@@ -661,12 +946,18 @@ export function createDatabase({
       );
     }
     if (error) throw new NaruDataError(403, "Owner sign-in was denied.");
-    const result = await request(`${base.origin}/api/data-auth/token`, "POST", {
-      code,
-      verifier: pending.verifier,
-      clientId: pending.clientId,
-      redirectUri: pending.redirectUri,
-    });
+    const result = await request(
+      `${base.origin}/api/data-auth/token`,
+      "POST",
+      {
+        code,
+        verifier: pending.verifier,
+        clientId: pending.clientId,
+        redirectUri: pending.redirectUri,
+      },
+      undefined,
+      options,
+    );
     if (
       !result ||
       !/^[A-Za-z0-9_-]{43}$/.test(result.accessToken) ||

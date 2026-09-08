@@ -11,6 +11,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  displayRef,
+  githubWorkflowYaml,
+  normalizeWorkflowTargetPrefix,
+} from "@/lib/deploy/githubWorkflow";
 
 type GitHubDeployTarget = {
   id: number;
@@ -23,9 +28,20 @@ type GitHubDeployTarget = {
   lastDeployedAt: string | null;
 };
 
-function branchFromRef(ref: string) {
-  return ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : ref;
-}
+type GitHubDeployment = {
+  id: string;
+  status: string;
+  githubRepository: string;
+  githubRef: string;
+  githubSha: string;
+  targetPrefix: string;
+  fileCount: number;
+  uploadedFileCount: number;
+  deletedFileCount: number;
+  errorMessage: string | null;
+  createdAt: string;
+  finalizedAt: string | null;
+};
 
 function refFromBranch(branch: string) {
   const trimmed = branch.trim();
@@ -35,43 +51,21 @@ function refFromBranch(branch: string) {
   return `refs/heads/${trimmed || "main"}`;
 }
 
-function normalizeTargetPrefix(targetPrefix: string) {
-  const trimmed = targetPrefix.trim();
-  if (!trimmed || trimmed === "/") return "/";
-  return `/${trimmed.replace(/^\/+/, "").replace(/\/+$/, "")}`;
-}
-
-function workflowYaml(loginName: string, target: GitHubDeployTarget) {
-  return `name: Deploy to Naru
-
-on:
-  push:
-    branches: ["${branchFromRef(target.githubRef)}"]
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  id-token: write
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: naru-pub/actions/deploy@v1
-        with:
-          site: ${loginName}
-          dir: public
-          target: ${normalizeTargetPrefix(target.targetPrefix)}
-`;
+function statusLabel(status: string) {
+  if (status === "finalized") return "성공";
+  if (status === "failed") return "실패";
+  if (status === "expired") return "만료";
+  return "진행 중";
 }
 
 export default function GitHubDeployTargetsCard({
   loginName,
   targets,
+  deployments,
 }: {
   loginName: string;
   targets: GitHubDeployTarget[];
+  deployments: GitHubDeployment[];
 }) {
   const [githubRepository, setGithubRepository] = useState("");
   const [branch, setBranch] = useState("main");
@@ -143,7 +137,7 @@ export default function GitHubDeployTargetsCard({
   }
 
   async function copyWorkflow(target: GitHubDeployTarget) {
-    await navigator.clipboard.writeText(workflowYaml(loginName, target));
+    await navigator.clipboard.writeText(githubWorkflowYaml(loginName, target));
     toast.success("워크플로를 복사했습니다.");
   }
 
@@ -225,7 +219,7 @@ export default function GitHubDeployTargetsCard({
             </p>
           ) : (
             sortedTargets.map((target) => {
-              const yaml = workflowYaml(loginName, target);
+              const yaml = githubWorkflowYaml(loginName, target);
 
               return (
                 <div
@@ -239,10 +233,10 @@ export default function GitHubDeployTargetsCard({
                           {target.githubRepository}
                         </p>
                         <Badge variant="secondary">
-                          {branchFromRef(target.githubRef)}
+                          {displayRef(target.githubRef)}
                         </Badge>
                         <Badge variant="outline">
-                          {normalizeTargetPrefix(target.targetPrefix)}
+                          {normalizeWorkflowTargetPrefix(target.targetPrefix)}
                         </Badge>
                       </div>
                       {target.lastDeployedAt ? (
@@ -289,6 +283,71 @@ export default function GitHubDeployTargetsCard({
                 </div>
               );
             })
+          )}
+        </div>
+
+        <div className="space-y-3 border-t border-border pt-5">
+          <div>
+            <h3 className="font-semibold text-foreground">최근 배포</h3>
+            <p className="text-sm text-muted-foreground">
+              최근 20개의 GitHub 배포 시도와 오류를 확인할 수 있습니다.
+            </p>
+          </div>
+          {deployments.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              아직 기록된 배포가 없습니다.
+            </p>
+          ) : (
+            <div className="divide-y divide-border rounded border border-border">
+              {deployments.map((deployment) => (
+                <div key={deployment.id} className="space-y-2 p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
+                      <Badge
+                        variant={
+                          deployment.status === "failed" ||
+                          deployment.status === "expired"
+                            ? "destructive"
+                            : deployment.status === "finalized"
+                              ? "default"
+                              : "secondary"
+                        }
+                      >
+                        {statusLabel(deployment.status)}
+                      </Badge>
+                      <span className="font-medium break-all">
+                        {deployment.githubRepository}
+                      </span>
+                      <code title={deployment.githubSha}>
+                        {deployment.githubSha.slice(0, 7)}
+                      </code>
+                    </div>
+                    <time
+                      className="text-muted-foreground"
+                      dateTime={deployment.createdAt}
+                    >
+                      {new Date(deployment.createdAt).toLocaleString()}
+                    </time>
+                  </div>
+                  <p className="text-muted-foreground">
+                    {displayRef(deployment.githubRef)} →{" "}
+                    {normalizeWorkflowTargetPrefix(deployment.targetPrefix)} ·{" "}
+                    {deployment.fileCount}개 파일
+                    {deployment.uploadedFileCount < deployment.fileCount
+                      ? ` · ${deployment.uploadedFileCount}개 변경`
+                      : ""}
+                    {deployment.deletedFileCount > 0
+                      ? ` · ${deployment.deletedFileCount}개 삭제`
+                      : ""}
+                  </p>
+                  {deployment.errorMessage ? (
+                    <p className="rounded bg-destructive/10 px-2 py-1 text-destructive break-words">
+                      {deployment.errorMessage}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </CardContent>

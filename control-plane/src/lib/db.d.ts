@@ -56,10 +56,12 @@ export interface GithubDeployTargets {
   id: Generated<number>;
   user_id: number;
   github_repository: string;
+  github_repository_id: string | null;
   github_ref: string;
   target_prefix: Generated<string>;
   delete_removed_files: Generated<boolean>;
   enabled: Generated<boolean>;
+  deploy_generation: Generated<number>;
   last_manifest: unknown | null;
   last_github_sha: string | null;
   last_deployed_at: Timestamp | null;
@@ -73,6 +75,7 @@ export interface GithubDeployments {
   user_id: number;
   status: Generated<string>;
   github_repository: string;
+  github_repository_id: string | null;
   github_ref: string;
   github_sha: string;
   target_prefix: string;
@@ -80,6 +83,8 @@ export interface GithubDeployments {
   delete_removed_files: boolean;
   manifest: unknown;
   deleted_paths: unknown;
+  uploaded_paths: Generated<unknown>;
+  deploy_generation: Generated<number>;
   error_message: string | null;
   expires_at: Timestamp;
   created_at: Generated<Timestamp>;

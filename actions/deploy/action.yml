@@ -30,10 +30,14 @@ outputs:
     description: Naru deployment id.
   deployed-files:
     description: Number of files deployed.
+  uploaded-files:
+    description: Number of new or changed files uploaded.
   deleted-files:
     description: Number of files deleted from the managed target.
   directory-size:
     description: Final Naru home directory size in bytes.
+  site-url:
+    description: Public URL of the deployed Naru site.
 
 runs:
   using: node24

@@ -62,6 +62,12 @@ function setOutput(name, value) {
   return fs.appendFile(output, `${name}=${value}\n`);
 }
 
+function appendStepSummary(markdown) {
+  const summary = process.env.GITHUB_STEP_SUMMARY;
+  if (!summary) return;
+  return fs.appendFile(summary, markdown);
+}
+
 function setFailed(error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`::error::${message}`);
@@ -240,6 +246,16 @@ async function main() {
   const shouldFinalize = getBooleanInput("finalize", true);
   const rootDir = path.resolve(process.cwd(), dir);
 
+  let rootDirectory;
+  try {
+    rootDirectory = await fs.stat(rootDir);
+  } catch {
+    throw new Error(`Deploy directory does not exist: ${dir}`);
+  }
+  if (!rootDirectory.isDirectory()) {
+    throw new Error(`Deploy path is not a directory: ${dir}`);
+  }
+
   const files = await collectFiles(rootDir);
   if (!files.some((file) => file.path === "index.html")) {
     throw new Error("Deploy directory must include index.html");
@@ -282,10 +298,25 @@ async function main() {
   );
 
   await setOutput("deployed-files", finalize.deployedFiles ?? "");
+  await setOutput("uploaded-files", finalize.uploadedFiles ?? "");
   await setOutput("deleted-files", finalize.deletedFiles ?? "");
   await setOutput("directory-size", finalize.directorySize ?? "");
+  const siteUrl = `${endpoint.protocol}//${site}.${endpoint.host}/`;
+  await setOutput("site-url", siteUrl);
+  await appendStepSummary(`## Naru deployment complete
+
+| | |
+| --- | --- |
+| Site | [${siteUrl}](${siteUrl}) |
+| Commit | \`${process.env.GITHUB_SHA || "unknown"}\` |
+| Deployed files | ${finalize.deployedFiles ?? 0} |
+| Uploaded files | ${finalize.uploadedFiles ?? 0} |
+| Deleted files | ${finalize.deletedFiles ?? 0} |
+| Directory size | ${finalize.directorySize ?? 0} bytes |
+| Deployment ID | \`${plan.deploymentId}\` |
+`);
   info(
-    `Deployed ${finalize.deployedFiles} file(s), deleted ${finalize.deletedFiles} file(s)`,
+    `Deployed ${finalize.deployedFiles} file(s), uploaded ${finalize.uploadedFiles} changed file(s), deleted ${finalize.deletedFiles} file(s)`,
   );
 }
 

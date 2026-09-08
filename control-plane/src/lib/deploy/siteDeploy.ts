@@ -36,6 +36,26 @@ export type DeployManifest = {
   files: DeployManifestFile[];
 };
 
+export function changedManifestPaths(
+  previousFiles: DeployManifestFile[],
+  nextFiles: DeployManifestFile[],
+) {
+  const previousFilesByPath = new Map(
+    previousFiles.map((file) => [file.path, file]),
+  );
+  return nextFiles
+    .filter((file) => {
+      const previous = previousFilesByPath.get(file.path);
+      return (
+        !previous ||
+        previous.sha256 !== file.sha256 ||
+        previous.size !== file.size ||
+        previous.contentType !== file.contentType
+      );
+    })
+    .map((file) => file.path);
+}
+
 type UserRow = {
   id: number;
 };
@@ -288,11 +308,20 @@ function assertGitHubClaimsAllowed(
   claims: GitHubActionsClaims,
   target: {
     github_repository: string;
+    github_repository_id?: string | null;
     github_ref: string;
   },
 ) {
   if (claims.repository !== target.github_repository) {
     throw new Error("GitHub repository is not allowed for this target");
+  }
+  if (
+    target.github_repository_id &&
+    claims.repository_id !== target.github_repository_id
+  ) {
+    throw new Error(
+      "GitHub repository identity is not allowed for this target",
+    );
   }
   if (claims.ref !== target.github_ref) {
     throw new Error("GitHub ref is not allowed for this target");
@@ -322,6 +351,7 @@ export async function createGitHubDeploymentPlan(params: {
       "github_deploy_targets.id",
       "github_deploy_targets.user_id",
       "github_deploy_targets.github_repository",
+      "github_deploy_targets.github_repository_id",
       "github_deploy_targets.github_ref",
       "github_deploy_targets.target_prefix",
       "github_deploy_targets.delete_removed_files",
@@ -361,6 +391,8 @@ export async function createGitHubDeploymentPlan(params: {
 
   const previousPaths = new Set(previousFiles.map((file) => file.path));
   const nextPaths = new Set(manifest.files.map((file) => file.path));
+  const uploadedPaths = changedManifestPaths(previousFiles, manifest.files);
+  const uploadedPathSet = new Set(uploadedPaths);
   const deletedPaths = target.delete_removed_files
     ? [...previousPaths].filter((path) => !nextPaths.has(path))
     : [];
@@ -368,6 +400,28 @@ export async function createGitHubDeploymentPlan(params: {
   const id = deploymentId();
   const uploadPrefix = `__deploy_uploads/${target.user_id}/${id}`;
   const expiresAt = new Date(Date.now() + DEPLOYMENT_TTL_MS);
+  const claimedTarget = await db
+    .updateTable("github_deploy_targets")
+    .set((eb) => ({
+      deploy_generation: eb("deploy_generation", "+", 1),
+      github_repository_id: params.claims.repository_id,
+      updated_at: new Date(),
+    }))
+    .where("id", "=", target.id)
+    .where("enabled", "=", true)
+    .where((eb) =>
+      eb.or([
+        eb("github_repository_id", "is", null),
+        eb("github_repository_id", "=", params.claims.repository_id),
+      ]),
+    )
+    .returning("deploy_generation")
+    .executeTakeFirst();
+  if (!claimedTarget) {
+    throw new Error(
+      "Deploy target was disabled or is bound to a different GitHub repository identity",
+    );
+  }
 
   await db
     .insertInto("github_deployments")
@@ -377,6 +431,7 @@ export async function createGitHubDeploymentPlan(params: {
       user_id: target.user_id,
       status: "planned",
       github_repository: params.claims.repository,
+      github_repository_id: params.claims.repository_id,
       github_ref: params.claims.ref,
       github_sha: params.claims.sha,
       target_prefix: targetPrefix,
@@ -384,29 +439,33 @@ export async function createGitHubDeploymentPlan(params: {
       delete_removed_files: target.delete_removed_files,
       manifest,
       deleted_paths: deletedPaths,
+      uploaded_paths: uploadedPaths,
+      deploy_generation: claimedTarget.deploy_generation,
       expires_at: expiresAt,
     })
     .execute();
 
   const uploads = await Promise.all(
-    manifest.files.map(async (file) => {
-      const key = `${uploadPrefix}/${file.path}`;
-      const url = await getSignedUrl(
-        s3Client as any,
-        new PutObjectCommand({
-          Bucket: process.env.S3_BUCKET_NAME!,
-          Key: key,
-        }) as any,
-        { expiresIn: UPLOAD_URL_TTL_SECONDS },
-      );
+    manifest.files
+      .filter((file) => uploadedPathSet.has(file.path))
+      .map(async (file) => {
+        const key = `${uploadPrefix}/${file.path}`;
+        const url = await getSignedUrl(
+          s3Client as any,
+          new PutObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME!,
+            Key: key,
+          }) as any,
+          { expiresIn: UPLOAD_URL_TTL_SECONDS },
+        );
 
-      return {
-        path: file.path,
-        method: "PUT",
-        url,
-        headers: {},
-      };
-    }),
+        return {
+          path: file.path,
+          method: "PUT",
+          url,
+          headers: {},
+        };
+      }),
   );
 
   return {
@@ -435,14 +494,19 @@ export async function finalizeGitHubDeployment(params: {
       "github_deployments.user_id",
       "github_deployments.status",
       "github_deployments.github_repository",
+      "github_deployments.github_repository_id",
       "github_deployments.github_ref",
       "github_deployments.github_sha",
       "github_deployments.target_prefix",
       "github_deployments.upload_prefix",
       "github_deployments.manifest",
       "github_deployments.deleted_paths",
+      "github_deployments.uploaded_paths",
+      "github_deployments.deploy_generation",
       "github_deployments.expires_at",
       "github_deploy_targets.enabled",
+      "github_deploy_targets.github_repository_id as current_github_repository_id",
+      "github_deploy_targets.deploy_generation as current_deploy_generation",
       "users.login_name",
     ])
     .where("github_deployments.id", "=", params.deploymentId)
@@ -457,6 +521,19 @@ export async function finalizeGitHubDeployment(params: {
   if (!deployment.enabled) {
     throw new Error("Deploy target is disabled");
   }
+  if (
+    deployment.github_repository_id !== params.claims.repository_id ||
+    deployment.current_github_repository_id !== params.claims.repository_id
+  ) {
+    throw new Error(
+      "GitHub repository identity does not match this deployment",
+    );
+  }
+  if (deployment.current_deploy_generation !== deployment.deploy_generation) {
+    throw new Error(
+      "A newer deployment has already updated this target; start a new deployment",
+    );
+  }
   if (new Date(deployment.expires_at).getTime() <= Date.now()) {
     throw new Error("Deployment has expired");
   }
@@ -469,9 +546,24 @@ export async function finalizeGitHubDeployment(params: {
   const deletedPaths = Array.isArray(deployment.deleted_paths)
     ? deployment.deleted_paths.map((path) => normalizeDeployPath(String(path)))
     : [];
+  const uploadedPaths = Array.isArray(deployment.uploaded_paths)
+    ? deployment.uploaded_paths.map((path) => normalizeDeployPath(String(path)))
+    : [];
+  const uploadedPathSet = new Set(uploadedPaths);
+  if (uploadedPathSet.size !== uploadedPaths.length) {
+    throw new Error("Deployment contains duplicate uploaded paths");
+  }
+  const manifestPathSet = new Set(manifest.files.map((file) => file.path));
+  if (uploadedPaths.some((path) => !manifestPathSet.has(path))) {
+    throw new Error(
+      "Deployment contains an uploaded path outside its manifest",
+    );
+  }
 
   try {
-    for (const file of manifest.files) {
+    for (const file of manifest.files.filter((file) =>
+      uploadedPathSet.has(file.path),
+    )) {
       const stagingKey = `${deployment.upload_prefix}/${file.path}`;
       const head = await s3Client.send(
         new HeadObjectCommand({
@@ -494,14 +586,18 @@ export async function finalizeGitHubDeployment(params: {
 
     const rootIndex = manifest.files.find((file) => file.path === "index.html");
     const rootIndexKey =
-      rootIndex && deployment.target_prefix === ""
+      rootIndex &&
+      uploadedPathSet.has(rootIndex.path) &&
+      deployment.target_prefix === ""
         ? `${deployment.upload_prefix}/${rootIndex.path}`
         : null;
     const siteTitle = rootIndexKey
       ? extractHtmlTitle(await readObjectText(rootIndexKey))
       : null;
 
-    for (const file of manifest.files) {
+    for (const file of manifest.files.filter((file) =>
+      uploadedPathSet.has(file.path),
+    )) {
       const stagingKey = `${deployment.upload_prefix}/${file.path}`;
       const targetPath = publicPath(deployment.target_prefix, file.path);
       const publicKey = `${getUserHomeDirectory(
@@ -536,7 +632,7 @@ export async function finalizeGitHubDeployment(params: {
 
     await recordSiteEdit(deployment.user_id);
 
-    if (deployment.target_prefix === "") {
+    if (deployment.target_prefix === "" && rootIndexKey) {
       await db
         .updateTable("users")
         .set({ site_title: siteTitle })
@@ -579,6 +675,7 @@ export async function finalizeGitHubDeployment(params: {
     return {
       directorySize,
       deployedFiles: manifest.files.length,
+      uploadedFiles: uploadedPaths.length,
       deletedFiles: deletedPaths.length,
     };
   } catch (error) {

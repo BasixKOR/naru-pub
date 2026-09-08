@@ -16,6 +16,7 @@ export type GitHubActionsClaims = {
   nbf?: number;
   iat?: number;
   repository: string;
+  repository_id: string;
   ref: string;
   sha: string;
   workflow_ref?: string;
@@ -116,7 +117,13 @@ export async function verifyGitHubActionsToken(
   if (claims.nbf && claims.nbf > now) {
     throw new Error("OIDC token is not yet valid");
   }
-  if (!claims.sub || !claims.repository || !claims.ref || !claims.sha) {
+  if (
+    !claims.sub ||
+    !claims.repository ||
+    !claims.repository_id ||
+    !claims.ref ||
+    !claims.sha
+  ) {
     throw new Error("OIDC token is missing required GitHub claims");
   }
 

@@ -297,13 +297,9 @@ function assertGitHubClaimsAllowed(
   if (claims.ref !== target.github_ref) {
     throw new Error("GitHub ref is not allowed for this target");
   }
-  // GitHub's subject suffix can vary with repository OIDC customization and
-  // environments. The signed repository and ref claims above are the actual
-  // authorization boundary; keep sub bound to the same repository without
-  // assuming one particular suffix shape.
-  if (!claims.sub.startsWith(`repo:${target.github_repository}:`)) {
-    throw new Error("GitHub OIDC subject is not allowed for this target");
-  }
+  // GitHub permits repositories and organizations to customize the subject.
+  // The signed repository and ref claims above are the authorization boundary,
+  // so requiring one particular subject template would reject valid callers.
 }
 
 export async function createGitHubDeploymentPlan(params: {

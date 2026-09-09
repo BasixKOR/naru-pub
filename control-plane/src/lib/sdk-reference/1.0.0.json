@@ -172,7 +172,7 @@
         {
           "name": "all",
           "optional": false,
-          "signature": "all(\n  options?: Omit<ListOptions<T>, \"after\">,\n): AsyncIterableIterator<Document<T>>",
+          "signature": "all(\n  options?: Omit<ListOptions<T>, \"after\"> & WalkOptions,\n): AsyncIterableIterator<Document<T>>",
           "summary": [
             {
               "type": "paragraph",
@@ -212,7 +212,7 @@
             {
               "type": "code",
               "language": "javascript",
-              "code": "for await (const post of posts.all({ orderBy: \"created_at\" })) {\n  if (post.data.title === needle) return post;\n}"
+              "code": "for await (const post of posts.all({ orderBy: \"createdAt\" })) {\n  if (post.data.title === needle) return post;\n}"
             }
           ],
           "throws": []
@@ -228,6 +228,31 @@
                 {
                   "type": "text",
                   "value": "조건에 맞는 문서 수를 서버가 쪽 나눔 없이 세어 돌려줍니다."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "셀 뿐이라 정렬할 쪽이 없습니다. "
+                },
+                {
+                  "type": "code",
+                  "value": "orderBy"
+                },
+                {
+                  "type": "text",
+                  "value": "나 "
+                },
+                {
+                  "type": "code",
+                  "value": "direction"
+                },
+                {
+                  "type": "text",
+                  "value": "을 넘기면 요청 전에 TypeError로 거부합니다."
                 }
               ]
             }
@@ -432,7 +457,7 @@
                 },
                 {
                   "type": "code",
-                  "value": "created_at"
+                  "value": "createdAt"
                 },
                 {
                   "type": "text",
@@ -619,6 +644,23 @@
               "value": "가 돌려주는 공개 클라이언트입니다. 인증 없이 요청하므로 컬렉션의 공개 범위가 허용한 곳까지만 닿습니다."
             }
           ]
+        },
+        {
+          "type": "paragraph",
+          "spans": [
+            {
+              "type": "text",
+              "value": "묶음 쓰기와 미디어 라이브러리는 여기 없습니다. 둘 다 관리자 토큰이 있어야 하므로, 익명 클라이언트에 달려 있어 봐야 거절만 돌려받습니다. "
+            },
+            {
+              "type": "code",
+              "value": "completeOwnerSignIn()"
+            },
+            {
+              "type": "text",
+              "value": "이 돌려주는 OwnerDatabase에서 쓰세요."
+            }
+          ]
         }
       ],
       "throws": [],
@@ -663,9 +705,9 @@
       "extends": [],
       "members": [
         {
-          "name": "created_at",
+          "name": "createdAt",
           "optional": false,
-          "signature": "created_at: string",
+          "signature": "createdAt: string",
           "summary": [
             {
               "type": "paragraph",
@@ -722,9 +764,9 @@
           "throws": []
         },
         {
-          "name": "updated_at",
+          "name": "updatedAt",
           "optional": false,
-          "signature": "updated_at: string",
+          "signature": "updatedAt: string",
           "summary": [
             {
               "type": "paragraph",
@@ -766,6 +808,173 @@
       ]
     },
     {
+      "name": "FileListOptions",
+      "kind": "interface",
+      "summary": [
+        {
+          "type": "paragraph",
+          "spans": [
+            {
+              "type": "code",
+              "value": "FileStore.list"
+            },
+            {
+              "type": "text",
+              "value": "와 "
+            },
+            {
+              "type": "code",
+              "value": "FileStore.all"
+            },
+            {
+              "type": "text",
+              "value": "이 쓰는 거르기, 정렬, 쪽 나눔 옵션입니다. "
+            },
+            {
+              "type": "code",
+              "value": "where"
+            },
+            {
+              "type": "text",
+              "value": "는 문서의 "
+            },
+            {
+              "type": "code",
+              "value": "data"
+            },
+            {
+              "type": "text",
+              "value": "가 아니라 파일의 "
+            },
+            {
+              "type": "code",
+              "value": "metadata"
+            },
+            {
+              "type": "text",
+              "value": " 최상위 필드를 봅니다."
+            }
+          ]
+        }
+      ],
+      "throws": [],
+      "signature": "interface FileListOptions extends RequestOptions",
+      "extends": [
+        "RequestOptions"
+      ],
+      "members": [
+        {
+          "name": "after",
+          "optional": true,
+          "signature": "after?: string",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "같은 정렬, 같은 필터에서 받은 커서입니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "direction",
+          "optional": true,
+          "signature": "direction?: \"desc\" | \"asc\"",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "기본값은 "
+                },
+                {
+                  "type": "code",
+                  "value": "desc"
+                },
+                {
+                  "type": "text",
+                  "value": "입니다. 최근에 올린 것이 먼저 옵니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "limit",
+          "optional": true,
+          "signature": "limit?: number",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "한 쪽에 담을 파일 수입니다. 기본값은 50이고, 지금 서버가 받는 최댓값은 100입니다. 한도는 서버가 정하며 넘으면 서버가 400으로 거절합니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "orderBy",
+          "optional": true,
+          "signature": "orderBy?: FileOrderBy",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "기본값은 "
+                },
+                {
+                  "type": "code",
+                  "value": "createdAt"
+                },
+                {
+                  "type": "text",
+                  "value": "입니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "where",
+          "optional": true,
+          "signature": "where?: Record<\n  string,\n  string | number | boolean | RangeFilter<string | number> | null\n>",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "metadata의 최상위 필드에 거는 조건입니다. 규칙은 "
+                },
+                {
+                  "type": "code",
+                  "value": "Filter"
+                },
+                {
+                  "type": "text",
+                  "value": "와 같습니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        }
+      ]
+    },
+    {
       "name": "FileStore",
       "kind": "interface",
       "summary": [
@@ -783,6 +992,31 @@
       "signature": "interface FileStore",
       "extends": [],
       "members": [
+        {
+          "name": "all",
+          "optional": false,
+          "signature": "all(\n  options?: Omit<FileListOptions, \"after\"> & WalkOptions,\n): AsyncIterableIterator<StoredFile>",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "조건에 맞는 모든 파일을 필요할 때마다 한 쪽씩 가져옵니다. "
+                },
+                {
+                  "type": "code",
+                  "value": "Collection.all"
+                },
+                {
+                  "type": "text",
+                  "value": "과 같은 규칙입니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
         {
           "name": "delete",
           "optional": false,
@@ -830,24 +1064,121 @@
         {
           "name": "list",
           "optional": false,
-          "signature": "list(options?: RequestOptions): Promise<StoredFile[]>",
+          "signature": "list(\n  options?: FileListOptions,\n): Promise<{ files: StoredFile[]; nextCursor: string | null }>",
           "summary": [
             {
               "type": "paragraph",
               "spans": [
                 {
                   "type": "text",
-                  "value": "이 사이트의 준비된 파일 전부입니다. 쪽 나눔은 없습니다."
+                  "value": "준비된 파일 한 쪽을 가져옵니다."
                 }
               ]
+            },
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "컬렉션과 똑같이 커서로 넘겨봅니다. 라이브러리는 시간이 갈수록 자라기만 하므로, 파일 하나를 찾겠다고 전부 받아 오지 마세요. 어느 글에 붙은 이미지인지처럼 찾을 거리를 "
+                },
+                {
+                  "type": "code",
+                  "value": "metadata"
+                },
+                {
+                  "type": "text",
+                  "value": "에 스칼라로 담아 두었다면 "
+                },
+                {
+                  "type": "code",
+                  "value": "where"
+                },
+                {
+                  "type": "text",
+                  "value": "로 서버에서 거를 수 있습니다."
+                }
+              ]
+            },
+            {
+              "type": "code",
+              "language": "javascript",
+              "code": "const { files } = await owner.files.list({\n  where: { postId: \"hello\" },\n  limit: 100,\n});"
             }
           ],
           "throws": []
         },
         {
+          "name": "update",
+          "optional": false,
+          "signature": "update(\n  id: string,\n  patch: { [key: string]: Json },\n  options?: RequestOptions & Conditional & { unset?: string[] },\n): Promise<StoredFile>",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "파일의 metadata를 얕게 합칩니다. 패치에 있는 필드가 저장된 필드를 대신하고, "
+                },
+                {
+                  "type": "code",
+                  "value": "unset"
+                },
+                {
+                  "type": "text",
+                  "value": "에 적은 이름은 지워집니다."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "고칠 수 있는 것은 metadata뿐입니다. 바이트와 형식, 크기는 업로드를 승인하고 확인할 때 정해졌습니다. 한 이미지가 붙는 글이 바뀌었을 때처럼, 올릴 때 적어 둔 값이 더 이상 맞지 않으면 이걸로 고치세요."
+                }
+              ]
+            },
+            {
+              "type": "code",
+              "language": "javascript",
+              "code": "await owner.files.update(\n  image.id,\n  { postId: \"moved\" },\n  { ifVersion: image.version },\n);"
+            }
+          ],
+          "throws": [
+            [
+              {
+                "type": "paragraph",
+                "spans": [
+                  {
+                    "type": "text",
+                    "value": "파일이 없으면 "
+                  },
+                  {
+                    "type": "code",
+                    "value": "status: 404"
+                  },
+                  {
+                    "type": "text",
+                    "value": ", 버전이 어긋나면 "
+                  },
+                  {
+                    "type": "code",
+                    "value": "VERSION_CONFLICT"
+                  },
+                  {
+                    "type": "text",
+                    "value": "인 NaruDataError."
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
           "name": "upload",
           "optional": false,
-          "signature": "upload(\n  file: Blob | File,\n  options?: RequestOptions & {\n    image?: ImageOptions;\n    metadata?: Json;\n    onProgress?: (progress: { loaded: number; total: number }) => void;\n    original?: boolean;\n  },\n): Promise<StoredFile>",
+          "signature": "upload(\n  file: Blob | File,\n  options?: RequestOptions & {\n    image?: ImageOptions;\n    metadata?: Json;\n    onProgress?: (progress: {\n      loaded: number;\n      phase: \"resizing\" | \"uploading\";\n      total: number;\n    }) => void;\n    original?: boolean;\n  },\n): Promise<StoredFile>",
           "summary": [
             {
               "type": "paragraph",
@@ -963,7 +1294,7 @@
               "spans": [
                 {
                   "type": "text",
-                  "value": "이 사이트의 미디어 한도에서 쓰고 있는 양입니다."
+                  "value": "이 사이트의 미디어 한도에서 쓰고 있는 양입니다. 목록과는 별개의 요청이라, 남은 용량만 보려고 라이브러리를 훑지 않습니다."
                 }
               ]
             }
@@ -1139,7 +1470,7 @@
               "spans": [
                 {
                   "type": "text",
-                  "value": "한 쪽에 담을 문서 수로 1~100입니다. 기본값은 50입니다."
+                  "value": "한 쪽에 담을 문서 수입니다. 기본값은 50이고, 지금 서버가 받는 최댓값은 100입니다. 한도는 서버가 정하며 넘으면 서버가 400으로 거절합니다."
                 }
               ]
             }
@@ -1584,6 +1915,54 @@
       "extends": [],
       "members": [
         {
+          "name": "fresh",
+          "optional": true,
+          "signature": "fresh?: boolean",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "캐시를 건너뛰고 서버에 직접 묻습니다."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "누구나 읽을 수 있는 컬렉션을 로그인 없이 읽으면, 그 응답은 잠깐 동안 캐시될 수 있습니다. 방문자가 많은 사이트에서 같은 목록을 사람 수만큼 데이터베이스에 묻지 않기 위해서입니다. 대신 방금 내가 쓴 것을 곧바로 다시 읽을 때는 조금 지난 목록이 올 수 있으므로, 그럴 때 "
+                },
+                {
+                  "type": "code",
+                  "value": "fresh: true"
+                },
+                {
+                  "type": "text",
+                  "value": "를 넘기세요."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "관리자 토큰으로 보내는 요청과 쓰기는 원래 캐시를 쓰지 않으므로 영향이 없습니다."
+                }
+              ]
+            },
+            {
+              "type": "code",
+              "language": "javascript",
+              "code": "await guestbook.add({ message });\nconst page = await guestbook.list({ fresh: true });"
+            }
+          ],
+          "throws": []
+        },
+        {
           "name": "signal",
           "optional": true,
           "signature": "signal?: AbortSignal",
@@ -1645,9 +2024,9 @@
           "throws": []
         },
         {
-          "name": "created_at",
+          "name": "createdAt",
           "optional": false,
-          "signature": "created_at: string",
+          "signature": "createdAt: string",
           "summary": [],
           "throws": []
         },
@@ -1686,7 +2065,23 @@
               "spans": [
                 {
                   "type": "text",
-                  "value": "업로드할 때 함께 넘긴 정보입니다. 대체 텍스트나 이 파일을 쓰는 문서 목록처럼 애플리케이션이 정하는 값입니다."
+                  "value": "애플리케이션이 정하는 값입니다. 대체 텍스트나 이 파일을 쓰는 글의 ID처럼 나중에 찾아야 하는 것을 담으세요. "
+                },
+                {
+                  "type": "code",
+                  "value": "FileStore.list"
+                },
+                {
+                  "type": "text",
+                  "value": "의 "
+                },
+                {
+                  "type": "code",
+                  "value": "where"
+                },
+                {
+                  "type": "text",
+                  "value": "가 이 안의 최상위 필드를 거르므로, 스칼라로 담아 두면 서버가 찾아 줍니다."
                 }
               ]
             }
@@ -1753,9 +2148,9 @@
           "throws": []
         },
         {
-          "name": "updated_at",
+          "name": "updatedAt",
           "optional": false,
-          "signature": "updated_at: string",
+          "signature": "updatedAt: string",
           "summary": [],
           "throws": []
         },
@@ -1783,6 +2178,145 @@
             }
           ],
           "throws": []
+        },
+        {
+          "name": "version",
+          "optional": false,
+          "signature": "version: number",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "metadata를 고칠 때마다 증가합니다. "
+                },
+                {
+                  "type": "code",
+                  "value": "FileStore.update"
+                },
+                {
+                  "type": "text",
+                  "value": "에 "
+                },
+                {
+                  "type": "code",
+                  "value": "ifVersion"
+                },
+                {
+                  "type": "text",
+                  "value": "으로 되돌려 주세요. 갓 올린 파일은 "
+                },
+                {
+                  "type": "code",
+                  "value": "1"
+                },
+                {
+                  "type": "text",
+                  "value": "입니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        }
+      ]
+    },
+    {
+      "name": "WalkOptions",
+      "kind": "interface",
+      "summary": [
+        {
+          "type": "paragraph",
+          "spans": [
+            {
+              "type": "text",
+              "value": "쪽을 알아서 넘겨 가며 훑는 "
+            },
+            {
+              "type": "code",
+              "value": "all"
+            },
+            {
+              "type": "text",
+              "value": "의 한도입니다."
+            }
+          ]
+        }
+      ],
+      "throws": [],
+      "signature": "interface WalkOptions",
+      "extends": [],
+      "members": [
+        {
+          "name": "max",
+          "optional": true,
+          "signature": "max?: number",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "훑을 최대 개수입니다. 기본값은 1000이고, 여기에 닿으면 "
+                },
+                {
+                  "type": "code",
+                  "value": "WALK_LIMIT_EXCEEDED"
+                },
+                {
+                  "type": "text",
+                  "value": " NaruDataError가 납니다."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "code",
+                  "value": "all"
+                },
+                {
+                  "type": "text",
+                  "value": "은 배열을 도는 것처럼 보이지만 쪽마다 요청 한 번입니다. 컬렉션 전체를 훑으면 요청 백 번이 되고, 그 요청은 모두 사이트마다 하나뿐인 잠금을 지나 갑니다. 그래서 끝이 없는 훑기는 실수로는 일어나지 않게 막아 두었습니다. 정말 전부가 필요하면 "
+                },
+                {
+                  "type": "code",
+                  "value": "max"
+                },
+                {
+                  "type": "text",
+                  "value": "를 직접 올리거나 "
+                },
+                {
+                  "type": "code",
+                  "value": "Infinity"
+                },
+                {
+                  "type": "text",
+                  "value": "를 넘기세요. 대개는 "
+                },
+                {
+                  "type": "code",
+                  "value": "where"
+                },
+                {
+                  "type": "text",
+                  "value": "로 좁히거나 "
+                },
+                {
+                  "type": "code",
+                  "value": "list"
+                },
+                {
+                  "type": "text",
+                  "value": "로 직접 쪽을 넘기는 쪽이 맞습니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
         }
       ]
     },
@@ -1798,12 +2332,46 @@
               "value": "쓰기가 성공했을 때 돌아오는 값입니다."
             }
           ]
+        },
+        {
+          "type": "paragraph",
+          "spans": [
+            {
+              "type": "text",
+              "value": "서버가 실제로 찍은 시각이 함께 옵니다. 방금 저장한 것을 곧바로 화면에 그릴 때 브라우저 시계로 시각을 지어낼 필요가 없고, 목록에 이미 있는 서버 시각과 같은 기준으로 정렬됩니다."
+            }
+          ]
         }
       ],
       "throws": [],
       "signature": "interface Written",
       "extends": [],
       "members": [
+        {
+          "name": "createdAt",
+          "optional": false,
+          "signature": "createdAt: string",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "서버가 매긴 ISO 8601 생성 시각입니다. "
+                },
+                {
+                  "type": "code",
+                  "value": "set"
+                },
+                {
+                  "type": "text",
+                  "value": "으로 교체해도 유지됩니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
         {
           "name": "id",
           "optional": false,
@@ -1823,6 +2391,31 @@
                 {
                   "type": "text",
                   "value": "가 매긴 UUID입니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "updatedAt",
+          "optional": false,
+          "signature": "updatedAt: string",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "이 쓰기가 반영된 ISO 8601 시각입니다. 새로 만든 문서는 "
+                },
+                {
+                  "type": "code",
+                  "value": "createdAt"
+                },
+                {
+                  "type": "text",
+                  "value": "과 같습니다."
                 }
               ]
             }
@@ -1971,6 +2564,14 @@
                 {
                   "type": "code",
                   "value": "UNREGISTERED_REDIRECT_URI"
+                },
+                {
+                  "type": "text",
+                  "value": ", "
+                },
+                {
+                  "type": "code",
+                  "value": "UPLOAD_REDIRECTED"
                 },
                 {
                   "type": "text",
@@ -2149,6 +2750,23 @@
       "signature": "type FieldValue<T, K extends string> = Json extends T\n  ? Json\n  : T extends unknown\n    ? K extends keyof T\n      ? T[K]\n      : never\n    : never"
     },
     {
+      "name": "FileOrderBy",
+      "kind": "type",
+      "summary": [
+        {
+          "type": "paragraph",
+          "spans": [
+            {
+              "type": "text",
+              "value": "파일에는 문서 본문이 없으므로, 정렬은 서버 메타데이터로만 합니다."
+            }
+          ]
+        }
+      ],
+      "throws": [],
+      "signature": "type FileOrderBy = \"id\" | \"createdAt\" | \"updatedAt\""
+    },
+    {
       "name": "Filter",
       "kind": "type",
       "summary": [
@@ -2215,7 +2833,7 @@
         {
           "type": "code",
           "language": "javascript",
-          "code": "// 올해 공개된 글을 최신순으로.\nawait db.collection(\"posts\").list({\n  where: { published: true, created_at: { gte: \"2026-01-01\" } },\n  orderBy: \"created_at\",\n  direction: \"desc\",\n});"
+          "code": "// 올해 공개된 글을 최신순으로.\nawait db.collection(\"posts\").list({\n  where: { published: true, createdAt: { gte: \"2026-01-01\" } },\n  orderBy: \"createdAt\",\n  direction: \"desc\",\n});"
         }
       ],
       "throws": [],
@@ -2331,7 +2949,7 @@
             },
             {
               "type": "code",
-              "value": "created_at"
+              "value": "createdAt"
             },
             {
               "type": "text",
@@ -2339,7 +2957,7 @@
             },
             {
               "type": "code",
-              "value": "updated_at"
+              "value": "updatedAt"
             },
             {
               "type": "text",
@@ -2347,7 +2965,7 @@
             },
             {
               "type": "code",
-              "value": "created_at"
+              "value": "createdAt"
             },
             {
               "type": "text",
@@ -2357,7 +2975,7 @@
         }
       ],
       "throws": [],
-      "signature": "type OrderBy<T = Json> =\n  | \"id\"\n  | \"created_at\"\n  | \"updated_at\"\n  | `data.${FieldNames<T>}`"
+      "signature": "type OrderBy<T = Json> =\n  | \"id\"\n  | \"createdAt\"\n  | \"updatedAt\"\n  | `data.${FieldNames<T>}`"
     },
     {
       "name": "CONTROL_PLANE_ORIGIN",

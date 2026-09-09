@@ -416,6 +416,66 @@ integration("SDK and data API contract", () => {
     expect((publicDb as { files?: unknown }).files).toBeUndefined();
   });
 
+  // Public reads are the request a site makes most, and letting a shared cache
+  // hold them is the whole reason the SDK stopped forcing no-store. What must
+  // never be cacheable is a response that depended on a credential.
+  test("only anonymous reads of world collections are marked cacheable", async () => {
+    const anonymous = await nativeFetch(`${origin}/api/data/alice/feed`, {
+      headers: { Origin: "https://example.test" },
+    });
+    await anonymous.arrayBuffer();
+    expect(anonymous.headers.get("cache-control")).toContain("s-maxage");
+    expect(anonymous.headers.get("vary")).toContain("Authorization");
+
+    // Same URL, but with a token: an intermediary that ignores Vary must not be
+    // handed something it could replay to a stranger.
+    const authorized = await nativeFetch(`${origin}/api/data/alice/feed`, {
+      headers: { Origin: origin, Authorization: `Bearer ${accessToken}` },
+    });
+    await authorized.arrayBuffer();
+    expect(authorized.headers.get("cache-control")).toBe("no-store");
+
+    // An admin-only collection is never cacheable, whoever asks.
+    const priv = await nativeFetch(`${origin}/api/data/alice/private`, {
+      headers: { Origin: origin, Authorization: `Bearer ${accessToken}` },
+    });
+    await priv.arrayBuffer();
+    expect(priv.headers.get("cache-control")).toBe("no-store");
+
+    // Neither is a write, nor an error.
+    const written = await nativeFetch(`${origin}/api/data/alice/feed`, {
+      method: "POST",
+      headers: { Origin: origin, "Content-Type": "application/json" },
+      body: JSON.stringify({ data: { cacheable: false } }),
+    });
+    await written.arrayBuffer();
+    expect(written.headers.get("cache-control")).toBe("no-store");
+    const missing = await nativeFetch(`${origin}/api/data/alice/nope`, {
+      headers: { Origin: "https://example.test" },
+    });
+    await missing.arrayBuffer();
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get("cache-control")).toBe("no-store");
+  });
+
+  test("walking stops at its ceiling instead of paging without end", async () => {
+    const feed = owner.collection("feed");
+    for (let index = 0; index < 4; index += 1)
+      await feed.set(`walk-${index}`, { index });
+    const walked: string[] = [];
+    await expect(
+      (async () => {
+        for await (const document of feed.all({ max: 2, limit: 1 }))
+          walked.push(document.id);
+      })(),
+    ).rejects.toMatchObject({ code: "WALK_LIMIT_EXCEEDED" });
+    expect(walked).toHaveLength(2);
+    // Raising it deliberately is what the error tells the caller to do.
+    const all: string[] = [];
+    for await (const document of feed.all({ max: 100 })) all.push(document.id);
+    expect(all.length).toBeGreaterThanOrEqual(4);
+  });
+
   test("SDK signout revokes the real owner token", async () => {
     await owner.signOut();
     expect(await publicDb.completeOwnerSignIn()).toBeNull();

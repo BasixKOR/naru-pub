@@ -81,6 +81,23 @@ export interface RequestOptions {
    * 업로드는 승인·전송·마무리를 합쳐 기본 120초이며, all은 쪽마다 적용됩니다.
    * 시간 초과는 REQUEST_TIMEOUT 오류입니다. */
   timeoutMs?: number;
+  /**
+   * 캐시를 건너뛰고 서버에 직접 묻습니다.
+   *
+   * 누구나 읽을 수 있는 컬렉션을 로그인 없이 읽으면, 그 응답은 잠깐 동안 캐시될
+   * 수 있습니다. 방문자가 많은 사이트에서 같은 목록을 사람 수만큼 데이터베이스에
+   * 묻지 않기 위해서입니다. 대신 방금 내가 쓴 것을 곧바로 다시 읽을 때는 조금
+   * 지난 목록이 올 수 있으므로, 그럴 때 `fresh: true`를 넘기세요.
+   *
+   * 관리자 토큰으로 보내는 요청과 쓰기는 원래 캐시를 쓰지 않으므로 영향이
+   * 없습니다.
+   *
+   * ```js
+   * await guestbook.add({ message });
+   * const page = await guestbook.list({ fresh: true });
+   * ```
+   */
+  fresh?: boolean;
 }
 
 /** 문서 하나를 쓰는 모든 작업에 섞어 쓰는 낙관적 동시성 제어입니다. */
@@ -216,9 +233,25 @@ export interface QueryOptions<T = Json> extends RequestOptions {
   direction?: "asc" | "desc";
 }
 
+/** 쪽을 알아서 넘겨 가며 훑는 `all`의 한도입니다. */
+export interface WalkOptions {
+  /**
+   * 훑을 최대 개수입니다. 기본값은 1000이고, 여기에 닿으면
+   * `WALK_LIMIT_EXCEEDED` NaruDataError가 납니다.
+   *
+   * `all`은 배열을 도는 것처럼 보이지만 쪽마다 요청 한 번입니다. 컬렉션 전체를
+   * 훑으면 요청 백 번이 되고, 그 요청은 모두 사이트마다 하나뿐인 잠금을 지나
+   * 갑니다. 그래서 끝이 없는 훑기는 실수로는 일어나지 않게 막아 두었습니다.
+   * 정말 전부가 필요하면 `max`를 직접 올리거나 `Infinity`를 넘기세요. 대개는
+   * `where`로 좁히거나 `list`로 직접 쪽을 넘기는 쪽이 맞습니다.
+   */
+  max?: number;
+}
+
 /** 컬렉션의 한 쪽입니다. */
 export interface ListOptions<T = Json> extends QueryOptions<T> {
-  /** 한 쪽에 담을 문서 수로 1~100입니다. 기본값은 50입니다. */
+  /** 한 쪽에 담을 문서 수입니다. 기본값은 50이고, 지금 서버가 받는 최댓값은
+   * 100입니다. 한도는 서버가 정하며 넘으면 서버가 400으로 거절합니다. */
   limit?: number;
   /** 같은 컬렉션, 같은 정렬, 같은 필터에서 받은 커서입니다. */
   after?: string;
@@ -277,7 +310,7 @@ export interface Collection<T = Json> {
    * ```
    */
   all(
-    options?: Omit<ListOptions<T>, "after">,
+    options?: Omit<ListOptions<T>, "after"> & WalkOptions,
   ): AsyncIterableIterator<Document<T>>;
   /** 조건에 맞는 문서 수를 서버가 쪽 나눔 없이 세어 돌려줍니다.
    *
@@ -462,7 +495,8 @@ export interface FileListOptions extends RequestOptions {
   orderBy?: FileOrderBy;
   /** 기본값은 `desc`입니다. 최근에 올린 것이 먼저 옵니다. */
   direction?: "asc" | "desc";
-  /** 한 쪽에 담을 파일 수로 1~100입니다. 기본값은 50입니다. */
+  /** 한 쪽에 담을 파일 수입니다. 기본값은 50이고, 지금 서버가 받는 최댓값은
+   * 100입니다. 한도는 서버가 정하며 넘으면 서버가 400으로 거절합니다. */
   limit?: number;
   /** 같은 정렬, 같은 필터에서 받은 커서입니다. */
   after?: string;
@@ -493,7 +527,7 @@ export interface FileStore {
   /** 조건에 맞는 모든 파일을 필요할 때마다 한 쪽씩 가져옵니다. `Collection.all`과
    * 같은 규칙입니다. */
   all(
-    options?: Omit<FileListOptions, "after">,
+    options?: Omit<FileListOptions, "after"> & WalkOptions,
   ): AsyncIterableIterator<StoredFile>;
   /** 이 사이트의 미디어 한도에서 쓰고 있는 양입니다. 목록과는 별개의 요청이라,
    * 남은 용량만 보려고 라이브러리를 훑지 않습니다. */

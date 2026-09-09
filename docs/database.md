@@ -209,7 +209,9 @@ There are at most 20 registrations per site, 20 pending codes and 50 live tokens
 - Collection names and document IDs: 1–64 ASCII letters, numbers, underscores or hyphens.
 - Pages: 1–100 documents (default 50), defaulting to ID ascending under the database collation. See sorting below; pagination is not a snapshot across concurrent changes.
 - PostgreSQL JSONB semantics apply, including JavaScript number precision and no significant object key order.
-- Owner-row locks serialize permission checks, writes, and quota checks across server processes. Deletes free quota; account deletion cascades through collections and documents.
+- Owner-row locks serialize permission checks, writes, and quota checks across server processes. Reads take no such lock. Deletes free quota; account deletion cascades through collections and documents.
+- `all()` walks at most 1000 records before raising `WALK_LIMIT_EXCEEDED`; pass `max` to change it. Each page is a request, so an unbounded walk is a hundred of them — narrow with `where` or page explicitly with `list()`.
+- A site holds at most 10,000 media files: the byte quota alone does not bound row count, since the smallest accepted file is one byte.
 - Replacements and `owner.batch()` writes are atomic and last-write-wins; creates are insert-only. No realtime subscriptions, offline persistence, custom indexes or arbitrary query expressions, compare-and-set, per-document rules or visitor accounts in v1.
 
 ## File uploads (SDK 1.0.0)
@@ -296,11 +298,38 @@ public origin, and the stored name takes the new extension. Pass
 transfer only; it reports nothing while an image is being re-encoded. The media
 library at `/media` uploads originals and does not resize.
 
-Public access intentionally permits callers from any origin. Public creates use database-backed fixed-minute limits of 60 successful creates per site and 20 per caller/IP per site, shared across collections and server processes. Owner writes do not consume these limits. Failed writes roll back their counters.
+Public access intentionally permits callers from any origin. Every write that arrives without an owner credential — creates into a `create` collection and replacements, merges or deletes in a `world`-writable one alike — uses database-backed fixed-minute limits of 60 successful writes per site and 20 per caller/IP per site, shared across collections and server processes. Owner writes do not consume these limits. Failed writes roll back their counters.
 
 By default, callers share an `unknown` bucket (20/minute/site). Set `SITE_DATA_TRUST_CLOUDFLARE_IP=1` **only** when a trusted Cloudflare ingress replaces `CF-Connecting-IP` and direct access to the application is blocked. Otherwise clients can spoof the header to evade IP limits. With that setting, valid IPs get separate buckets while invalid/missing headers still share `unknown`. Only a digest is stored in the bucket key; it is not guaranteed anonymization. Old buckets are removed on the next create for that site.
 
-These limits do not protect reads, full-public replacements/deletes, invalid requests or authorization endpoints from high request volumes. Configure edge rate/body limits for `/api/data/*` and `/api/data-auth/*` as well. PostgreSQL backups must include these new tables; the existing hosted-file export does not include database records.
+Old buckets are also swept by `cleanup-site-data-grants`, along with expired authorization codes and access tokens, so a site that is used once and left alone does not keep them forever.
+
+These limits do not protect reads, invalid requests or authorization endpoints from high request volumes. `deploy.sh` renders per-client nginx limits for `/api/data/*` (30 r/s, burst 60) and `/api/data-auth/*` (2 r/s, burst 10) with matching body caps, keyed on `CF-Connecting-IP` when `SITE_DATA_TRUST_CLOUDFLARE_IP=1` and on the peer address otherwise — behind a CDN the peer address is the CDN, so keying on it would put every visitor in one bucket. PostgreSQL backups must include these new tables; the existing hosted-file export does not include database records.
+
+### Reads, caching and locks
+
+Reads do not take the owner row lock; writes do. Serializing reads behind one
+row per site would have queued a popular site's whole audience on a single lock,
+each waiter holding a connection from the pool the rest of the control plane
+shares. Request transactions also carry a statement deadline, and the pool has
+an explicit size (`DATABASE_POOL_MAX`, default 20) and checkout timeout, so a
+saturated pool sheds requests instead of hanging on them.
+
+A read of a `world`-readable collection that carries no credential returns the
+same bytes to everyone, so it is served with
+`Cache-Control: public, max-age=0, s-maxage=10` and the SDK lets the browser and
+any shared cache honour it. Anything carrying a credential, every write, and
+every error stays `no-store`, so an intermediary that ignores `Vary` can never
+replay one caller's authorized response to somebody else. Pass `fresh: true` on
+a read that must not see a stale copy — re-reading a list straight after your
+own write is the case that wants it.
+
+That window is also the lag on a permission change: changing a collection from
+`world` to `admin` stops new reads immediately, but a shared cache may keep
+answering an already-cached public read for up to ten seconds, and nothing in
+the control plane can purge it. The data was public until that moment, so this
+delays hiding it rather than exposing anything new — but treat "make it admin"
+as taking effect within seconds, not instantly.
 
 ## Tests
 

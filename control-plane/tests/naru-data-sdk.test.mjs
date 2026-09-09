@@ -515,18 +515,35 @@ test("SDK serializes range filters and rejects unsupported comparisons", async (
     });
     for (const where of [
       { date: {} },
-      { date: { between: "x" } },
       { date: { gte: null } },
       { date: { gte: true } },
       { date: { gte: NaN } },
       { date: { gte: ["a"] } },
       // Bounds of one range must share a type; JSONB orders numbers above strings.
       { date: { gte: "2026-01-01", lte: 3 } },
-      // Six predicates: two bounds on each of three fields.
-      { a: { gte: 1, lte: 2 }, b: { gte: 1, lte: 2 }, c: { gte: 1, lte: 2 } },
     ])
       assert.throws(() => posts.list({ where }), TypeError);
     assert.equal(calls.length, 1);
+    // An operator this version does not know, and more predicates than the
+    // server accepts today, are both sent rather than refused here. This file
+    // is versioned: a client frozen with a closed operator list could never use
+    // a filter the server learns later, so the server does the refusing and
+    // says so. Only shapes that could not be a filter at all fail locally.
+    await posts.list({ where: { date: { between: "x" } } });
+    assert.deepEqual(JSON.parse(calls[1].searchParams.get("where")), {
+      date: { between: "x" },
+    });
+    await posts.list({
+      where: {
+        a: { gte: 1, lte: 2 },
+        b: { gte: 1, lte: 2 },
+        c: { gte: 1, lte: 2 },
+      },
+    });
+    assert.equal(calls.length, 3);
+    // A filter with no predicate at all still cannot mean anything.
+    assert.throws(() => posts.list({ where: {} }), TypeError);
+    assert.equal(calls.length, 3);
   } finally {
     globalThis.fetch = original;
   }
@@ -823,8 +840,8 @@ test("query options fail locally instead of making malformed requests", async ()
     const posts = createDatabase({ site: "alice" }).collection("posts");
     for (const options of [
       { limit: 0 },
-      { limit: 101 },
       { limit: 1.5 },
+      { limit: -1 },
       { after: "" },
       { direction: "sideways" },
       { orderBy: "data.author.name" },
@@ -832,6 +849,11 @@ test("query options fail locally instead of making malformed requests", async ()
       assert.throws(() => posts.list(options), TypeError);
     await assert.rejects(posts.count({ direction: "sideways" }), TypeError);
     assert.equal(requests, 0);
+    // A page larger than the server currently allows is the server's to refuse.
+    // Freezing today's ceiling into the client would mean this SDK could never
+    // ask for a bigger page even after the server started allowing one.
+    await posts.list({ limit: 101 });
+    assert.equal(requests, 1);
   } finally {
     globalThis.fetch = original;
   }

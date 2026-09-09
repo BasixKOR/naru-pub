@@ -20,6 +20,8 @@ const EXPIRED_CUSTOM_DOMAIN_CLEANUP_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const EXPIRED_GITHUB_DEPLOYMENT_CLEANUP_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const MEDIA_CLEANUP_INTERVAL = 15 * 60 * 1000;
 const MEDIA_CLEANUP_TIMEOUT = 5 * 60 * 1000;
+const SITE_DATA_CLEANUP_INTERVAL = 30 * 60 * 1000;
+const SITE_DATA_CLEANUP_TIMEOUT = 5 * 60 * 1000;
 
 function runWithTimeout(
   script: string,
@@ -114,6 +116,13 @@ async function runMediaCleanup() {
   await runWithTimeout("cleanup-pending-media.ts", MEDIA_CLEANUP_TIMEOUT);
 }
 
+async function runSiteDataGrantCleanup() {
+  await runWithTimeout(
+    "cleanup-site-data-grants.ts",
+    SITE_DATA_CLEANUP_TIMEOUT,
+  );
+}
+
 function scheduleDaily(hour: number, minute: number, fn: () => Promise<void>) {
   const runIfTime = () => {
     const now = new Date();
@@ -167,6 +176,10 @@ async function main() {
   console.log("[cron] Scheduling pending media cleanup every 15 minutes");
   setInterval(runMediaCleanup, MEDIA_CLEANUP_INTERVAL);
   setTimeout(runMediaCleanup, 40 * 1000);
+
+  console.log("[cron] Scheduling site database grant cleanup every 30 minutes");
+  setInterval(runSiteDataGrantCleanup, SITE_DATA_CLEANUP_INTERVAL);
+  setTimeout(runSiteDataGrantCleanup, 50 * 1000);
 
   // Run home directory updater daily at 22:00
   console.log("[cron] Scheduling home directory updater daily at 22:00");

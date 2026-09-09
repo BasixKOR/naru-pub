@@ -131,6 +131,16 @@ async function scope(tx: Kysely<DB>, userId: number, names: string[]) {
 // Persist independently of callback registrations, so removing the last page does
 // not change the website's public identifier. The unique owner key handles races.
 export async function siteClientId(userId: number, tx: Kysely<DB> = db) {
+  // Read first. The public discovery endpoint calls this on every request, and
+  // an unconditional upsert made each of those a write — a stranger's traffic
+  // burning transaction ids and leaving dead tuples on a table that should
+  // change about once per account.
+  const existing = await tx
+    .selectFrom("site_data_site_clients")
+    .select("id")
+    .where("user_id", "=", userId)
+    .executeTakeFirst();
+  if (existing) return existing.id;
   await tx
     .insertInto("site_data_site_clients")
     .values({ user_id: userId, id: randomUUID() })
@@ -566,7 +576,14 @@ export async function revokeToken(token: string, origin: string | null) {
   });
 }
 
-export async function limitPublicCreate(
+/**
+ * Bounds writes that arrive with no owner credential. Every such write takes
+ * the owner row lock and re-aggregates the site's whole document usage, so an
+ * unbounded stranger-driven write is expensive far out of proportion to the
+ * request that caused it. A `world`-writable collection is as reachable as a
+ * `create` one, so both are counted here.
+ */
+export async function limitPublicWrite(
   tx: Kysely<DB>,
   userId: number,
   clientIp?: string,
@@ -590,7 +607,7 @@ export async function limitPublicCreate(
     if ((bucket?.count ?? 0) >= maximum)
       throw new DataError(
         429,
-        "Public creation rate limit reached. Try again next minute.",
+        "Public write rate limit reached. Try again next minute.",
       );
     await tx
       .insertInto("site_data_rate_limits")

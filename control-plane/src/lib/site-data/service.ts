@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
-import { db } from "@/lib/database";
+import { db, requestDeadline } from "@/lib/database";
 import {
   authorize,
   DataError,
@@ -14,7 +14,7 @@ import {
 } from "./validation";
 import { COMPARISONS, filters } from "./filters";
 import { sorting, decodeCursor, encodeCursor } from "./pagination";
-import { tokenScope, limitPublicCreate } from "./owner-auth";
+import { tokenScope, limitPublicWrite } from "./owner-auth";
 import { previewFeatureAccess, userHasFeature } from "@/lib/entitlements";
 import { noteSupporterFeatureUse } from "@/lib/feature-usage";
 
@@ -33,6 +33,12 @@ export type DataCommand = {
   where?: unknown;
   count?: boolean;
   ifVersion?: number;
+  /**
+   * Filled in by the service when the response it produced is one any stranger
+   * could have fetched, so the transport can let it be cached. Reported rather
+   * than returned because it is metadata about the response, not part of it.
+   */
+  cacheability?: { public: boolean };
 };
 
 /** Server metadata is camelCase on the wire; the columns stay snake_case. */
@@ -127,22 +133,37 @@ export async function executeData(command: DataCommand) {
   const { site, path, method, adminUserId, body = {} } = command;
   if (path.length > 2) throw new DataError(404, "Not found.");
   path.forEach(name);
+  const reading = method === "GET";
   return db.transaction().execute(async (tx) => {
-    // All operations lock the owner row. Rules, quota checks and document writes
-    // are serialized across processes, including concurrent collection deletion.
-    const owner = await tx
+    await requestDeadline(tx);
+    // Writes lock the owner row, so rules, quota checks and document writes are
+    // serialized across processes, including concurrent collection deletion.
+    // Reads take no lock: they happen on every visitor pageview of a site that
+    // uses the SDK, and serializing those behind one row would queue a popular
+    // site's whole audience on a single lock while each waiter holds a pool
+    // connection the rest of the control plane also needs.
+    const ownerQuery = tx
       .selectFrom("users")
       .select(["id", "supporter_comp"])
-      .where("login_name", "=", site)
-      .forUpdate()
-      .executeTakeFirst();
+      .where("login_name", "=", site);
+    const owner = await (
+      reading ? ownerQuery : ownerQuery.forUpdate()
+    ).executeTakeFirst();
     if (!owner) throw new DataError(404, "Site not found.");
     const preview = previewFeatureAccess(!!owner.supporter_comp, "database");
-    if (!(preview ?? (await userHasFeature(owner.id, "database"))))
+    // `tx`, never the pool: this runs inside the transaction, and taking a
+    // second connection while holding the first is how the pool deadlocks.
+    if (!(preview ?? (await userHasFeature(owner.id, "database", tx))))
       throw new DataError(403, "Database access is not enabled for this site.");
-    // Reads happen on every visitor pageview of a site that uses the SDK; a
-    // write is the owner's own data actually living in 나루.
-    if (command.method !== "GET") noteSupporterFeatureUse(owner.id, "database");
+    // Only once the request is authorized. A stranger's refused write is not
+    // the owner getting value out of a 후원자 전용 기능, and recording it here
+    // would let anyone drive ledger queries with requests that end in 403.
+    let recorded = false;
+    const noteUse = () => {
+      if (recorded || reading) return;
+      recorded = true;
+      noteSupporterFeatureUse(owner.id, "database");
+    };
     const allowedIds = command.bearer
       ? await tokenScope(
           tx,
@@ -168,6 +189,7 @@ export async function executeData(command: DataCommand) {
             .execute(),
         };
       if (method !== "POST") throw new DataError(405, "Method not allowed.");
+      noteUse();
       const collectionName = name(body.name);
       if (
         await collections()
@@ -208,6 +230,7 @@ export async function executeData(command: DataCommand) {
       if (allowedIds !== undefined)
         throw new DataError(403, "Website tokens cannot manage collections.");
       if (!admin) throw new DataError(403, "Admin access required.");
+      noteUse();
       if (method === "DELETE") {
         await tx
           .deleteFrom("site_data_collections")
@@ -232,6 +255,18 @@ export async function executeData(command: DataCommand) {
         .where("collection_id", "=", collection.id);
     if (method === "GET") {
       authorize(collection.read_access, admin);
+      // A world-readable collection returns identical rows whoever asks, so an
+      // anonymous read of one is safe for a shared cache to hold and replay.
+      // Requests carrying a credential are never marked: an intermediary that
+      // ignores Vary would otherwise be able to serve one caller's authorized
+      // response to somebody else.
+      if (
+        collection.read_access === "world" &&
+        command.bearer === undefined &&
+        adminUserId === undefined &&
+        command.cacheability
+      )
+        command.cacheability.public = true;
       if (path.length === 2) {
         const document = await documents()
           .where("id", "=", path[1])
@@ -315,6 +350,10 @@ export async function executeData(command: DataCommand) {
     const creating = method === "POST" && path.length === 1;
     if (!(creating && collection.write_access === "create"))
       authorize(collection.write_access, admin);
+    noteUse();
+    // Every write below this point is reachable without an owner credential
+    // when the collection allows it, so bound them all — not just creates.
+    if (!admin) await limitPublicWrite(tx, owner.id, command.clientIp);
     const expected = expectedVersion(command.ifVersion);
     const current = (id: string) =>
       documents()
@@ -337,8 +376,6 @@ export async function executeData(command: DataCommand) {
       throw new DataError(405, "Method not allowed.");
     if (!Object.hasOwn(body, "data"))
       throw new DataError(400, "data is required.");
-    if (creating && !admin)
-      await limitPublicCreate(tx, owner.id, command.clientIp);
     const id = path[1] ?? randomUUID();
     const existing = await current(id);
     if (expected !== undefined) matchVersion(expected, existing?.version);
@@ -415,6 +452,8 @@ export async function executeBatch(command: DataCommand) {
   )
     throw new DataError(400, "Batch requires 1–100 operations.");
   return db.transaction().execute(async (tx) => {
+    await requestDeadline(tx);
+    // A batch is always a write, so it always takes the owner lock.
     const owner = await tx
       .selectFrom("users")
       .select(["id", "supporter_comp"])
@@ -423,11 +462,10 @@ export async function executeBatch(command: DataCommand) {
       .executeTakeFirst();
     if (!owner) throw new DataError(404, "Site not found.");
     const preview = previewFeatureAccess(!!owner.supporter_comp, "database");
-    if (!(preview ?? (await userHasFeature(owner.id, "database"))))
+    // `tx`, never the pool: a second connection taken while this one is held
+    // is what empties the pool under concurrency.
+    if (!(preview ?? (await userHasFeature(owner.id, "database", tx))))
       throw new DataError(403, "Database access is not enabled for this site.");
-    // Reads happen on every visitor pageview of a site that uses the SDK; a
-    // write is the owner's own data actually living in 나루.
-    if (command.method !== "GET") noteSupporterFeatureUse(owner.id, "database");
     const allowedIds = command.bearer
       ? await tokenScope(
           tx,
@@ -438,6 +476,8 @@ export async function executeBatch(command: DataCommand) {
       : undefined;
     if (allowedIds === undefined && command.adminUserId !== owner.id)
       throw new DataError(403, "Owner access required.");
+    // Authorized, so this is the owner's own data being written.
+    noteSupporterFeatureUse(owner.id, "database");
     const collectionRows = await tx
       .selectFrom("site_data_collections")
       .selectAll()

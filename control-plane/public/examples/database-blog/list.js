@@ -5,7 +5,11 @@ let db,
   cursor,
   category = "",
   loading = false;
-async function load(reset = false) {
+// `fresh` skips the short-lived cache a public read may be served from. Only
+// worth it right after this page's own write: the cache is what keeps a busy
+// day from costing one database query per visitor, so a plain read should use
+// it.
+async function load(reset = false, fresh = false) {
   if (loading) return false;
   loading = true;
   $("more").disabled = true;
@@ -22,6 +26,7 @@ async function load(reset = false) {
       ...(!guestbook && category ? { where: { category } } : {}),
       orderBy: "createdAt",
       direction: "desc",
+      ...(fresh ? { fresh: true } : {}),
       ...(reset ? {} : cursor ? { after: cursor } : {}),
     });
     if (reset) $("entries").replaceChildren();
@@ -87,7 +92,8 @@ if (guestbook)
       db ??= await connect();
       await db.collection("guestbook").add({ name, message: body });
       $("entry-form").reset();
-      const refreshed = await load(true);
+      // Past the cache: the entry just written has to be in this list.
+      const refreshed = await load(true, true);
       message(
         refreshed
           ? "인사를 남겼습니다. 최신 인사부터 표시됩니다."

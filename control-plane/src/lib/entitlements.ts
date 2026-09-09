@@ -1,5 +1,15 @@
+import type { Kysely } from "kysely";
 import { db } from "@/lib/database";
+import type { DB } from "@/lib/db";
 import { addPaymentGrace } from "@/lib/subscriptions";
+
+/**
+ * Callers already inside a transaction must pass their own `tx`. Reaching for
+ * the pool from inside a held transaction takes a second connection while the
+ * first is still checked out, and enough concurrent callers doing that empty
+ * the pool with every one of them waiting on it.
+ */
+export type Executor = Kysely<DB>;
 
 // Features that a paid (supporter) plan can unlock. Add new features here as
 // they become gated.
@@ -60,8 +70,9 @@ export type UserEntitlement = {
 // permanent comp or a paid-through date that has not passed the grace window.
 export async function getUserEntitlement(
   userId: number,
+  executor: Executor = db,
 ): Promise<UserEntitlement> {
-  const row = await db
+  const row = await executor
     .selectFrom("users")
     .leftJoin("subscriptions", "subscriptions.user_id", "users.id")
     .select([
@@ -143,9 +154,10 @@ export async function getUserFeatures(userId: number): Promise<Set<Feature>> {
 export async function userHasFeature(
   userId: number,
   feature: Feature,
+  executor: Executor = db,
 ): Promise<boolean> {
   if (process.env.FEATURE_ACCESS_MODE !== "supporters") {
-    const user = await db
+    const user = await executor
       .selectFrom("users")
       .select("supporter_comp")
       .where("id", "=", userId)
@@ -155,7 +167,7 @@ export async function userHasFeature(
       if (preview !== null) return preview;
     }
   }
-  const ent = await getUserEntitlement(userId);
+  const ent = await getUserEntitlement(userId, executor);
   if (!ent.isSupporter) return false;
   const planFeatures = PLAN_FEATURES[ent.plan ?? "supporter"] ?? [];
   return planFeatures.includes(feature);

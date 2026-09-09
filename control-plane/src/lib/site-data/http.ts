@@ -5,6 +5,25 @@ import { parseWhereQuery } from "./filters";
 import { isIP } from "node:net";
 import { executeMedia } from "./media";
 
+// A public read is the same bytes for everyone, and on a site with visitors it
+// is the request that arrives most often by a wide margin. Letting a shared
+// cache absorb a burst of them is the difference between a popular page costing
+// one database round trip every few seconds and costing one per visitor.
+//
+// `max-age=0` keeps the browser revalidating, so a reader who reloads is not
+// looking at their own stale copy; `s-maxage` is what a CDN collapses bursts
+// with. The window is short because the data behind it is a guestbook or a post
+// list, where seconds of lag is unremarkable and minutes would not be. Callers
+// that must not see a stale read say so explicitly (the SDK's `fresh` option),
+// which is what write-then-reread flows use.
+//
+// No `stale-while-revalidate`: it would extend how long a shared cache may keep
+// answering after this window, and that window is also how long a collection
+// just changed from `world` to `admin` can still be served from a cache nothing
+// here can purge. Ten seconds of that is worth the traffic it collapses; a
+// minute of it would not be.
+const PUBLIC_READ_CACHE = "public, max-age=0, s-maxage=10";
+
 const publicHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
@@ -18,10 +37,12 @@ export async function dataRequest(
   site?: string,
 ) {
   const admin = site === undefined;
-  const headers = {
+  // Boxed so the service can report back whether what it produced is public.
+  const cacheability = { public: false };
+  const headers: Record<string, string> = {
     ...(admin ? {} : publicHeaders),
     "Cache-Control": "no-store",
-    Vary: "Origin",
+    Vary: "Origin, Authorization",
     ...(!admin &&
     request.headers.get("origin") &&
     (request.headers.has("authorization") || request.method === "OPTIONS")
@@ -69,6 +90,7 @@ export async function dataRequest(
       body,
       where: parseWhereQuery(url.searchParams.get("where")),
       count: url.searchParams.get("count") === "1",
+      cacheability,
       // The media listing and its quota readout are separate queries, so a
       // caller that only wants the quota never pays to page the library.
       usage: url.searchParams.get("usage") === "1",
@@ -92,7 +114,12 @@ export async function dataRequest(
           ? await executeBatch({ ...command, path: [] })
           : await executeData(command);
     return Response.json(result, {
-      headers,
+      headers: {
+        ...headers,
+        // Only a read the service itself vouched for as public. Anything else
+        // keeps the default no-store, including every error path below.
+        ...(cacheability.public ? { "Cache-Control": PUBLIC_READ_CACHE } : {}),
+      },
       status: request.method === "POST" ? 201 : 200,
     });
   } catch (error) {

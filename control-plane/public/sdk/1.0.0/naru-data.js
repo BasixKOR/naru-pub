@@ -9,13 +9,15 @@ export class NaruDataError extends Error {
   }
 }
 // One scope keeps the deadline active until the response body has been read.
-function requestScope({ signal, timeoutMs = 30000 } = {}) {
+function requestScope({ signal, timeoutMs = 30000, fresh } = {}) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > 2147483647)
     throw new TypeError(
       "timeoutMs must be an integer between 0 and 2147483647.",
     );
   if (signal !== undefined && !(signal instanceof AbortSignal))
     throw new TypeError("signal must be an AbortSignal.");
+  if (fresh !== undefined && typeof fresh !== "boolean")
+    throw new TypeError("fresh must be a boolean.");
   const controller = new AbortController();
   const abort = () => controller.abort(signal.reason);
   signal?.addEventListener("abort", abort, { once: true });
@@ -403,7 +405,12 @@ const checkUnset = (unset) => {
   return unset;
 };
 const FIELD = /^[a-zA-Z0-9_-]{1,64}$/;
+// Known today. Anything else is passed through for the server to accept or
+// refuse rather than rejected here: this file is versioned and, once frozen,
+// a closed list would mean a client that can never use a filter the server
+// later learns, no matter how long it lives.
 const COMPARISONS = ["gt", "gte", "lt", "lte"];
+const OPERATOR = /^[a-z][a-zA-Z0-9_]{0,31}$/;
 const ORDER_FIELDS = /^(id|createdAt|updatedAt|data\.[a-zA-Z0-9_-]{1,64})$/;
 // A file has no document body to sort by, only its server metadata.
 const FILE_ORDER_FIELDS = /^(id|createdAt|updatedAt)$/;
@@ -433,8 +440,14 @@ function filterJson(where) {
     if (!bounds.length)
       throw new TypeError("Comparison objects need at least one operator.");
     for (const [operator, bound] of bounds) {
-      if (!COMPARISONS.includes(operator))
-        throw new TypeError("Use gt, gte, lt or lte for range comparisons.");
+      if (!OPERATOR.test(operator))
+        throw new TypeError("Filter operators must be short lowercase names.");
+      // Only the operators this version knows have a checkable bound shape.
+      // An unrecognized one is the server's to judge.
+      if (!COMPARISONS.includes(operator)) {
+        predicates += 1;
+        continue;
+      }
       if (
         !(
           typeof bound === "string" ||
@@ -447,7 +460,9 @@ function filterJson(where) {
       predicates += 1;
     }
   }
-  if (predicates > 5) throw new TypeError("Use at most 5 filter predicates.");
+  // The count itself is the server's limit to set, and it may raise it.
+  if (!predicates)
+    throw new TypeError("A filter needs at least one predicate.");
   return JSON.stringify(where);
 }
 function queryOptions({ orderBy, direction } = {}, fields = ORDER_FIELDS) {
@@ -465,13 +480,14 @@ function queryOptions({ orderBy, direction } = {}, fields = ORDER_FIELDS) {
 }
 function listOptions(options = {}, fields = ORDER_FIELDS) {
   queryOptions(options, fields);
+  // No upper bound here on purpose. The server caps the page size and says so
+  // in its error; a ceiling baked into a frozen client would be one this SDK
+  // could never be told about again.
   if (
     options.limit !== undefined &&
-    (!Number.isInteger(options.limit) ||
-      options.limit < 1 ||
-      options.limit > 100)
+    (!Number.isInteger(options.limit) || options.limit < 1)
   )
-    throw new TypeError("limit must be an integer between 1 and 100.");
+    throw new TypeError("limit must be a positive integer.");
   if (
     options.after !== undefined &&
     (typeof options.after !== "string" || options.after.length === 0)
@@ -491,10 +507,26 @@ function pageParameters(options, fields) {
   if (options.after !== undefined) parameters.set("after", options.after);
   return parameters;
 }
+// `all()` reads like a loop over an array and is not one: each page is a
+// request, and on a full collection that is a hundred of them against a row the
+// server locks per site. A walk that stays small — one post's images, a
+// category's entries — is the shape this is for. Rather than leave the
+// unbounded walk available by accident, it has a ceiling that says so; a caller
+// that genuinely wants everything raises it deliberately.
+const DEFAULT_WALK = 1000;
+function walkLimit(max) {
+  if (max === undefined) return DEFAULT_WALK;
+  if (max === Infinity) return Infinity;
+  if (!Number.isInteger(max) || max < 1)
+    throw new TypeError("max must be a positive integer or Infinity.");
+  return max;
+}
 // Walking every page is the same job whichever collection is being walked: keep
 // asking until the cursor runs out, and refuse to loop on a repeated one.
-async function* walk(readPage, key, options) {
+async function* walk(readPage, key, { max, ...options } = {}) {
   let after;
+  let walked = 0;
+  const ceiling = walkLimit(max);
   const seen = new Set();
   do {
     const page = await readPage({ limit: 100, ...options, after });
@@ -514,6 +546,15 @@ async function* walk(readPage, key, options) {
           scope.close();
         }
       }
+      if (walked >= ceiling)
+        throw new NaruDataError(
+          200,
+          `Walked ${ceiling} records without reaching the end. Narrow the ` +
+            `query with where, page explicitly with list(), or pass max to ` +
+            `raise this ceiling.`,
+          "WALK_LIMIT_EXCEEDED",
+        );
+      walked += 1;
       yield item;
     }
     after = page.nextCursor ?? undefined;
@@ -588,11 +629,18 @@ export function createDatabase({
       // Serialize before awaiting so later caller mutations cannot change the write.
       const serialized = body === undefined ? undefined : JSON.stringify(body);
       let response;
+      // A public read is the same bytes for every caller, and the server marks
+      // those responses cacheable; refusing the cache here would throw that
+      // away and send every visitor's every read to the origin. Anything
+      // carrying a credential, and anything that is not a read, still bypasses
+      // the cache entirely — as does a caller that asks for `fresh`, which is
+      // what a read immediately after one's own write wants.
+      const cacheable = method === "GET" && !token && !options?.fresh;
       try {
         response = await fetch(url, {
           method,
           credentials: "omit",
-          cache: "no-store",
+          cache: cacheable ? "default" : "no-store",
           redirect: "error",
           headers: {
             ...(body === undefined
@@ -771,12 +819,10 @@ export function createDatabase({
     // these would only ever be able to be refused by the server.
     if (!owner) return api;
     api.batch = (operations, options) => {
-      if (
-        !Array.isArray(operations) ||
-        !operations.length ||
-        operations.length > 100
-      )
-        throw new TypeError("Batch requires 1–100 operations.");
+      // The server sets and enforces the ceiling; this only rejects a shape
+      // that could not be a batch at all.
+      if (!Array.isArray(operations) || !operations.length)
+        throw new TypeError("Batch requires at least one operation.");
       const snapshot = operations.map((operation) => {
         if (
           !operation ||
@@ -1168,10 +1214,9 @@ export function createDatabase({
         if (
           !Array.isArray(collections) ||
           !collections.length ||
-          collections.length > 100 ||
           new Set(collections).size !== collections.length
         )
-          throw new TypeError("Choose 1–100 unique collections.");
+          throw new TypeError("Choose at least one unique collection.");
         collections.forEach(segment);
         const callback = new URL(redirectUri);
         if (

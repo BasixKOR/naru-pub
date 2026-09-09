@@ -31,6 +31,16 @@ render_gateway_config() {
   local slot=$1
   local destination=$2
 
+  # Only believe CF-Connecting-IP where the application is configured to believe
+  # it too; otherwise a client could pick its own rate-limit bucket. The value
+  # is read from the same .env the containers get it from, so the gateway and
+  # the application can never disagree about whether the header is trusted.
+  local client_key_trusted='$binary_remote_addr'
+  if [[ -f .env ]] &&
+    grep -Eq '^[[:space:]]*SITE_DATA_TRUST_CLOUDFLARE_IP[[:space:]]*=[[:space:]]*"?1"?[[:space:]]*$' .env; then
+    client_key_trusted='$http_cf_connecting_ip'
+  fi
+
   cat > "$destination" <<EOF
 map \$http_x_forwarded_proto \$naru_forwarded_proto {
     default \$http_x_forwarded_proto;
@@ -41,6 +51,30 @@ map \$http_upgrade \$naru_connection_upgrade {
     default upgrade;
     ""      "";
 }
+
+# The site database API is the one control-plane surface a stranger can drive at
+# will: it is public, CORS-open, and every request costs a PostgreSQL round trip
+# on the pool the whole control plane shares. These buckets keep a burst against
+# one site from becoming a sign-in outage for everyone else. Per-client, so a
+# busy site with many real visitors is unaffected.
+#
+# \$naru_client_key is what "per-client" means here, and behind a CDN the peer
+# address is the CDN, not the visitor — keying on it would put every visitor in
+# one bucket and throttle the whole service. This follows the application's own
+# trust decision (SITE_DATA_TRUST_CLOUDFLARE_IP) rather than inventing a second
+# one: the header is only believed where the ingress is known to overwrite it
+# and direct access is blocked, because a client that can set it freely can also
+# rotate it to escape the limit.
+map \$http_cf_connecting_ip \$naru_client_key {
+    default        ${client_key_trusted};
+    ""             \$binary_remote_addr;
+}
+
+limit_req_zone \$naru_client_key zone=naru_data:16m rate=30r/s;
+limit_req_zone \$naru_client_key zone=naru_data_auth:8m rate=2r/s;
+limit_req_status 429;
+limit_conn_zone \$naru_client_key zone=naru_conn:16m;
+limit_conn_status 429;
 
 upstream naru_control_plane {
     server control-plane-$slot:3000;
@@ -55,6 +89,41 @@ upstream naru_site_proxy {
 server {
     listen 3000;
     client_max_body_size 0;
+
+    # A document is capped at 64 KiB and the largest body the data API accepts
+    # is one batch of them, so nothing on these routes needs megabytes.
+    location /api/data/ {
+        limit_req zone=naru_data burst=60 nodelay;
+        limit_conn naru_conn 24;
+        client_max_body_size 1m;
+        proxy_pass http://naru_control_plane;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$naru_forwarded_proto;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_buffering off;
+    }
+
+    # Sign-in is a human action a few times a day, never a page-load cost, so
+    # this can be far tighter than the data API. Token exchange and revocation
+    # both live here, and both are worth bounding against guessing.
+    location /api/data-auth/ {
+        limit_req zone=naru_data_auth burst=10 nodelay;
+        limit_conn naru_conn 24;
+        client_max_body_size 64k;
+        proxy_pass http://naru_control_plane;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$naru_forwarded_proto;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_buffering off;
+    }
 
     location / {
         proxy_pass http://naru_control_plane;

@@ -8,7 +8,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { sql } from "kysely";
-import { db } from "@/lib/database";
+import { db, requestDeadline } from "@/lib/database";
 import { s3Client } from "@/lib/s3";
 import { previewFeatureAccess, userHasFeature } from "@/lib/entitlements";
 import { noteSupporterFeatureUse } from "@/lib/feature-usage";
@@ -20,6 +20,11 @@ import { decodeCursor, encodeCursor, sorting } from "./pagination";
 
 export const MAX_MEDIA_FILE_BYTES = 25 * 1024 * 1024;
 export const MAX_MEDIA_SITE_BYTES = 250 * 1024 * 1024;
+// The byte quota alone does not bound row count: the minimum file is one byte,
+// so a quota's worth of tiny files is millions of rows. Listing is paged, but
+// the count still has to stop somewhere the cleanup job and the owner's own
+// library screen can cope with.
+export const MAX_MEDIA_FILES = 10000;
 const mediaBucket = () => process.env.SITE_DATA_MEDIA_BUCKET || "naru-media";
 const mediaOrigin = () =>
   (process.env.SITE_DATA_MEDIA_ORIGIN || "https://media.naru.pub").replace(
@@ -149,9 +154,6 @@ export async function executeMedia(command: MediaCommand) {
   const preview = previewFeatureAccess(!!owner.supporter_comp, "database");
   if (!(preview ?? (await userHasFeature(owner.id, "database"))))
     throw new DataError(403, "Database access is not enabled for this site.");
-  // Uploading or removing a file is the owner using the supporter storage;
-  // serving one back is a visitor reading their site.
-  if (command.method !== "GET") noteSupporterFeatureUse(owner.id, "database");
   const allowedIds = command.bearer
     ? await db
         .transaction()
@@ -168,6 +170,10 @@ export async function executeMedia(command: MediaCommand) {
   if (!admin) throw new DataError(403, "Owner access required.");
   if (command.adminUserId !== undefined && command.adminUserId !== owner.id)
     throw new DataError(403, "Permission denied.");
+  // Recorded only now that the caller is known to be the owner. Uploading or
+  // removing a file is the owner using the supporter storage; serving one back
+  // is a visitor reading their site, and a refused request is neither.
+  if (command.method !== "GET") noteSupporterFeatureUse(owner.id, "database");
 
   const files = () =>
     db.selectFrom("site_data_files").where("user_id", "=", owner.id);
@@ -267,6 +273,7 @@ export async function executeMedia(command: MediaCommand) {
       : "";
     const objectKey = `${owner.id}/${fileId}${extension ? `.${extension}` : ""}`;
     const file = await db.transaction().execute(async (tx) => {
+      await requestDeadline(tx);
       await tx
         .selectFrom("users")
         .select("id")
@@ -276,10 +283,17 @@ export async function executeMedia(command: MediaCommand) {
       const usage = await tx
         .selectFrom("site_data_files")
         .where("user_id", "=", owner.id)
-        .select(sql<number>`coalesce(sum(size_bytes), 0)`.as("bytes"))
+        .select([
+          sql<number>`coalesce(sum(size_bytes), 0)`.as("bytes"),
+          sql<number>`count(*)`.as("count"),
+        ])
         .executeTakeFirstOrThrow();
       if (Number(usage.bytes) + input.size > MAX_MEDIA_SITE_BYTES)
         throw new DataError(409, "Media storage quota exceeded.");
+      // Counted as well as measured: the byte quota does not bound rows, and an
+      // authorization loop would otherwise mint them without limit.
+      if (Number(usage.count) >= MAX_MEDIA_FILES)
+        throw new DataError(409, "Media file count limit reached.");
       return tx
         .insertInto("site_data_files")
         .values({

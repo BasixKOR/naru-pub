@@ -66,13 +66,20 @@ limit_req_status 429;
 limit_conn_zone \$binary_remote_addr zone=naru_conn:16m;
 limit_conn_status 429;
 
+# Docker assigns a new address whenever a blue/green container is recreated.
+# Resolve upstream names through Docker's embedded DNS at runtime so the
+# long-lived gateway never keeps sending traffic to a recycled container IP.
+resolver 127.0.0.11 ipv6=off valid=10s;
+
 upstream naru_control_plane {
-    server control-plane-$slot:3000;
+    zone naru_control_plane 64k;
+    server control-plane-$slot:3000 resolve;
     keepalive 32;
 }
 
 upstream naru_site_proxy {
-    server proxy-$slot:5000;
+    zone naru_site_proxy 64k;
+    server proxy-$slot:5000 resolve;
     keepalive 32;
 }
 

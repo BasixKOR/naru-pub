@@ -230,8 +230,8 @@ URL을 복사하고, 파일을 삭제할 수 있습니다. 삭제 전에 해당 
 직접 확인해야 합니다.
 
 Uploads are owner-only and use the same tab-scoped website bearer token as
-document writes. Each file is limited to 25 MiB; each site is limited to 1,000
-files and 250 MiB. JPEG, PNG, WebP, AVIF, GIF, supported audio, PDF, ZIP, and
+document writes. Each file is limited to 25 MiB; each site is limited to 250
+MiB. JPEG, PNG, WebP, AVIF, GIF, supported audio, PDF, ZIP, and
 plain text are accepted. HTML and SVG are rejected. Public objects are served
 from the separately isolated `media.naru.pub` origin. Deleting a file removes
 both the R2 object and its metadata; deleting an account removes its media

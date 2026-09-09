@@ -1057,23 +1057,6 @@
           "throws": []
         },
         {
-          "name": "maxFiles",
-          "optional": false,
-          "signature": "maxFiles: number",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "이 사이트에 허용된 전체 파일 수입니다."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
           "name": "pending",
           "optional": false,
           "signature": "pending: number",

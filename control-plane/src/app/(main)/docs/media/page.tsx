@@ -147,7 +147,7 @@ const mine = files.filter((file) =>
             <Section id="limits" title="04 · 한도와 허용 형식">
               <p>
                 파일 하나는 <strong>25 MiB</strong>까지, 사이트 하나는{" "}
-                <strong>1,000개 · 250 MiB</strong>까지 저장할 수 있습니다.
+                <strong>250 MiB</strong>까지 저장할 수 있습니다.
                 데이터베이스 문서 한도와는 별개로 셉니다.
               </p>
               <p>
@@ -156,8 +156,8 @@ const mine = files.filter((file) =>
                 형식은 스크립트를 품을 수 있어, 공개 주소에서 그대로 열리면
                 방문자에게 위험할 수 있기 때문입니다.
               </p>
-              <Code>{`const { bytes, maxBytes, count, maxFiles } = await owner.files.usage();
-showQuota(bytes / maxBytes, count + " / " + maxFiles);`}</Code>
+              <Code>{`const { bytes, maxBytes, count } = await owner.files.usage();
+showQuota(bytes / maxBytes, count);`}</Code>
             </Section>
 
             <Section id="cleanup" title="05 · 정리와 삭제">

@@ -17,7 +17,6 @@ import { DataError, name } from "./validation";
 
 export const MAX_MEDIA_FILE_BYTES = 25 * 1024 * 1024;
 export const MAX_MEDIA_SITE_BYTES = 250 * 1024 * 1024;
-export const MAX_MEDIA_FILES = 1000;
 const mediaBucket = () => process.env.SITE_DATA_MEDIA_BUCKET || "naru-media";
 const mediaOrigin = () =>
   (process.env.SITE_DATA_MEDIA_ORIGIN || "https://media.naru.pub").replace(
@@ -143,7 +142,6 @@ export async function executeMedia(command: MediaCommand) {
         .where("status", "=", "ready")
         .selectAll()
         .orderBy("created_at", "desc")
-        .limit(MAX_MEDIA_FILES)
         .execute(),
       files()
         .select([
@@ -160,7 +158,6 @@ export async function executeMedia(command: MediaCommand) {
         count: Number(usage.count),
         pending: Number(usage.pending),
         maxBytes: MAX_MEDIA_SITE_BYTES,
-        maxFiles: MAX_MEDIA_FILES,
       },
     };
   }
@@ -196,15 +193,9 @@ export async function executeMedia(command: MediaCommand) {
       const usage = await tx
         .selectFrom("site_data_files")
         .where("user_id", "=", owner.id)
-        .select([
-          sql<number>`coalesce(sum(size_bytes), 0)`.as("bytes"),
-          sql<number>`count(*)`.as("count"),
-        ])
+        .select(sql<number>`coalesce(sum(size_bytes), 0)`.as("bytes"))
         .executeTakeFirstOrThrow();
-      if (
-        Number(usage.count) >= MAX_MEDIA_FILES ||
-        Number(usage.bytes) + input.size > MAX_MEDIA_SITE_BYTES
-      )
+      if (Number(usage.bytes) + input.size > MAX_MEDIA_SITE_BYTES)
         throw new DataError(409, "Media storage quota exceeded.");
       return tx
         .insertInto("site_data_files")

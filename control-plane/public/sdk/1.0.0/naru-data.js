@@ -127,7 +127,7 @@ function validateResponse(url, method, body, result, status) {
         Array.isArray(result.files) &&
         result.files.every(fileValue) &&
         object(result.usage) &&
-        ["bytes", "count", "pending", "maxBytes", "maxFiles"].every(
+        ["bytes", "count", "pending", "maxBytes"].every(
           (key) =>
             Number.isSafeInteger(result.usage[key]) && result.usage[key] >= 0,
         );

@@ -410,8 +410,6 @@ export interface MediaUsage {
   pending: number;
   /** 이 사이트에 허용된 전체 바이트입니다. */
   maxBytes: number;
-  /** 이 사이트에 허용된 전체 파일 수입니다. */
-  maxFiles: number;
 }
 
 /** 관리자 세션에서만 닿을 수 있는 미디어 라이브러리입니다. */

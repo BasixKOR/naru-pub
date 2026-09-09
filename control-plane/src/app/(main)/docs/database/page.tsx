@@ -499,7 +499,7 @@ try {
                 관리자 클라이언트의 <code>owner.files.upload(file)</code>은
                 브라우저에서 Naru Media로 파일을 직접 올리고, 확인된 공개 URL과
                 파일 ID를 반환합니다. 문서에는 base64 대신 이 URL이나 ID를
-                저장하세요. 파일 하나는 25 MiB, 사이트당 1,000개·250 MiB까지
+                저장하세요. 파일 하나는 25 MiB, 사이트당 250 MiB까지
                 저장할 수 있습니다. HTML과 SVG는 허용하지 않습니다.
               </p>
               <Code>{`const image = await owner.files.upload(fileInput.files[0], {
@@ -520,7 +520,7 @@ const mine = files.filter((file) =>
 );
 for (const file of mine) await owner.files.delete(file.id);
 
-const { bytes, maxBytes, count, maxFiles } = await owner.files.usage();`}</Code>
+const { bytes, maxBytes, count } = await owner.files.usage();`}</Code>
               <p>
                 <code>metadata</code>에 넣은 값은 <code>files.list()</code>와{" "}
                 <code>files.get()</code>에 그대로 돌아옵니다. 어떤 문서가 그

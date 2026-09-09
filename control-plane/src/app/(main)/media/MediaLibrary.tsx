@@ -36,7 +36,6 @@ type Usage = {
   count: number;
   pending: number;
   maxBytes: number;
-  maxFiles: number;
 };
 type UploadState = {
   key: string;
@@ -106,7 +105,6 @@ export default function MediaLibrary() {
     count: 0,
     pending: 0,
     maxBytes: 250 * 1024 * 1024,
-    maxFiles: 1000,
   });
   const [uploads, setUploads] = useState<UploadState[]>([]);
   const [query, setQuery] = useState("");
@@ -284,9 +282,7 @@ export default function MediaLibrary() {
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div className="rounded-md bg-muted/50 p-3">
                 <p className="text-muted-foreground">파일</p>
-                <p className="font-semibold">
-                  {usage.count} / {usage.maxFiles}
-                </p>
+                <p className="font-semibold">{usage.count}</p>
               </div>
               <div className="rounded-md bg-muted/50 p-3">
                 <p className="text-muted-foreground">처리 중</p>

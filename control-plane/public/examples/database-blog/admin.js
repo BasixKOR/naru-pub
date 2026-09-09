@@ -99,7 +99,7 @@ async function loadList(reset = true) {
   listKind = kind;
   const page = await owner.collection(kind).list({
     limit: 20,
-    orderBy: "updated_at",
+    orderBy: "updatedAt",
     direction: "desc",
     ...(cursor ? { after: cursor } : {}),
   });
@@ -136,7 +136,7 @@ async function loadList(reset = true) {
         );
       }),
     );
-    row.append(button, element("span", date(doc.updated_at), "meta"));
+    row.append(button, element("span", date(doc.updatedAt), "meta"));
     $("manage-list").append(row);
   }
   cursor = page.nextCursor;

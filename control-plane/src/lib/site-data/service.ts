@@ -35,6 +35,24 @@ export type DataCommand = {
   ifVersion?: number;
 };
 
+/** Server metadata is camelCase on the wire; the columns stay snake_case. */
+const TIMESTAMPS = [
+  sql<Date>`created_at`.as("createdAt"),
+  sql<Date>`updated_at`.as("updatedAt"),
+];
+/** Every accepted write reports the version and stamps conditional writes and
+ * optimistic rendering both need, so a caller never has to guess a timestamp. */
+const WRITTEN = ["version", "created_at", "updated_at"] as const;
+const written = (
+  id: string,
+  row: { version: number; created_at: Date; updated_at: Date },
+) => ({
+  id,
+  version: row.version,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
 /** `0` asserts the document does not exist yet, so a create cannot clobber. */
 function expectedVersion(value: unknown) {
   if (value === undefined) return undefined;
@@ -54,7 +72,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 /** Shallow merge: patch fields replace stored fields, `unset` names removed. */
-function merge(
+export function merge(
   existing: { data: unknown } | undefined,
   body: Record<string, unknown>,
 ) {
@@ -76,22 +94,28 @@ function merge(
   return merged;
 }
 
-function filterConditions(filter: ReturnType<typeof filters>) {
+/** Documents filter on `data`; media filters on `metadata`. The column is only
+ * ever one of those two literals, never caller-supplied text. */
+export function filterConditions(
+  filter: ReturnType<typeof filters>,
+  column: "data" | "metadata" = "data",
+) {
+  const target = sql.ref(column);
   const conditions = [];
   if (filter.entries.length) {
     // GIN finds candidates; equality checks enforce exact scalar semantics,
     // so arrays containing a scalar never count as a scalar field match.
-    conditions.push(sql<boolean>`data @> ${filter.json}::jsonb`);
+    conditions.push(sql<boolean>`${target} @> ${filter.json}::jsonb`);
     for (const [field, value] of filter.entries)
       conditions.push(
-        sql<boolean>`data -> ${field} = ${JSON.stringify(value)}::jsonb`,
+        sql<boolean>`${target} -> ${field} = ${JSON.stringify(value)}::jsonb`,
       );
   }
   for (const [field, operator, bound] of filter.ranges) {
     // JSONB orders numbers above strings, so ranges compare within one type
     // only. Comparing JSONB rather than a cast never raises on other types.
     conditions.push(
-      sql<boolean>`jsonb_typeof(data -> ${field}) = ${typeof bound} and data -> ${field} ${sql.raw(
+      sql<boolean>`jsonb_typeof(${target} -> ${field}) = ${typeof bound} and ${target} -> ${field} ${sql.raw(
         COMPARISONS[operator],
       )} ${JSON.stringify(bound)}::jsonb`,
     );
@@ -211,7 +235,8 @@ export async function executeData(command: DataCommand) {
       if (path.length === 2) {
         const document = await documents()
           .where("id", "=", path[1])
-          .select(["id", "data", "created_at", "updated_at", "version"])
+          .select(["id", "data", "version"])
+          .select(TIMESTAMPS)
           .executeTakeFirst();
         if (!document) throw new DataError(404, "Document not found.");
         return { document };
@@ -242,9 +267,10 @@ export async function executeData(command: DataCommand) {
       // sort key is never SQL NULL and the tuple comparison stays a total order.
       const sortValue = sort.field
         ? sql`coalesce(data -> ${sort.field}, 'null'::jsonb)`
-        : sql.ref(sort.orderBy);
+        : sql.ref(sort.column);
       let query = documents()
-        .select(["id", "data", "created_at", "updated_at", "version"])
+        .select(["id", "data", "version"])
+        .select(TIMESTAMPS)
         .select(
           (sort.orderBy === "id"
             ? sql<string | null>`null`
@@ -343,35 +369,38 @@ export async function executeData(command: DataCommand) {
       data: sql`${encoded}::jsonb`,
       size_bytes: size,
     });
-    let version = 1;
+    let row;
     if (creating) {
       // Never overwrite a document, even in the event of an ID collision.
-      const inserted = await insert
+      row = await insert
         .onConflict((oc) => oc.columns(["collection_id", "id"]).doNothing())
-        .returning("version")
+        .returning(WRITTEN)
         .executeTakeFirst();
-      if (!inserted)
+      if (!row)
         throw new DataError(409, "Document ID collision. Retry creation.");
-      version = inserted.version;
     } else {
-      version = (
-        await insert
-          .onConflict((oc) =>
-            oc.columns(["collection_id", "id"]).doUpdateSet({
-              data: sql`${encoded}::jsonb`,
-              size_bytes: size,
-              updated_at: new Date(),
-              // Every accepted write advances the version conditional writes quote.
-              version: sql`site_data_documents.version + 1`,
-            }),
-          )
-          .returning("version")
-          .executeTakeFirstOrThrow()
-      ).version;
+      row = await insert
+        .onConflict((oc) =>
+          oc.columns(["collection_id", "id"]).doUpdateSet({
+            data: sql`${encoded}::jsonb`,
+            size_bytes: size,
+            updated_at: new Date(),
+            // Every accepted write advances the version conditional writes quote.
+            version: sql`site_data_documents.version + 1`,
+          }),
+        )
+        .returning(WRITTEN)
+        .executeTakeFirstOrThrow();
     }
     // Do not read/return stored data: write-only callers may not read it.
-    // The version is write metadata, not content, and conditional writes need it.
-    return { id, version };
+    // Version and timestamps are write metadata, not content. Spelled out here
+    // rather than built by a helper so the union of results stays discriminable.
+    return {
+      id,
+      version: row.version,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
   });
 }
 
@@ -414,7 +443,13 @@ export async function executeBatch(command: DataCommand) {
       .selectAll()
       .where("user_id", "=", owner.id)
       .execute();
-    const results: { id?: string; version?: number; success?: true }[] = [];
+    const results: {
+      id?: string;
+      version?: number;
+      createdAt?: Date;
+      updatedAt?: Date;
+      success?: true;
+    }[] = [];
     for (const raw of operations) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw))
         throw new DataError(400, "Invalid batch operation.");
@@ -486,14 +521,14 @@ export async function executeBatch(command: DataCommand) {
         // Never overwrite a document, even in the event of an ID collision.
         const inserted = await insert
           .onConflict((oc) => oc.columns(["collection_id", "id"]).doNothing())
-          .returning("version")
+          .returning(WRITTEN)
           .executeTakeFirst();
         if (!inserted)
           throw new DataError(409, "Document ID collision. Retry creation.");
-        results.push({ id, version: inserted.version });
+        results.push(written(id, inserted));
         continue;
       }
-      const written = await insert
+      const row = await insert
         .onConflict((oc) =>
           oc.columns(["collection_id", "id"]).doUpdateSet({
             data: sql`${encoded}::jsonb`,
@@ -502,9 +537,9 @@ export async function executeBatch(command: DataCommand) {
             version: sql`site_data_documents.version + 1`,
           }),
         )
-        .returning("version")
+        .returning(WRITTEN)
         .executeTakeFirstOrThrow();
-      results.push({ id, version: written.version });
+      results.push(written(id, row));
     }
     const usage = await tx
       .selectFrom("site_data_documents as d")

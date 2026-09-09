@@ -20,7 +20,7 @@ async function load(reset = false) {
     const page = await db.collection(guestbook ? "guestbook" : "posts").list({
       limit: 20,
       ...(!guestbook && category ? { where: { category } } : {}),
-      orderBy: "created_at",
+      orderBy: "createdAt",
       direction: "desc",
       ...(reset ? {} : cursor ? { after: cursor } : {}),
     });
@@ -44,7 +44,7 @@ async function load(reset = false) {
           element("p", text(data.category, "미분류"), "meta"),
         );
       }
-      card.append(element("p", date(doc.created_at), "meta"));
+      card.append(element("p", date(doc.createdAt), "meta"));
       $("entries").append(card);
     }
     cursor = page.nextCursor;

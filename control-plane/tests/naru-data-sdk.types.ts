@@ -103,7 +103,7 @@ posts.list({ where: { published: { gt: 0 } } });
 posts.all({ orderBy: "data.titel" });
 // @ts-expect-error String ranges cannot use numeric boundaries.
 posts.list({ where: { title: { gte: 1 } } });
-posts.list({ orderBy: "created_at" });
+posts.list({ orderBy: "createdAt" });
 posts.list({ where: {} });
 
 interface Article {

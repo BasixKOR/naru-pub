@@ -5,12 +5,15 @@ import {
   NaruDataError,
 } from "../public/sdk/1.0.0/naru-data.js";
 
-const documentFixture = (id, data = null) => ({
+const writtenFixture = (id = "one", version = 1) => ({
   id,
+  version,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+});
+const documentFixture = (id, data = null) => ({
+  ...writtenFixture(id),
   data,
-  version: 1,
-  created_at: "2026-01-01T00:00:00.000Z",
-  updated_at: "2026-01-01T00:00:00.000Z",
 });
 
 test("SDK sends cross-origin CRUD requests without credentials", async () => {
@@ -19,8 +22,7 @@ test("SDK sends cross-origin CRUD requests without credentials", async () => {
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options });
     return Response.json({
-      id: "one",
-      version: 1,
+      ...writtenFixture(),
       success: true,
       document: documentFixture("one"),
       documents: [],
@@ -87,8 +89,9 @@ test("owner file upload authorizes, uploads directly, finalizes and exposes meta
         size: 3,
         status: "ready",
         metadata: {},
-        created_at: "2026-01-01T00:00:00Z",
-        updated_at: "2026-01-01T00:00:00Z",
+        version: 1,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
         url: "https://media.naru.pub/1/file_one.png",
       },
     });
@@ -140,12 +143,24 @@ test("SDK exposes status codes and rejects unsafe path segments", async () => {
 
 function fakeBrowser() {
   const storage = new Map();
+  // A real Location derives origin and pathname from href. Holding them as
+  // fixed strings would let a test navigate somewhere the SDK could not see.
+  let href = "https://alice.example/admin.html";
   const location = {
-    href: "https://alice.example/admin.html",
-    origin: "https://alice.example",
-    pathname: "/admin.html",
+    get href() {
+      return href;
+    },
+    set href(value) {
+      href = value;
+    },
+    get origin() {
+      return new URL(href).origin;
+    },
+    get pathname() {
+      return new URL(href).pathname;
+    },
     assign(url) {
-      this.href = url;
+      href = url;
     },
   };
   return {
@@ -182,8 +197,7 @@ test("owner redirect uses PKCE; callback exchanges once and keeps public calls a
     return Response.json({
       documents: [],
       nextCursor: null,
-      id: "one",
-      version: 1,
+      ...writtenFixture(),
     });
   };
   try {
@@ -293,7 +307,7 @@ test("schemas reject invalid writes and owner batch snapshots valid operations",
       results: JSON.parse(body).operations.map((op) =>
         op.type === "delete"
           ? { success: true }
-          : { id: op.id ?? "one", version: 1 },
+          : writtenFixture(op.id ?? "one"),
       ),
     });
   };
@@ -431,10 +445,10 @@ test("SDK carries sort options and opaque cursors unchanged", async () => {
       site: "alice",
       baseUrl: "https://naru.pub",
     }).collection("posts");
-    const sort = { orderBy: "created_at", direction: "desc" };
+    const sort = { orderBy: "createdAt", direction: "desc" };
     const first = await posts.list({ ...sort, limit: 20 });
     await posts.list({ ...sort, after: first.nextCursor, limit: 10 });
-    assert.equal(urls[1].searchParams.get("orderBy"), "created_at");
+    assert.equal(urls[1].searchParams.get("orderBy"), "createdAt");
     assert.equal(urls[1].searchParams.get("direction"), "desc");
     assert.equal(urls[1].searchParams.get("after"), "v1.opaque-cursor");
     assert.equal(urls[1].searchParams.get("limit"), "10");
@@ -599,7 +613,7 @@ test("merge patches and conditional writes travel as PATCH and ifVersion", async
     return Response.json(
       options.method === "DELETE"
         ? { success: true }
-        : { id: "one", version: 2 },
+        : writtenFixture("one", 2),
     );
   };
   try {
@@ -695,13 +709,11 @@ test("one token restores after reload without network calls and retains its orig
       `Bearer ${saved.accessToken}`,
     );
     assert.equal(browser.storage.get(key), JSON.stringify(saved));
-    browser.location.pathname = "/other.html";
     browser.location.href = "https://alice.example/other.html";
     assert.equal(
       await createDatabase({ site: "alice" }).completeOwnerSignIn(),
       null,
     );
-    browser.location.pathname = "/admin.html";
     browser.location.href = saved.redirectUri;
     now = deadline;
     await assert.rejects(
@@ -830,7 +842,7 @@ test("writes reject lossy JSON without requests and snapshot valid shared refere
   const bodies = [];
   globalThis.fetch = async (_url, options) => {
     bodies.push(JSON.parse(options.body));
-    return Response.json({ id: "one", version: 1 });
+    return Response.json(writtenFixture());
   };
   const entries = createDatabase({ site: "alice" }).collection("posts");
   const cyclic = {};
@@ -997,9 +1009,10 @@ const storedFileFixture = () => ({
   size: 3,
   status: "ready",
   metadata: {},
+  version: 1,
   url: "https://media.naru.pub/1/file_one.png",
-  created_at: "2026-01-01T00:00:00Z",
-  updated_at: "2026-01-01T00:00:00Z",
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-01T00:00:00Z",
 });
 const untilAborted = (signal) =>
   new Promise((_, reject) => {
@@ -1145,7 +1158,12 @@ test("malformed successful envelopes reject instead of returning values outside 
         () => owner.files.get("one"),
         { file: { ...storedFileFixture(), status: "pending" } },
       ],
+      // The pre-cursor listing shape is not a page and is not accepted.
       [() => owner.files.list(), { files: [], usage: {} }],
+      [() => owner.files.list(), { files: [{}], nextCursor: null }],
+      [() => owner.files.list(), { files: [], nextCursor: 7 }],
+      [() => owner.files.usage(), { usage: { bytes: -1 } }],
+      [() => owner.files.update("one", {}), { file: null }],
       [() => owner.files.delete("one"), {}],
       [
         () => owner.files.upload(new Blob(["abc"])),
@@ -1412,7 +1430,7 @@ test("schema registries validate own properties eagerly without invoking getters
 test("schemas ignore inherited names and retain a snapshot of own validators", async () => {
   const oldFetch = globalThis.fetch;
   try {
-    globalThis.fetch = async () => Response.json({ id: "one", version: 1 });
+    globalThis.fetch = async () => Response.json(writtenFixture());
     const schemas = Object.create({
       posts: () => {
         throw new Error("inherited validator ran");
@@ -1447,7 +1465,7 @@ test("full writes reject asynchronous and invalid schema results before sending"
     let requests = 0;
     globalThis.fetch = async () => {
       requests++;
-      return Response.json({ id: "one", version: 1 });
+      return Response.json(writtenFixture());
     };
     for (const validator of [
       async () => false,
@@ -1680,8 +1698,7 @@ test("read parsers are handle-local and do not run for counts or writes", async 
         options.method === "DELETE"
           ? { success: true }
           : {
-              id: "one",
-              version: 1,
+              ...writtenFixture(),
               count: 2,
               document: documentFixture("one", {}),
             },
@@ -2056,6 +2073,287 @@ test("an encoder that substitutes an unusable type for every request keeps the o
     });
   } finally {
     image.restore();
+    globalThis.window = oldWindow;
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("the media library pages and filters like a collection instead of loading whole", async () => {
+  const oldWindow = globalThis.window,
+    oldFetch = globalThis.fetch;
+  const urls = [];
+  try {
+    const owner = await restoreTestOwner();
+    const pages = [
+      { files: [storedFileFixture()], nextCursor: "v1.second" },
+      { files: [{ ...storedFileFixture(), id: "file_two" }], nextCursor: null },
+    ];
+    globalThis.fetch = async (url) => {
+      urls.push(new URL(url));
+      return Response.json(pages[urls.length - 1]);
+    };
+    const page = await owner.files.list({
+      where: { postId: "hello" },
+      limit: 2,
+      orderBy: "updatedAt",
+      direction: "asc",
+    });
+    assert.deepEqual(
+      page.files.map((file) => file.id),
+      ["file_one"],
+    );
+    assert.equal(page.nextCursor, "v1.second");
+    assert.equal(urls[0].pathname, "/api/data/alice/_files");
+    assert.deepEqual(JSON.parse(urls[0].searchParams.get("where")), {
+      postId: "hello",
+    });
+    assert.equal(urls[0].searchParams.get("limit"), "2");
+    assert.equal(urls[0].searchParams.get("orderBy"), "updatedAt");
+    assert.equal(urls[0].searchParams.get("direction"), "asc");
+    assert.equal(urls[0].searchParams.has("after"), false);
+    urls.length = 0;
+    pages.length = 0;
+    pages.push(
+      { files: [storedFileFixture()], nextCursor: "v1.second" },
+      { files: [{ ...storedFileFixture(), id: "file_two" }], nextCursor: null },
+    );
+    const walked = [];
+    for await (const file of owner.files.all({ where: { postId: "hello" } }))
+      walked.push(file.id);
+    assert.deepEqual(walked, ["file_one", "file_two"]);
+    assert.equal(urls[1].searchParams.get("after"), "v1.second");
+    assert.equal(urls[1].searchParams.get("limit"), "100");
+    // A document field is not something a file has to sort by.
+    assert.throws(() => owner.files.list({ orderBy: "data.title" }), TypeError);
+  } finally {
+    globalThis.window = oldWindow;
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("a quota readout is its own request and never pages the library", async () => {
+  const oldWindow = globalThis.window,
+    oldFetch = globalThis.fetch;
+  const urls = [];
+  try {
+    const owner = await restoreTestOwner();
+    const usage = { bytes: 10, count: 1, pending: 0, maxBytes: 1000 };
+    globalThis.fetch = async (url) => {
+      urls.push(new URL(url));
+      return Response.json({ usage });
+    };
+    assert.deepEqual(await owner.files.usage(), usage);
+    assert.equal(urls[0].searchParams.get("usage"), "1");
+    assert.equal(urls[0].searchParams.has("limit"), false);
+    // Without the flag the same envelope is not a listing and is refused.
+    globalThis.fetch = async () => Response.json({ usage });
+    await assert.rejects(owner.files.list(), { code: "INVALID_RESPONSE" });
+  } finally {
+    globalThis.window = oldWindow;
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("file metadata is patchable under a version check", async () => {
+  const oldWindow = globalThis.window,
+    oldFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    const owner = await restoreTestOwner();
+    globalThis.fetch = async (url, options) => {
+      calls.push({ url: new URL(url), options });
+      return Response.json({
+        file: {
+          ...storedFileFixture(),
+          metadata: { postId: "moved" },
+          version: 2,
+        },
+      });
+    };
+    const file = await owner.files.update(
+      "file_one",
+      { postId: "moved" },
+      { ifVersion: 1, unset: ["draft"] },
+    );
+    assert.deepEqual(file.metadata, { postId: "moved" });
+    assert.equal(file.version, 2);
+    assert.equal(calls[0].options.method, "PATCH");
+    assert.equal(calls[0].url.pathname, "/api/data/alice/_files/file_one");
+    assert.equal(calls[0].url.searchParams.get("ifVersion"), "1");
+    assert.deepEqual(JSON.parse(calls[0].options.body), {
+      data: { postId: "moved" },
+      unset: ["draft"],
+    });
+    await assert.rejects(owner.files.update("file_one", null), TypeError);
+  } finally {
+    globalThis.window = oldWindow;
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("the anonymous client carries no surface that only an owner token can use", async () => {
+  const db = createDatabase({ site: "alice" });
+  assert.equal(db.files, undefined);
+  assert.equal(db.batch, undefined);
+  assert.equal(typeof db.collection, "function");
+  const oldWindow = globalThis.window;
+  try {
+    const owner = await restoreTestOwner();
+    assert.equal(typeof owner.files.upload, "function");
+    assert.equal(typeof owner.batch, "function");
+  } finally {
+    globalThis.window = oldWindow;
+  }
+});
+
+test("counting refuses a sort order it has no page to apply", async () => {
+  const original = globalThis.fetch;
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests += 1;
+    return Response.json({ count: 0 });
+  };
+  try {
+    const posts = createDatabase({ site: "alice" }).collection("posts");
+    await assert.rejects(posts.count({ orderBy: "createdAt" }), TypeError);
+    await assert.rejects(posts.count({ direction: "desc" }), TypeError);
+    assert.equal(await posts.count({ where: { published: true } }), 0);
+    assert.equal(requests, 1);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("resizing announces itself before any bytes move", async () => {
+  const oldWindow = globalThis.window,
+    oldFetch = globalThis.fetch;
+  const image = fakeImagePipeline({
+    width: 8000,
+    height: 6000,
+    encoded: ({ type }) => new Blob(["x".repeat(1024)], { type }),
+  });
+  const calls = captureUpload();
+  const events = [];
+  try {
+    const owner = await restoreTestOwner();
+    await owner.files.upload(
+      new File([new Uint8Array(4 * 1024 * 1024)], "IMG.HEIC", {
+        type: "image/heic",
+      }),
+      { onProgress: (event) => events.push(event) },
+    );
+    // The resize is reported before the authorization request is even sent,
+    // so a caller never has to guess which files the SDK will re-encode.
+    assert.deepEqual(events[0], {
+      loaded: 0,
+      total: 4 * 1024 * 1024,
+      phase: "resizing",
+    });
+    assert.equal(calls[0].url, "https://naru.pub/api/data/alice/_files");
+    // A small file that is left alone gets no resizing event at all.
+    events.length = 0;
+    calls.length = 0;
+    await owner.files.upload(new Blob(["abc"], { type: "text/plain" }), {
+      onProgress: (event) => events.push(event),
+    });
+    assert.deepEqual(events, []);
+  } finally {
+    image.restore();
+    globalThis.window = oldWindow;
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("a throwing progress callback fails the upload rather than shipping the original", async () => {
+  const oldWindow = globalThis.window,
+    oldFetch = globalThis.fetch;
+  const image = fakeImagePipeline({
+    width: 8000,
+    height: 6000,
+    encoded: ({ type }) => new Blob(["x".repeat(1024)], { type }),
+  });
+  const calls = captureUpload();
+  try {
+    const owner = await restoreTestOwner();
+    await assert.rejects(
+      owner.files.upload(
+        new File([new Uint8Array(4 * 1024 * 1024)], "IMG.HEIC", {
+          type: "image/heic",
+        }),
+        {
+          onProgress: () => {
+            throw new Error("reporting failed");
+          },
+        },
+      ),
+      { message: "reporting failed" },
+    );
+    assert.deepEqual(calls, []);
+  } finally {
+    image.restore();
+    globalThis.window = oldWindow;
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("an upload redirected off its authorized origin fails and is cleaned up", async () => {
+  const oldWindow = globalThis.window,
+    oldFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    const owner = await restoreTestOwner();
+    globalThis.fetch = async (url, options) => {
+      calls.push({ url: String(url), options });
+      if (String(url) === "https://upload.example/signed")
+        return Object.defineProperty(
+          new Response(null, { status: 200 }),
+          "url",
+          {
+            value: "https://elsewhere.example/signed",
+          },
+        );
+      if (options.method === "POST")
+        return Response.json(uploadAuthorization());
+      return Response.json({ success: true });
+    };
+    await assert.rejects(
+      owner.files.upload(new Blob(["abc"], { type: "text/plain" })),
+      (error) =>
+        error.code === "UPLOAD_REDIRECTED" && error.fileId === "file_one",
+    );
+    // The authorization is not left dangling against the storage quota.
+    assert.equal(calls.at(-1).options.method, "DELETE");
+  } finally {
+    globalThis.window = oldWindow;
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("a callback completes on a page that carries its own query string", async () => {
+  const oldWindow = globalThis.window,
+    oldFetch = globalThis.fetch;
+  const browser = fakeBrowser();
+  globalThis.window = browser;
+  globalThis.fetch = async () =>
+    Response.json({
+      accessToken: "t".repeat(43),
+      expiresIn: 86400,
+      expiresAt: Date.now() + 24 * 3600000,
+      tokenType: "Bearer",
+    });
+  try {
+    const db = createDatabase({ site: "alice" });
+    await db.signInAsOwner({ clientId: "registered", collections: ["posts"] });
+    const saved = JSON.parse([...browser.storage.values()][0]);
+    // A static site routes on the query string, and providers may append their
+    // own parameters. Neither is the callback being a different callback.
+    browser.location.href = `${saved.redirectUri}?post=hello&code=${"c".repeat(43)}&state=${saved.state}&iss=https%3A%2F%2Fnaru.pub`;
+    assert.notEqual(await db.completeOwnerSignIn(), null);
+    assert.equal(
+      browser.location.href,
+      "https://alice.example/admin.html?post=hello&iss=https%3A%2F%2Fnaru.pub",
+    );
+  } finally {
     globalThis.window = oldWindow;
     globalThis.fetch = oldFetch;
   }

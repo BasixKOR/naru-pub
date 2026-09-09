@@ -55,29 +55,35 @@ const idValue = (value) =>
   typeof value === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(value);
 const timestamp = (value) =>
   typeof value === "string" && Number.isFinite(Date.parse(value));
-const written = (value) =>
+const versioned = (value) =>
   object(value) &&
   idValue(value.id) &&
   Number.isSafeInteger(value.version) &&
-  value.version > 0;
+  value.version > 0 &&
+  timestamp(value.createdAt) &&
+  timestamp(value.updatedAt);
+// Writes carry the stamps they produced, so a caller rendering what it just
+// saved never has to invent a timestamp from the browser clock.
+const written = versioned;
 const documentValue = (value) =>
-  written(value) &&
-  Object.hasOwn(value, "data") &&
-  timestamp(value.created_at) &&
-  timestamp(value.updated_at);
+  versioned(value) && Object.hasOwn(value, "data");
 const fileValue = (value) =>
-  object(value) &&
-  idValue(value.id) &&
+  versioned(value) &&
   value.status === "ready" &&
   typeof value.name === "string" &&
   typeof value.contentType === "string" &&
   Number.isSafeInteger(value.size) &&
   value.size > 0 &&
   typeof value.url === "string" &&
-  Object.hasOwn(value, "metadata") &&
-  timestamp(value.created_at) &&
-  timestamp(value.updated_at);
+  Object.hasOwn(value, "metadata");
 const success = (value) => object(value) && value.success === true;
+const cursorValue = (value) =>
+  value === null || (typeof value === "string" && value.length > 0);
+const usageValue = (value) =>
+  object(value) &&
+  ["bytes", "count", "pending", "maxBytes"].every(
+    (key) => Number.isSafeInteger(value[key]) && value[key] >= 0,
+  );
 function invalidResponse(status) {
   return new NaruDataError(
     status,
@@ -99,7 +105,7 @@ function validateResponse(url, method, body, result, status) {
       );
   } else if (path[0] === "_files") {
     if (method === "DELETE") valid = success(result);
-    else if (method === "POST") {
+    else if (method === "POST" && path.length === 1) {
       let upload;
       try {
         upload = new URL(result.uploadUrl);
@@ -122,15 +128,13 @@ function validateResponse(url, method, body, result, status) {
           (upload.protocol === "http:" &&
             ["localhost", "127.0.0.1", "[::1]"].includes(upload.hostname)));
     } else if (path.length > 1) valid = fileValue(result.file);
+    else if (url.searchParams.get("usage") === "1")
+      valid = usageValue(result.usage);
     else
       valid =
         Array.isArray(result.files) &&
         result.files.every(fileValue) &&
-        object(result.usage) &&
-        ["bytes", "count", "pending", "maxBytes"].every(
-          (key) =>
-            Number.isSafeInteger(result.usage[key]) && result.usage[key] >= 0,
-        );
+        cursorValue(result.nextCursor);
   } else if (method === "DELETE") valid = success(result);
   else if (method !== "GET") valid = written(result);
   else if (path.length > 1) valid = documentValue(result.document);
@@ -140,9 +144,7 @@ function validateResponse(url, method, body, result, status) {
     valid =
       Array.isArray(result.documents) &&
       result.documents.every(documentValue) &&
-      (result.nextCursor === null ||
-        (typeof result.nextCursor === "string" &&
-          result.nextCursor.length > 0));
+      cursorValue(result.nextCursor);
   if (!valid) throw invalidResponse(status);
 }
 // Reject values JSON.stringify would silently discard or coerce.
@@ -309,7 +311,7 @@ function renameExtension(name, type) {
   );
   return `${base}.${ENCODABLE[type]}`;
 }
-async function downscaleImage(file, settings) {
+async function downscaleImage(file, settings, onResize) {
   if (
     !settings ||
     !DECODABLE.has(file.type) ||
@@ -343,6 +345,9 @@ async function downscaleImage(file, settings) {
       Math.max(1, Math.round(bitmap.width * scale)),
       Math.max(1, Math.round(bitmap.height * scale)),
     ];
+    // Re-encoding is certain from here, and it is slow enough that a caller
+    // drawing a progress bar should be told this is not the transfer yet.
+    onResize?.();
     let blob = await encodeWithin(bitmap, settings, box);
     // A browser that cannot encode the requested type quietly hands back PNG
     // instead, and giving up there would ship the untouched original — the one
@@ -399,7 +404,9 @@ const checkUnset = (unset) => {
 };
 const FIELD = /^[a-zA-Z0-9_-]{1,64}$/;
 const COMPARISONS = ["gt", "gte", "lt", "lte"];
-const ORDER_FIELDS = /^(id|created_at|updated_at|data\.[a-zA-Z0-9_-]{1,64})$/;
+const ORDER_FIELDS = /^(id|createdAt|updatedAt|data\.[a-zA-Z0-9_-]{1,64})$/;
+// A file has no document body to sort by, only its server metadata.
+const FILE_ORDER_FIELDS = /^(id|createdAt|updatedAt)$/;
 const isScalar = (value) =>
   value === null ||
   typeof value === "string" ||
@@ -443,19 +450,21 @@ function filterJson(where) {
   if (predicates > 5) throw new TypeError("Use at most 5 filter predicates.");
   return JSON.stringify(where);
 }
-function queryOptions({ orderBy, direction } = {}) {
+function queryOptions({ orderBy, direction } = {}, fields = ORDER_FIELDS) {
   if (
     orderBy !== undefined &&
-    (typeof orderBy !== "string" || !ORDER_FIELDS.test(orderBy))
+    (typeof orderBy !== "string" || !fields.test(orderBy))
   )
     throw new TypeError(
-      "orderBy must be id, created_at, updated_at or data.<field>.",
+      fields === ORDER_FIELDS
+        ? "orderBy must be id, createdAt, updatedAt or data.<field>."
+        : "orderBy must be id, createdAt or updatedAt.",
     );
   if (direction !== undefined && direction !== "asc" && direction !== "desc")
     throw new TypeError("direction must be asc or desc.");
 }
-function listOptions(options = {}) {
-  queryOptions(options);
+function listOptions(options = {}, fields = ORDER_FIELDS) {
+  queryOptions(options, fields);
   if (
     options.limit !== undefined &&
     (!Number.isInteger(options.limit) ||
@@ -468,6 +477,47 @@ function listOptions(options = {}) {
     (typeof options.after !== "string" || options.after.length === 0)
   )
     throw new TypeError("after must be a non-empty cursor string.");
+}
+/** One page request, spelled the same way for documents and for files. */
+function pageParameters(options, fields) {
+  listOptions(options, fields);
+  const parameters = new URLSearchParams();
+  if (options.where !== undefined)
+    parameters.set("where", filterJson(options.where));
+  if (options.orderBy !== undefined) parameters.set("orderBy", options.orderBy);
+  if (options.direction !== undefined)
+    parameters.set("direction", options.direction);
+  parameters.set("limit", String(options.limit ?? 50));
+  if (options.after !== undefined) parameters.set("after", options.after);
+  return parameters;
+}
+// Walking every page is the same job whichever collection is being walked: keep
+// asking until the cursor runs out, and refuse to loop on a repeated one.
+async function* walk(readPage, key, options) {
+  let after;
+  const seen = new Set();
+  do {
+    const page = await readPage({ limit: 100, ...options, after });
+    if (page.nextCursor !== null && seen.has(page.nextCursor))
+      throw new NaruDataError(
+        200,
+        "Pagination cursor repeated.",
+        "INVALID_PAGINATION",
+      );
+    if (page.nextCursor !== null) seen.add(page.nextCursor);
+    for (const item of page[key]) {
+      if (options.signal?.aborted) {
+        const scope = requestScope(options);
+        try {
+          scope.check();
+        } finally {
+          scope.close();
+        }
+      }
+      yield item;
+    }
+    after = page.nextCursor ?? undefined;
+  } while (after);
 }
 const base64url = (bytes) =>
   btoa(String.fromCharCode(...bytes))
@@ -600,7 +650,9 @@ export function createDatabase({
       scope.close();
     }
   }
-  function client(getToken = () => undefined, unauthorized = () => {}) {
+  // Batching and the media library both require an owner token, so an
+  // anonymous client does not carry methods that could only ever be refused.
+  function client(getToken = () => undefined, unauthorized = () => {}, owner) {
     const send = async (url, method, body, options) => {
       try {
         return await request(url, method, body, getToken(), options);
@@ -609,65 +661,7 @@ export function createDatabase({
         throw error;
       }
     };
-    return {
-      batch(operations, options) {
-        if (
-          !Array.isArray(operations) ||
-          !operations.length ||
-          operations.length > 100
-        )
-          throw new TypeError("Batch requires 1–100 operations.");
-        const snapshot = operations.map((operation) => {
-          if (
-            !operation ||
-            typeof operation !== "object" ||
-            Array.isArray(operation)
-          )
-            throw new TypeError("Invalid batch operation.");
-          const collection = operation.collection;
-          segment(collection);
-          if (operation.type === "add") {
-            if (operation.id !== undefined)
-              throw new TypeError("add assigns the document ID itself.");
-            if (operation.ifVersion !== undefined)
-              throw new TypeError("add cannot take ifVersion.");
-            validateDocument(collection, operation.data);
-            return { type: "add", collection, data: operation.data };
-          }
-          segment(operation.id);
-          const base = { collection, id: operation.id };
-          if (operation.ifVersion !== undefined)
-            base.ifVersion = checkVersion(operation.ifVersion);
-          if (operation.type === "set") {
-            validateDocument(collection, operation.data);
-            return { ...base, type: "set", data: operation.data };
-          }
-          if (operation.type === "update") {
-            // A patch is a fragment, so whole-document schemas cannot judge it.
-            validateJson(operation.data);
-            checkPatch(operation.data);
-            return {
-              ...base,
-              type: "update",
-              data: operation.data,
-              ...(operation.unset === undefined
-                ? {}
-                : { unset: checkUnset(operation.unset) }),
-            };
-          }
-          if (operation.type !== "delete")
-            throw new TypeError(
-              "Batch operations must be add, set, update or delete.",
-            );
-          return { ...base, type: "delete" };
-        });
-        return send(
-          `${root}/_batch`,
-          "POST",
-          { operations: snapshot },
-          options,
-        );
-      },
+    const api = {
       collection(collectionName, { parse } = {}) {
         const path = `${root}/${segment(collectionName)}`;
         if (parse !== undefined && typeof parse !== "function")
@@ -697,30 +691,17 @@ export function createDatabase({
             throw error;
           }
         };
-        const query = ({ where, orderBy, direction }) => {
-          queryOptions({ orderBy, direction });
-          const parameters = new URLSearchParams();
-          if (where !== undefined) parameters.set("where", filterJson(where));
-          if (orderBy !== undefined) parameters.set("orderBy", orderBy);
-          if (direction !== undefined) parameters.set("direction", direction);
-          return parameters;
-        };
-        const list = (options = {}) => {
-          listOptions(options);
-          const parameters = query(options);
-          parameters.set("limit", String(options.limit ?? 50));
-          if (options.after !== undefined)
-            parameters.set("after", options.after);
-          return send(`${path}?${parameters}`, "GET", undefined, options).then(
-            (page) =>
-              parse === undefined
-                ? page
-                : {
-                    ...page,
-                    documents: page.documents.map(readDocument),
-                  },
+        const list = (options = {}) =>
+          send(
+            `${path}?${pageParameters(options, ORDER_FIELDS)}`,
+            "GET",
+            undefined,
+            options,
+          ).then((page) =>
+            parse === undefined
+              ? page
+              : { ...page, documents: page.documents.map(readDocument) },
           );
-        };
         return {
           async get(id, options) {
             return readDocument(
@@ -730,38 +711,23 @@ export function createDatabase({
           },
           list,
           async count(options = {}) {
-            queryOptions(options);
-            const parameters = query(options);
+            // Counting has no page to order, so accepting a sort would only
+            // promise something the answer cannot carry.
+            if (
+              options.orderBy !== undefined ||
+              options.direction !== undefined
+            )
+              throw new TypeError("count does not take orderBy or direction.");
+            const parameters = new URLSearchParams();
+            if (options.where !== undefined)
+              parameters.set("where", filterJson(options.where));
             parameters.set("count", "1");
             return (
               await send(`${path}?${parameters}`, "GET", undefined, options)
             ).count;
           },
-          async *all(options = {}) {
-            let after;
-            const seen = new Set();
-            do {
-              const page = await list({ limit: 100, ...options, after });
-              if (page.nextCursor !== null && seen.has(page.nextCursor))
-                throw new NaruDataError(
-                  200,
-                  "Pagination cursor repeated.",
-                  "INVALID_PAGINATION",
-                );
-              if (page.nextCursor !== null) seen.add(page.nextCursor);
-              for (const document of page.documents) {
-                if (options.signal?.aborted) {
-                  const scope = requestScope(options);
-                  try {
-                    scope.check();
-                  } finally {
-                    scope.close();
-                  }
-                }
-                yield document;
-              }
-              after = page.nextCursor ?? undefined;
-            } while (after);
+          all(options = {}) {
+            return walk(list, "documents", options);
           },
           add(data, options) {
             validateDocument(collectionName, data);
@@ -800,186 +766,301 @@ export function createDatabase({
           },
         };
       },
-      files: {
-        async get(id, options) {
+    };
+    // Everything below needs an owner token. An anonymous client that carried
+    // these would only ever be able to be refused by the server.
+    if (!owner) return api;
+    api.batch = (operations, options) => {
+      if (
+        !Array.isArray(operations) ||
+        !operations.length ||
+        operations.length > 100
+      )
+        throw new TypeError("Batch requires 1–100 operations.");
+      const snapshot = operations.map((operation) => {
+        if (
+          !operation ||
+          typeof operation !== "object" ||
+          Array.isArray(operation)
+        )
+          throw new TypeError("Invalid batch operation.");
+        const collection = operation.collection;
+        segment(collection);
+        if (operation.type === "add") {
+          if (operation.id !== undefined)
+            throw new TypeError("add assigns the document ID itself.");
+          if (operation.ifVersion !== undefined)
+            throw new TypeError("add cannot take ifVersion.");
+          validateDocument(collection, operation.data);
+          return { type: "add", collection, data: operation.data };
+        }
+        segment(operation.id);
+        const base = { collection, id: operation.id };
+        if (operation.ifVersion !== undefined)
+          base.ifVersion = checkVersion(operation.ifVersion);
+        if (operation.type === "set") {
+          validateDocument(collection, operation.data);
+          return { ...base, type: "set", data: operation.data };
+        }
+        if (operation.type === "update") {
+          // A patch is a fragment, so whole-document schemas cannot judge it.
+          validateJson(operation.data);
+          checkPatch(operation.data);
+          return {
+            ...base,
+            type: "update",
+            data: operation.data,
+            ...(operation.unset === undefined
+              ? {}
+              : { unset: checkUnset(operation.unset) }),
+          };
+        }
+        if (operation.type !== "delete")
+          throw new TypeError(
+            "Batch operations must be add, set, update or delete.",
+          );
+        return { ...base, type: "delete" };
+      });
+      return send(`${root}/_batch`, "POST", { operations: snapshot }, options);
+    };
+    const fileList = (options = {}) =>
+      send(
+        `${root}/_files?${pageParameters(options, FILE_ORDER_FIELDS)}`,
+        "GET",
+        undefined,
+        options,
+      );
+    api.files = {
+      async get(id, options) {
+        return (
+          await send(`${root}/_files/${segment(id)}`, "GET", undefined, options)
+        ).file;
+      },
+      list: fileList,
+      all(options = {}) {
+        return walk(fileList, "files", options);
+      },
+      async usage(options) {
+        // A quota readout is one aggregate row; asking for it never pages the
+        // library the way sharing the listing response used to.
+        return (await send(`${root}/_files?usage=1`, "GET", undefined, options))
+          .usage;
+      },
+      async upload(
+        source,
+        { image, original, onProgress, metadata = {}, ...options } = {},
+      ) {
+        if (!(source instanceof Blob))
+          throw new TypeError("upload requires a File or Blob.");
+        if (onProgress !== undefined && typeof onProgress !== "function")
+          throw new TypeError("onProgress must be a function.");
+        validateJson(metadata);
+        const settings = imageSettings(image, original);
+        // Shrinking precedes the limit check on purpose: a 40 MB photo the
+        // site would downscale for display anyway should upload, not fail.
+        // It also takes seconds with no bytes moving, so it is its own phase
+        // rather than a progress bar that claims to be uploading.
+        let progressError;
+        const file = await downscaleImage(
+          source,
+          settings,
+          onProgress &&
+            (() => {
+              // A throwing callback must fail the upload, not be swallowed by
+              // the resize and silently ship the original.
+              try {
+                onProgress({
+                  loaded: 0,
+                  total: source.size,
+                  phase: "resizing",
+                });
+              } catch (error) {
+                progressError = error;
+              }
+            }),
+        );
+        if (progressError) throw progressError;
+        if (!file.size || file.size > 25 * 1024 * 1024)
+          throw new TypeError("File must be between 1 byte and 25 MiB.");
+        const scope = requestScope({ timeoutMs: 120000, ...options });
+        const transferOptions = { signal: scope.signal, timeoutMs: 0 };
+        let authorization;
+        try {
+          scope.check();
+          authorization = await send(
+            `${root}/_files`,
+            "POST",
+            {
+              name:
+                typeof file.name === "string" && file.name
+                  ? file.name
+                  : "upload",
+              contentType: file.type || "application/octet-stream",
+              size: file.size,
+              metadata,
+            },
+            transferOptions,
+          );
+          scope.check();
+          let response;
+          if (onProgress && typeof XMLHttpRequest !== "undefined") {
+            response = await new Promise((resolve, reject) => {
+              const xhr = new XMLHttpRequest();
+              const abort = () => {
+                xhr.abort();
+                finish(reject, scope.signal.reason);
+              };
+              const finish = (settle, value) => {
+                scope.signal.removeEventListener("abort", abort);
+                xhr.onload =
+                  xhr.onerror =
+                  xhr.onabort =
+                  xhr.upload.onprogress =
+                    null;
+                settle(value);
+              };
+              try {
+                xhr.open(authorization.method, authorization.uploadUrl);
+                for (const [key, value] of Object.entries(
+                  authorization.headers,
+                ))
+                  xhr.setRequestHeader(key, value);
+                xhr.upload.onprogress = (event) => {
+                  try {
+                    onProgress({
+                      loaded: event.loaded,
+                      total: event.lengthComputable ? event.total : file.size,
+                      phase: "uploading",
+                    });
+                  } catch (error) {
+                    finish(reject, error);
+                    xhr.abort();
+                  }
+                };
+                xhr.onload = () =>
+                  finish(resolve, {
+                    ok: xhr.status >= 200 && xhr.status < 300,
+                    status: xhr.status,
+                    url: xhr.responseURL,
+                  });
+                xhr.onerror = () =>
+                  finish(reject, new TypeError("Network request failed."));
+                xhr.onabort = () =>
+                  finish(
+                    reject,
+                    new DOMException("Upload aborted.", "AbortError"),
+                  );
+                scope.signal.addEventListener("abort", abort, { once: true });
+                scope.check();
+                xhr.send(file);
+              } catch (error) {
+                finish(reject, error);
+              }
+            });
+          } else {
+            response = await fetch(authorization.uploadUrl, {
+              method: authorization.method,
+              headers: authorization.headers,
+              credentials: "omit",
+              redirect: "error",
+              body: file,
+              signal: scope.signal,
+            });
+          }
+          scope.check();
+          // XMLHttpRequest follows redirects silently, where the fetch path
+          // refuses them outright. Bytes that ended up on another host did not
+          // go where the control plane signed for them to go.
+          if (
+            response.url &&
+            new URL(response.url).origin !==
+              new URL(authorization.uploadUrl).origin
+          )
+            throw new NaruDataError(
+              0,
+              "File upload was redirected off its authorized origin.",
+              "UPLOAD_REDIRECTED",
+            );
+          if (!response.ok)
+            throw new NaruDataError(
+              response.status,
+              `File upload failed (HTTP ${response.status}).`,
+            );
           return (
             await send(
-              `${root}/_files/${segment(id)}`,
-              "GET",
-              undefined,
-              options,
+              `${root}/_files/${segment(authorization.file.id)}`,
+              "PUT",
+              {},
+              transferOptions,
             )
           ).file;
-        },
-        async list(options) {
-          return (await send(`${root}/_files`, "GET", undefined, options))
-            .files;
-        },
-        async usage(options) {
-          return (await send(`${root}/_files`, "GET", undefined, options))
-            .usage;
-        },
-        async upload(
-          source,
-          { image, original, onProgress, metadata = {}, ...options } = {},
-        ) {
-          if (!(source instanceof Blob))
-            throw new TypeError("upload requires a File or Blob.");
-          if (onProgress !== undefined && typeof onProgress !== "function")
-            throw new TypeError("onProgress must be a function.");
-          validateJson(metadata);
-          const settings = imageSettings(image, original);
-          // Shrinking precedes the limit check on purpose: a 40 MB photo the
-          // site would downscale for display anyway should upload, not fail.
-          // onProgress covers the transfer only, so callers see no movement
-          // while this runs.
-          const file = await downscaleImage(source, settings);
-          if (!file.size || file.size > 25 * 1024 * 1024)
-            throw new TypeError("File must be between 1 byte and 25 MiB.");
-          const scope = requestScope({ timeoutMs: 120000, ...options });
-          const transferOptions = { signal: scope.signal, timeoutMs: 0 };
-          let authorization;
+        } catch (cause) {
+          let error = cause;
           try {
             scope.check();
-            authorization = await send(
-              `${root}/_files`,
-              "POST",
-              {
-                name:
-                  typeof file.name === "string" && file.name
-                    ? file.name
-                    : "upload",
-                contentType: file.type || "application/octet-stream",
-                size: file.size,
-                metadata,
-              },
-              transferOptions,
-            );
-            scope.check();
-            let response;
-            if (onProgress && typeof XMLHttpRequest !== "undefined") {
-              response = await new Promise((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                const abort = () => {
-                  xhr.abort();
-                  finish(reject, scope.signal.reason);
-                };
-                const finish = (settle, value) => {
-                  scope.signal.removeEventListener("abort", abort);
-                  xhr.onload =
-                    xhr.onerror =
-                    xhr.onabort =
-                    xhr.upload.onprogress =
-                      null;
-                  settle(value);
-                };
-                try {
-                  xhr.open(authorization.method, authorization.uploadUrl);
-                  for (const [key, value] of Object.entries(
-                    authorization.headers,
-                  ))
-                    xhr.setRequestHeader(key, value);
-                  xhr.upload.onprogress = (event) => {
-                    try {
-                      onProgress({
-                        loaded: event.loaded,
-                        total: event.lengthComputable ? event.total : file.size,
-                      });
-                    } catch (error) {
-                      finish(reject, error);
-                      xhr.abort();
-                    }
-                  };
-                  xhr.onload = () =>
-                    finish(resolve, {
-                      ok: xhr.status >= 200 && xhr.status < 300,
-                      status: xhr.status,
-                    });
-                  xhr.onerror = () =>
-                    finish(reject, new TypeError("Network request failed."));
-                  xhr.onabort = () =>
-                    finish(
-                      reject,
-                      new DOMException("Upload aborted.", "AbortError"),
-                    );
-                  scope.signal.addEventListener("abort", abort, { once: true });
-                  scope.check();
-                  xhr.send(file);
-                } catch (error) {
-                  finish(reject, error);
-                }
-              });
-            } else {
-              response = await fetch(authorization.uploadUrl, {
-                method: authorization.method,
-                headers: authorization.headers,
-                credentials: "omit",
-                redirect: "error",
-                body: file,
-                signal: scope.signal,
-              });
-            }
-            scope.check();
-            if (!response.ok)
-              throw new NaruDataError(
-                response.status,
-                `File upload failed (HTTP ${response.status}).`,
-              );
-            return (
-              await send(
-                `${root}/_files/${segment(authorization.file.id)}`,
-                "PUT",
-                {},
-                transferOptions,
-              )
-            ).file;
-          } catch (cause) {
-            let error = cause;
-            try {
-              scope.check();
-            } catch (aborted) {
-              error = aborted;
-            }
-            if (!(error instanceof NaruDataError)) {
-              error = new NaruDataError(
-                0,
-                "File upload failed. Check your connection before retrying.",
-              );
-              error.cause = cause;
-            }
-            if (authorization) {
-              error.fileId = authorization.file.id;
-              // Cleanup gets its own bounded request, independent of cancellation.
-              try {
-                await send(
-                  `${root}/_files/${segment(error.fileId)}`,
-                  "DELETE",
-                  undefined,
-                  { timeoutMs: 10000 },
-                );
-              } catch (cleanupError) {
-                error.cleanupError = cleanupError;
-              }
-            }
-            throw error;
-          } finally {
-            scope.close();
+          } catch (aborted) {
+            error = aborted;
           }
-        },
-        delete(id, options) {
-          return send(
-            `${root}/_files/${segment(id)}`,
-            "DELETE",
-            undefined,
+          if (!(error instanceof NaruDataError)) {
+            error = new NaruDataError(
+              0,
+              "File upload failed. Check your connection before retrying.",
+            );
+            error.cause = cause;
+          }
+          if (authorization) {
+            error.fileId = authorization.file.id;
+            // Cleanup gets its own bounded request, independent of cancellation.
+            try {
+              await send(
+                `${root}/_files/${segment(error.fileId)}`,
+                "DELETE",
+                undefined,
+                { timeoutMs: 10000 },
+              );
+            } catch (cleanupError) {
+              error.cleanupError = cleanupError;
+            }
+          }
+          throw error;
+        } finally {
+          scope.close();
+        }
+      },
+      async update(id, patch, { ifVersion, unset, ...options } = {}) {
+        // Only the metadata is mutable: the bytes, their type and their size
+        // were fixed when the upload was authorized and verified.
+        validateJson(patch);
+        checkPatch(patch);
+        return (
+          await send(
+            `${root}/_files/${segment(id)}${condition(ifVersion)}`,
+            "PATCH",
+            {
+              data: patch,
+              ...(unset === undefined ? {} : { unset: checkUnset(unset) }),
+            },
             options,
-          );
-        },
+          )
+        ).file;
+      },
+      delete(id, options) {
+        return send(
+          `${root}/_files/${segment(id)}`,
+          "DELETE",
+          undefined,
+          options,
+        );
       },
     };
+    return api;
   }
   // Each callback has an independent tab-scoped session. No localStorage or cookies.
-  const sessionKey = () =>
-    `${storageKey}:session:${window.location.origin}${window.location.pathname}`;
+  const callbackHref = () => window.location.origin + window.location.pathname;
+  const sessionKey = () => `${storageKey}:session:${callbackHref()}`;
+  // The transaction is keyed by the callback that will read it back, not by the
+  // page that started it: two callbacks on one origin sign in independently.
+  const pendingKey = (redirectUri) => `${storageKey}:pending:${redirectUri}`;
   let activeOwner = null;
   let completing = null;
   function ownerClient(saved, key) {
@@ -1008,16 +1089,20 @@ export function createDatabase({
       }
     }
     const owner = {
-      ...client(() => {
-        if (!token || Date.now() >= expiresAt) {
-          clear();
-          throw new NaruDataError(
-            401,
-            "Owner session expired or signed out. Sign in again.",
-          );
-        }
-        return token;
-      }, clear),
+      ...client(
+        () => {
+          if (!token || Date.now() >= expiresAt) {
+            clear();
+            throw new NaruDataError(
+              401,
+              "Owner session expired or signed out. Sign in again.",
+            );
+          }
+          return token;
+        },
+        clear,
+        true,
+      ),
       expiresAt,
       async signOut(options) {
         const current = token;
@@ -1047,7 +1132,7 @@ export function createDatabase({
     if (
       !saved ||
       !/^[A-Za-z0-9_-]{43}$/.test(saved.accessToken) ||
-      saved.redirectUri !== window.location.origin + window.location.pathname ||
+      saved.redirectUri !== callbackHref() ||
       !Number.isFinite(saved.expiresAt) ||
       saved.expiresAt <= Date.now() ||
       saved.expiresAt > Date.now() + 24 * 60 * 60 * 1000 + 60000
@@ -1066,7 +1151,7 @@ export function createDatabase({
     ...client(),
     async signInAsOwner({
       clientId,
-      redirectUri = window.location.origin + window.location.pathname,
+      redirectUri = callbackHref(),
       collections,
       ...options
     }) {
@@ -1139,7 +1224,7 @@ export function createDatabase({
         scope.check();
         // Persist the short-lived PKCE transaction across the approval redirect.
         window.sessionStorage.setItem(
-          storageKey,
+          pendingKey(callback.href),
           JSON.stringify({
             clientId,
             redirectUri: callback.href,
@@ -1185,9 +1270,10 @@ export function createDatabase({
       error = url.searchParams.get("error");
     for (const key of ["code", "state", "error"]) url.searchParams.delete(key);
     // Remove the authorization response before fetching or rendering user content.
-    window.history.replaceState(null, "", url.href);
-    const saved = window.sessionStorage.getItem(storageKey);
-    window.sessionStorage.removeItem(storageKey);
+    window.history.replaceState(window.history.state, "", url.href);
+    const key = pendingKey(callbackHref());
+    const saved = window.sessionStorage.getItem(key);
+    window.sessionStorage.removeItem(key);
     let pending;
     try {
       pending = JSON.parse(saved);
@@ -1197,7 +1283,7 @@ export function createDatabase({
     if (
       !pending ||
       pending.state !== state ||
-      pending.redirectUri !== url.href ||
+      pending.redirectUri !== callbackHref() ||
       !Number.isFinite(pending.startedAt) ||
       Date.now() - pending.startedAt > 10 * 60 * 1000 ||
       pending.startedAt > Date.now()
@@ -1237,9 +1323,9 @@ export function createDatabase({
       expiresAt: result.expiresAt,
       redirectUri: pending.redirectUri,
     };
-    const key = sessionKey();
+    const session = sessionKey();
     try {
-      window.sessionStorage.setItem(key, JSON.stringify(credentials));
+      window.sessionStorage.setItem(session, JSON.stringify(credentials));
     } catch (error) {
       // If persistence fails, do not leave a newly issued token active unnecessarily.
       try {
@@ -1252,6 +1338,6 @@ export function createDatabase({
       } catch {}
       throw error;
     }
-    return (activeOwner = ownerClient(credentials, key));
+    return (activeOwner = ownerClient(credentials, session));
   }
 }

@@ -69,6 +69,9 @@ export async function dataRequest(
       body,
       where: parseWhereQuery(url.searchParams.get("where")),
       count: url.searchParams.get("count") === "1",
+      // The media listing and its quota readout are separate queries, so a
+      // caller that only wants the quota never pays to page the library.
+      usage: url.searchParams.get("usage") === "1",
       ifVersion:
         ifVersion === null
           ? undefined

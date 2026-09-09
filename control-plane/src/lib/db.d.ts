@@ -286,6 +286,7 @@ export interface SiteDataFiles {
   size_bytes: number;
   status: Generated<string>;
   metadata: Generated<unknown>;
+  version: Generated<number>;
   created_at: Generated<Timestamp>;
   updated_at: Generated<Timestamp>;
 }

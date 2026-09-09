@@ -32,6 +32,7 @@ integration("SDK and data API contract", () => {
   let origin: string;
   let accessToken: string;
   let owner: OwnerDatabase;
+  let ownerId: number;
   let publicDb: ReturnType<typeof createDatabase>;
   const nativeFetch = globalThis.fetch;
   const oldWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
@@ -137,6 +138,7 @@ integration("SDK and data API contract", () => {
       origin,
     );
     accessToken = token.accessToken;
+    ownerId = userId;
     const storage = new Map<string, string>([
       [
         `naru:owner:${origin}:alice:session:${redirectUri}`,
@@ -187,13 +189,18 @@ integration("SDK and data API contract", () => {
       nested: { value: null },
       tags: [1, true],
     });
-    expect(added).toEqual({ id: expect.any(String), version: 1 });
+    expect(added).toEqual({
+      id: expect.any(String),
+      version: 1,
+      createdAt: expect.any(String),
+      updatedAt: expect.any(String),
+    });
+    // A write reports the very stamps the read comes back with, so a caller
+    // rendering what it just saved never has to invent one.
     const first = await posts.get(added.id);
     expect(first).toEqual({
       ...added,
       data: { title: "한글", nested: { value: null }, tags: [1, true] },
-      created_at: expect.any(String),
-      updated_at: expect.any(String),
     });
     expect(
       await posts.set(
@@ -201,9 +208,14 @@ integration("SDK and data API contract", () => {
         { replaced: true },
         { ifVersion: first.version },
       ),
-    ).toEqual({ id: added.id, version: 2 });
+    ).toEqual({
+      id: added.id,
+      version: 2,
+      createdAt: first.createdAt,
+      updatedAt: expect.any(String),
+    });
     const replaced = await posts.get(added.id);
-    expect(replaced.created_at).toBe(first.created_at);
+    expect(replaced.createdAt).toBe(first.createdAt);
     expect(replaced.data).toEqual({ replaced: true });
     await expect(
       posts.set(added.id, null, { ifVersion: 1 }),
@@ -277,9 +289,14 @@ integration("SDK and data API contract", () => {
       { type: "add", collection: "private", data: { secret: true } },
       { type: "delete", collection: "atomic", id: "missing" },
     ]);
+    const stamps = {
+      version: 1,
+      createdAt: expect.any(String),
+      updatedAt: expect.any(String),
+    };
     expect(result.results).toEqual([
-      { id: "one", version: 1 },
-      { id: expect.any(String), version: 1 },
+      { id: "one", ...stamps },
+      { id: expect.any(String), ...stamps },
       { success: true },
     ]);
     const privateId = result.results[1].id;
@@ -333,6 +350,70 @@ integration("SDK and data API contract", () => {
     await expect(iterator.next()).rejects.toMatchObject(failure);
     expect((await raw.get("b")).data).toEqual({ title: 42 });
     expect(await parsed.count()).toBe(2);
+  });
+
+  test("the media library pages, filters on metadata and patches it", async () => {
+    // Uploads need object storage; everything after the bytes land is database
+    // work, and that is what the reshaped listing and patch endpoints do.
+    for (let index = 1; index <= 3; index++)
+      await sql`insert into site_data_files
+        (id, user_id, object_key, original_name, content_type, size_bytes, status, metadata, created_at)
+        values (${`file_${index}`}, ${ownerId}, ${`${ownerId}/file_${index}.png`}, ${`file_${index}.png`},
+          'image/png', ${index * 100}, 'ready', ${JSON.stringify({
+            postId: index === 3 ? "other" : "hello",
+          })}::jsonb, now() + ${sql.raw(`interval '${index} seconds'`)})`.execute(
+        db,
+      );
+    const usage = await owner.files.usage();
+    expect(usage).toEqual({
+      bytes: 600,
+      count: 3,
+      pending: 0,
+      maxBytes: expect.any(Number),
+    });
+    // Newest first by default, and a page carries a cursor rather than the lot.
+    const first = await owner.files.list({ limit: 2 });
+    expect(first.files.map((file) => file.id)).toEqual(["file_3", "file_2"]);
+    expect(first.nextCursor).toEqual(expect.any(String));
+    const second = await owner.files.list({
+      limit: 2,
+      after: first.nextCursor!,
+    });
+    expect(second.files.map((file) => file.id)).toEqual(["file_1"]);
+    expect(second.nextCursor).toBeNull();
+    // The server does the finding, so a caller never walks the library to
+    // discover which images belong to one post.
+    const matched: string[] = [];
+    for await (const file of owner.files.all({ where: { postId: "hello" } }))
+      matched.push(file.id);
+    expect(matched).toEqual(["file_2", "file_1"]);
+    await expect(
+      owner.files.list({
+        where: { postId: "other" },
+        after: first.nextCursor!,
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+    const moved = await owner.files.update(
+      "file_1",
+      { postId: "moved", altText: "비둘기" },
+      { ifVersion: 1 },
+    );
+    expect(moved).toMatchObject({
+      id: "file_1",
+      version: 2,
+      metadata: { postId: "moved", altText: "비둘기" },
+    });
+    await expect(
+      owner.files.update("file_1", { postId: "again" }, { ifVersion: 1 }),
+    ).rejects.toMatchObject({ status: 409, code: "VERSION_CONFLICT" });
+    expect(
+      (await owner.files.update("file_1", {}, { unset: ["altText"] })).metadata,
+    ).toEqual({ postId: "moved" });
+    await expect(
+      publicDb.collection("crud").list({ orderBy: "createdAt" }),
+    ).resolves.toBeDefined();
+    // The anonymous client has no media surface at all to misuse.
+    expect((publicDb as { files?: unknown }).files).toBeUndefined();
   });
 
   test("SDK signout revokes the real owner token", async () => {

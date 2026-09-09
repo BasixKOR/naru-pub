@@ -223,7 +223,7 @@ integration("indexed filtered queries", () => {
     ).rejects.toMatchObject({ status: 403 });
   });
   test("range filters page with a cursor bound to their bounds", async () => {
-    const sort = { orderBy: "created_at", direction: "asc" };
+    const sort = { orderBy: "createdAt", direction: "asc" };
     const where = { count: { gte: 1, lte: 2 } };
     const first = await call("GET", ["posts"], { ...sort, where, limit: 1 });
     expect(first.documents!.map((d) => d.id)).toEqual(["a"]);
@@ -246,7 +246,7 @@ integration("indexed filtered queries", () => {
       ).rejects.toMatchObject({ status: 400 });
   });
   test("filtered pagination binds query fingerprint and accepts reordered equivalent filters", async () => {
-    const sort = { orderBy: "created_at", direction: "desc" };
+    const sort = { orderBy: "createdAt", direction: "desc" };
     const first = await call("GET", ["posts"], {
       ...sort,
       where: { category: "일상", active: true },

@@ -15,8 +15,8 @@
     id,
     data: null,
     version: 1,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
   });
   const output = document.querySelector("#results");
   const reloadKey = "naru-sdk-fixture-reload";
@@ -86,12 +86,14 @@
           nextCursor: null,
           id: "one",
           version: 1,
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
         });
       };
       await owner.collection("posts").set("one", { title: "브라우저 테스트" });
       await db.collection("posts").list({
         where: { category: "일상" },
-        orderBy: "created_at",
+        orderBy: "createdAt",
         direction: "desc",
       });
       check(
@@ -214,9 +216,10 @@
         size: 3,
         status: "ready",
         metadata: {},
+        version: 1,
         url: `${location.origin}/upload`,
-        created_at: "2026-01-01T00:00:00Z",
-        updated_at: "2026-01-01T00:00:00Z",
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
       };
       for (const cancel of [false, true]) {
         const uploadController = new AbortController();

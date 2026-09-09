@@ -188,7 +188,7 @@ export default function DatabaseDocs() {
                 <code>site</code>에는 전체 도메인이 아니라 나루 로그인 이름을
                 넣으세요. 공개 작업에는 API 키가 필요 없습니다.
               </p>
-              <Code language="html">{`<script type="module">\n  import { createDatabase } from "https://naru.pub/sdk/1.0.0/naru-data.js";\n  const db = createDatabase({ site: "내-로그인-이름" });\n  const posts = db.collection("posts");\n  const sort = { orderBy: "created_at", direction: "desc" };\n  const page = await posts.list({ ...sort, limit: 20 });\n  for (const document of page.documents) {\n    console.log(document.id, document.data, document.created_at);\n  }\n  if (page.nextCursor) {\n    const next = await posts.list({ ...sort, limit: 20, after: page.nextCursor });\n  }\n  const post = await posts.get("hello");\n  await db.collection("guestbook").add({\n    name: "방문자", message: "잘 읽었습니다!"\n  });\n</script>`}</Code>
+              <Code language="html">{`<script type="module">\n  import { createDatabase } from "https://naru.pub/sdk/1.0.0/naru-data.js";\n  const db = createDatabase({ site: "내-로그인-이름" });\n  const posts = db.collection("posts");\n  const sort = { orderBy: "createdAt", direction: "desc" };\n  const page = await posts.list({ ...sort, limit: 20 });\n  for (const document of page.documents) {\n    console.log(document.id, document.data, document.createdAt);\n  }\n  if (page.nextCursor) {\n    const next = await posts.list({ ...sort, limit: 20, after: page.nextCursor });\n  }\n  const post = await posts.get("hello");\n  await db.collection("guestbook").add({\n    name: "방문자", message: "잘 읽었습니다!"\n  });\n</script>`}</Code>
               <p>
                 현재 제공 버전은 <strong>1.0.0</strong>이며 이 버전 안에서 계속
                 개선합니다. 버전 없는 URL은 제공하지 않습니다. 제어판 주소는
@@ -213,7 +213,7 @@ export default function DatabaseDocs() {
                     {[
                       [
                         "get(id)",
-                        "문서 한 개 → { id, data, created_at, updated_at, version }. 없으면 404",
+                        "문서 한 개 → { id, data, version, createdAt, updatedAt }. 없으면 404",
                       ],
                       [
                         "list({ limit, after, orderBy, direction, where })",
@@ -261,7 +261,7 @@ export default function DatabaseDocs() {
               </p>
               <Code>{`const query = {
   where: { category: "일상" },
-  orderBy: "created_at",
+  orderBy: "createdAt",
   direction: "desc",
   limit: 20,
 };
@@ -331,11 +331,11 @@ const mine = await db.collection("posts").list({
               <h3 className="font-bold">정렬과 페이지 이동</h3>
               <p>
                 기본 정렬은 ID 오름차순입니다. <code>orderBy</code>는{" "}
-                <code>id</code>, <code>created_at</code>(서버 생성 시각),{" "}
-                <code>updated_at</code>(서버 수정 시각), 그리고 문서의 최상위
+                <code>id</code>, <code>createdAt</code>(서버 생성 시각),{" "}
+                <code>updatedAt</code>(서버 수정 시각), 그리고 문서의 최상위
                 필드를 뜻하는 <code>data.필드이름</code> 중 하나이며,{" "}
                 <code>direction</code>은 <code>asc</code>(기본값) 또는{" "}
-                <code>desc</code>입니다. 방명록은 <code>created_at</code>{" "}
+                <code>desc</code>입니다. 방명록은 <code>createdAt</code>{" "}
                 내림차순으로 최신 글부터 표시합니다. 글쓴이가 날짜를 직접 정하는
                 블로그라면 <code>orderBy: &quot;data.date&quot;</code>로
                 정렬해야 나중에 쓴 지난 날짜 글이 맨 위로 올라오지 않습니다.
@@ -361,11 +361,13 @@ const mine = await db.collection("posts").list({
                 빠지거나 다시 나타날 수 있습니다.
               </p>
               <p>
-                <code>created_at</code>은 처음 저장할 때 서버가 정하고
-                덮어쓰기에도 유지됩니다. <code>updated_at</code>은 저장할 때
+                <code>createdAt</code>은 처음 저장할 때 서버가 정하고
+                덮어쓰기에도 유지됩니다. <code>updatedAt</code>은 저장할 때
                 갱신됩니다. 기존 문서는 생성 시각을 기록하지 않았으므로
                 마이그레이션 당시의 수정 시각으로 채워집니다. JSON에 같은 이름의
-                필드를 넣어도 서버 시각을 변경할 수 없습니다.
+                필드를 넣어도 서버 시각을 변경할 수 없습니다. 쓰기도 방금 찍힌
+                두 시각을 함께 돌려주므로, 저장한 것을 바로 화면에 그릴 때
+                브라우저 시계로 시각을 지어낼 필요가 없습니다.
               </p>
               <Code>{`// 커서를 직접 다루지 않고 전부 순회합니다.
 for await (const document of db.collection("posts").all({
@@ -499,8 +501,8 @@ try {
                 관리자 클라이언트의 <code>owner.files.upload(file)</code>은
                 브라우저에서 Naru Media로 파일을 직접 올리고, 확인된 공개 URL과
                 파일 ID를 반환합니다. 문서에는 base64 대신 이 URL이나 ID를
-                저장하세요. 파일 하나는 25 MiB, 사이트당 250 MiB까지
-                저장할 수 있습니다. HTML과 SVG는 허용하지 않습니다.
+                저장하세요. 파일 하나는 25 MiB, 사이트당 250 MiB까지 저장할 수
+                있습니다. HTML과 SVG는 허용하지 않습니다.
               </p>
               <Code>{`const image = await owner.files.upload(fileInput.files[0], {
   signal: abortController.signal,

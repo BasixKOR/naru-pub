@@ -6,6 +6,12 @@ import { executeBatch, executeData } from "../service";
 import { jsonBody, MAX_DOCUMENT_BYTES } from "../validation";
 import { setupTestDatabase, teardownTestDatabase } from "./test-database";
 
+/** Every accepted write reports its version and the stamps it produced. */
+const writeStamps = (version: number) => ({
+  version,
+  createdAt: expect.any(Date),
+  updatedAt: expect.any(Date),
+});
 // Opt in against a dedicated disposable database, never the developer's app DB.
 const integration =
   process.env.NARU_DATA_TEST === "1" ? describe : describe.skip;
@@ -158,14 +164,14 @@ integration("site database integration", () => {
       { data: { title: "first", body: "text", legacy: "drop", keep: [1, 2] } },
       true,
     );
-    expect(created).toEqual({ id: "one", version: 1 });
+    expect(created).toEqual({ id: "one", ...writeStamps(1) });
     const patched = await call(
       "PATCH",
       ["notes", "one"],
       { data: { title: "second", added: null }, unset: ["legacy"] },
       true,
     );
-    expect(patched).toEqual({ id: "one", version: 2 });
+    expect(patched).toEqual({ id: "one", ...writeStamps(2) });
     const document = (await call("GET", ["notes", "one"])).document!;
     // A null in the patch stores null; removal is only ever explicit.
     expect(document.data).toEqual({
@@ -278,8 +284,8 @@ integration("site database integration", () => {
       { type: "set", collection: "batched", id: "two", data: { title: "c" } },
     );
     expect(applied.results).toEqual([
-      { id: "one", version: 2 },
-      { id: "two", version: 1 },
+      { id: "one", ...writeStamps(2) },
+      { id: "two", ...writeStamps(1) },
     ]);
     expect((await call("GET", ["batched", "one"])).document!.data).toEqual({
       title: "b",
@@ -325,8 +331,8 @@ integration("site database integration", () => {
       { type: "add", collection: "batched", data: { title: "h" } },
     );
     expect(created.results).toEqual([
-      { id: expect.stringMatching(/^[0-9a-f-]{36}$/), version: 1 },
-      { id: expect.stringMatching(/^[0-9a-f-]{36}$/), version: 1 },
+      { id: expect.stringMatching(/^[0-9a-f-]{36}$/), ...writeStamps(1) },
+      { id: expect.stringMatching(/^[0-9a-f-]{36}$/), ...writeStamps(1) },
     ]);
     expect(created.results[0].id).not.toBe(created.results[1].id);
     expect(

@@ -114,7 +114,7 @@ test("post list paginates and renders hostile input as text", async () => {
   await app.fire("more", "click");
   assert.equal(requests[1].after, "a");
   assert.ok(
-    requests.every((r) => r.orderBy === "created_at" && r.direction === "desc"),
+    requests.every((r) => r.orderBy === "createdAt" && r.direction === "desc"),
   );
   assert.equal(app.$("entries").children.length, 2);
   assert.equal(app.$("more").hidden, true);

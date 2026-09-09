@@ -48,19 +48,28 @@ export interface Document<T = Json> {
   /** 저장한 JSON 또는 parse의 반환값입니다. parse 없이 지정한 T는 검증되지 않습니다. */
   data: T;
   /** 서버가 매기는 ISO 8601 생성 시각이며, `set`으로 교체해도 유지됩니다. */
-  created_at: string;
+  createdAt: string;
   /** 가장 최근에 반영된 쓰기의 ISO 8601 시각입니다. */
-  updated_at: string;
+  updatedAt: string;
   /** 쓰기가 반영될 때마다 증가합니다. `ifVersion`으로 되돌려 주세요. */
   version: number;
 }
 
-/** 쓰기가 성공했을 때 돌아오는 값입니다. */
+/** 쓰기가 성공했을 때 돌아오는 값입니다.
+ *
+ * 서버가 실제로 찍은 시각이 함께 옵니다. 방금 저장한 것을 곧바로 화면에 그릴
+ * 때 브라우저 시계로 시각을 지어낼 필요가 없고, 목록에 이미 있는 서버 시각과
+ * 같은 기준으로 정렬됩니다. */
 export interface Written {
   /** 직접 정한 문서 ID이거나, `add`가 매긴 UUID입니다. */
   id: string;
   /** 이 쓰기가 만든 버전입니다. 새로 만든 문서는 `1`입니다. */
   version: number;
+  /** 서버가 매긴 ISO 8601 생성 시각입니다. `set`으로 교체해도 유지됩니다. */
+  createdAt: string;
+  /** 이 쓰기가 반영된 ISO 8601 시각입니다. 새로 만든 문서는 `createdAt`과
+   * 같습니다. */
+  updatedAt: string;
 }
 
 /** 요청 취소와 시간 제한입니다. 취소나 시간 초과 뒤에도 서버에 쓰기가
@@ -101,8 +110,8 @@ export class NaruDataError extends Error {
   status: number;
   /** 프로그램이 판단할 수 있는 고정된 실패 코드입니다. `VERSION_CONFLICT`,
    * `OWNER_SESSION_EXPIRED`, `COLLECTION_NOT_AUTHORIZED`,
-   * `UNREGISTERED_REDIRECT_URI` 등이 있고, 분류되지 않은 실패는
-   * `REQUEST_FAILED`입니다. */
+   * `UNREGISTERED_REDIRECT_URI`, `UPLOAD_REDIRECTED` 등이 있고, 분류되지 않은
+   * 실패는 `REQUEST_FAILED`입니다. */
   code: string;
   /** 원인이 된 네트워크 오류나 파싱 오류입니다. */
   cause?: unknown;
@@ -146,8 +155,8 @@ export interface RangeFilter<T extends string | number = string | number> {
  * ```js
  * // 올해 공개된 글을 최신순으로.
  * await db.collection("posts").list({
- *   where: { published: true, created_at: { gte: "2026-01-01" } },
- *   orderBy: "created_at",
+ *   where: { published: true, createdAt: { gte: "2026-01-01" } },
+ *   orderBy: "createdAt",
  *   direction: "desc",
  * });
  * ```
@@ -187,14 +196,14 @@ export type FilterValue<T> =
 /** `data.<필드>`는 문서의 최상위 필드로 정렬합니다. 값이 없는 필드는 JSON
  * null로 취급되어 문자열보다 아래에, 문자열은 수보다 아래에 놓입니다.
  *
- * `id`, `created_at`, `updated_at`은 서버 메타데이터로 정렬합니다. 시각이 같으면
- * 같은 방향의 ID 순으로 갈립니다. 목록에는 바뀌지 않는 `created_at`을
+ * `id`, `createdAt`, `updatedAt`은 서버 메타데이터로 정렬합니다. 시각이 같으면
+ * 같은 방향의 ID 순으로 갈립니다. 목록에는 바뀌지 않는 `createdAt`을
  * 권합니다. 넘겨보는 도중에 값이 바뀌는 필드로 정렬하면 문서가 빠지거나 두 번
  * 나올 수 있습니다. */
 export type OrderBy<T = Json> =
   | "id"
-  | "created_at"
-  | "updated_at"
+  | "createdAt"
+  | "updatedAt"
   | `data.${FieldNames<T>}`;
 
 /** `list`, `all`, `count`가 함께 쓰는 거르기와 정렬 옵션입니다. */
@@ -262,7 +271,7 @@ export interface Collection<T = Json> {
    * 반복자가 그 쪽에 닿을 때 비로소 요청하므로, 중간에 멈추면 요청도 멈춥니다.
    *
    * ```js
-   * for await (const post of posts.all({ orderBy: "created_at" })) {
+   * for await (const post of posts.all({ orderBy: "createdAt" })) {
    *   if (post.data.title === needle) return post;
    * }
    * ```
@@ -270,7 +279,10 @@ export interface Collection<T = Json> {
   all(
     options?: Omit<ListOptions<T>, "after">,
   ): AsyncIterableIterator<Document<T>>;
-  /** 조건에 맞는 문서 수를 서버가 쪽 나눔 없이 세어 돌려줍니다. */
+  /** 조건에 맞는 문서 수를 서버가 쪽 나눔 없이 세어 돌려줍니다.
+   *
+   * 셀 뿐이라 정렬할 쪽이 없습니다. `orderBy`나 `direction`을 넘기면 요청 전에
+   * TypeError로 거부합니다. */
   count(options?: RequestOptions & { where?: Filter<T> }): Promise<number>;
   /**
    * 서버가 매긴 UUID로 문서를 새로 만듭니다.
@@ -283,7 +295,7 @@ export interface Collection<T = Json> {
    * 문서 전체를 바꾸고, 없으면 새로 만듭니다.
    *
    * 합치기가 아니라 교체입니다. `data`에 없는 필드는 사라집니다. 문서의 일부만
-   * 바꾸려면 `Collection.update`를 쓰세요. 교체해도 `created_at`은 남습니다.
+   * 바꾸려면 `Collection.update`를 쓰세요. 교체해도 `createdAt`은 남습니다.
    */
   set(
     id: string,
@@ -317,7 +329,11 @@ export interface Collection<T = Json> {
 }
 
 /** `createDatabase`가 돌려주는 공개 클라이언트입니다. 인증 없이 요청하므로
- * 컬렉션의 공개 범위가 허용한 곳까지만 닿습니다. */
+ * 컬렉션의 공개 범위가 허용한 곳까지만 닿습니다.
+ *
+ * 묶음 쓰기와 미디어 라이브러리는 여기 없습니다. 둘 다 관리자 토큰이 있어야
+ * 하므로, 익명 클라이언트에 달려 있어 봐야 거절만 돌려받습니다.
+ * `completeOwnerSignIn()`이 돌려주는 OwnerDatabase에서 쓰세요. */
 export interface Database {
   /** T만 지정하면 읽은 값을 검증하지 않습니다. parse를 지정하면 반환 타입에서
    * T를 추론하고 get, list, all로 읽는 각 문서의 data에 실행합니다. */
@@ -393,11 +409,15 @@ export interface StoredFile {
   status: "ready";
   /** 분리된 `media.naru.pub` 출처에서 제공되는 공개 주소입니다. */
   url: string;
-  /** 업로드할 때 함께 넘긴 정보입니다. 대체 텍스트나 이 파일을 쓰는 문서
-   * 목록처럼 애플리케이션이 정하는 값입니다. */
+  /** 애플리케이션이 정하는 값입니다. 대체 텍스트나 이 파일을 쓰는 글의 ID처럼
+   * 나중에 찾아야 하는 것을 담으세요. `FileStore.list`의 `where`가 이 안의
+   * 최상위 필드를 거르므로, 스칼라로 담아 두면 서버가 찾아 줍니다. */
   metadata: Json;
-  created_at: string;
-  updated_at: string;
+  /** metadata를 고칠 때마다 증가합니다. `FileStore.update`에 `ifVersion`으로
+   * 되돌려 주세요. 갓 올린 파일은 `1`입니다. */
+  version: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** 사이트가 미디어 한도를 얼마나 쓰고 있는지 보여 줍니다. */
@@ -430,13 +450,53 @@ export interface ImageOptions {
   maxBytes?: number;
 }
 
+/** 파일에는 문서 본문이 없으므로, 정렬은 서버 메타데이터로만 합니다. */
+export type FileOrderBy = "id" | "createdAt" | "updatedAt";
+
+/** `FileStore.list`와 `FileStore.all`이 쓰는 거르기, 정렬, 쪽 나눔 옵션입니다.
+ * `where`는 문서의 `data`가 아니라 파일의 `metadata` 최상위 필드를 봅니다. */
+export interface FileListOptions extends RequestOptions {
+  /** metadata의 최상위 필드에 거는 조건입니다. 규칙은 `Filter`와 같습니다. */
+  where?: Filter;
+  /** 기본값은 `createdAt`입니다. */
+  orderBy?: FileOrderBy;
+  /** 기본값은 `desc`입니다. 최근에 올린 것이 먼저 옵니다. */
+  direction?: "asc" | "desc";
+  /** 한 쪽에 담을 파일 수로 1~100입니다. 기본값은 50입니다. */
+  limit?: number;
+  /** 같은 정렬, 같은 필터에서 받은 커서입니다. */
+  after?: string;
+}
+
 /** 관리자 세션에서만 닿을 수 있는 미디어 라이브러리입니다. */
 export interface FileStore {
   /** @throws 파일이 없으면 `status: 404`인 NaruDataError. */
   get(id: string, options?: RequestOptions): Promise<StoredFile>;
-  /** 이 사이트의 준비된 파일 전부입니다. 쪽 나눔은 없습니다. */
-  list(options?: RequestOptions): Promise<StoredFile[]>;
-  /** 이 사이트의 미디어 한도에서 쓰고 있는 양입니다. */
+  /**
+   * 준비된 파일 한 쪽을 가져옵니다.
+   *
+   * 컬렉션과 똑같이 커서로 넘겨봅니다. 라이브러리는 시간이 갈수록 자라기만
+   * 하므로, 파일 하나를 찾겠다고 전부 받아 오지 마세요. 어느 글에 붙은
+   * 이미지인지처럼 찾을 거리를 `metadata`에 스칼라로 담아 두었다면 `where`로
+   * 서버에서 거를 수 있습니다.
+   *
+   * ```js
+   * const { files } = await owner.files.list({
+   *   where: { postId: "hello" },
+   *   limit: 100,
+   * });
+   * ```
+   */
+  list(
+    options?: FileListOptions,
+  ): Promise<{ files: StoredFile[]; nextCursor: string | null }>;
+  /** 조건에 맞는 모든 파일을 필요할 때마다 한 쪽씩 가져옵니다. `Collection.all`과
+   * 같은 규칙입니다. */
+  all(
+    options?: Omit<FileListOptions, "after">,
+  ): AsyncIterableIterator<StoredFile>;
+  /** 이 사이트의 미디어 한도에서 쓰고 있는 양입니다. 목록과는 별개의 요청이라,
+   * 남은 용량만 보려고 라이브러리를 훑지 않습니다. */
   usage(options?: RequestOptions): Promise<MediaUsage>;
   /**
    * 파일 하나를 올리고 서버가 확인할 때까지 기다립니다.
@@ -478,9 +538,22 @@ export interface FileStore {
   upload(
     file: File | Blob,
     options?: RequestOptions & {
-      /** 바이트가 나가는 동안 불립니다. 전송 길이를 알 수 없으면 파일 크기를
-       * total로 알려 줍니다. 줄이는 동안에는 불리지 않습니다. */
-      onProgress?: (progress: { loaded: number; total: number }) => void;
+      /** 진행 상황을 알립니다. 전송 길이를 알 수 없으면 파일 크기를 total로
+       * 알려 줍니다.
+       *
+       * 큰 사진은 승인을 받기 전에 브라우저에서 줄이는데, 그동안은 바이트가
+       * 하나도 나가지 않으면서 몇 초가 걸릴 수 있습니다. 다시 인코딩하기로
+       * 정해지면 `phase: "resizing"`으로 한 번 불러 주므로, 업로드 중이라고
+       * 말하는 막대 대신 그 단계를 그대로 보여 줄 수 있습니다. 어떤 파일이
+       * 줄어드는지 SDK의 기준을 따라 짐작할 필요가 없습니다.
+       *
+       * 전송이 시작되면 `phase: "uploading"`으로 바뀝니다. 이 콜백이 오류를
+       * 던지면 업로드는 그 오류로 실패합니다. */
+      onProgress?: (progress: {
+        loaded: number;
+        total: number;
+        phase: "resizing" | "uploading";
+      }) => void;
       /** 이미지 축소 설정입니다. `original`이 참이면 쓰이지 않습니다. */
       image?: ImageOptions;
       /** 참이면 줄이지 않고 원본 바이트를 그대로 올립니다. 기본값은
@@ -490,6 +563,30 @@ export interface FileStore {
        * 값입니다. */
       metadata?: Json;
     },
+  ): Promise<StoredFile>;
+  /**
+   * 파일의 metadata를 얕게 합칩니다. 패치에 있는 필드가 저장된 필드를
+   * 대신하고, `unset`에 적은 이름은 지워집니다.
+   *
+   * 고칠 수 있는 것은 metadata뿐입니다. 바이트와 형식, 크기는 업로드를 승인하고
+   * 확인할 때 정해졌습니다. 한 이미지가 붙는 글이 바뀌었을 때처럼, 올릴 때 적어
+   * 둔 값이 더 이상 맞지 않으면 이걸로 고치세요.
+   *
+   * ```js
+   * await owner.files.update(
+   *   image.id,
+   *   { postId: "moved" },
+   *   { ifVersion: image.version },
+   * );
+   * ```
+   *
+   * @throws 파일이 없으면 `status: 404`, 버전이 어긋나면 `VERSION_CONFLICT`인
+   * NaruDataError.
+   */
+  update(
+    id: string,
+    patch: { [key: string]: Json },
+    options?: RequestOptions & Conditional & { unset?: string[] },
   ): Promise<StoredFile>;
   /** 저장된 파일과 그 정보를 지웁니다. 이 파일을 쓰는 문서는 그대로 남으니
    * 먼저 확인하세요. */

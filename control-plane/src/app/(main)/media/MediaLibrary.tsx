@@ -24,11 +24,12 @@ type MediaFile = {
   size: number;
   status: "ready";
   url: string;
-  created_at: string;
-  updated_at: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
   metadata?: {
     altText?: string;
-    references?: Array<{ collection?: string; id?: string; field?: string }>;
+    postId?: string;
   };
 };
 type Usage = {
@@ -114,9 +115,21 @@ export default function MediaLibrary() {
   const [copied, setCopied] = useState("");
 
   async function refresh() {
-    const result = await api();
-    setFiles(result.files);
-    setUsage(result.usage);
+    // The listing pages now. Search and sort below run over the whole library,
+    // so this walks the cursor to the end rather than showing a truncated set
+    // that would make a search look like it found nothing.
+    const collected: MediaFile[] = [];
+    let after: string | undefined;
+    do {
+      const page = await api(
+        `?limit=100${after ? `&after=${encodeURIComponent(after)}` : ""}`,
+      );
+      collected.push(...page.files);
+      after = page.nextCursor ?? undefined;
+    } while (after);
+    setFiles(collected);
+    // The quota is its own request and no longer rides along with the listing.
+    setUsage((await api("?usage=1")).usage);
   }
 
   useEffect(() => {
@@ -135,10 +148,10 @@ export default function MediaLibrary() {
     );
     result.sort((a, b) => {
       if (sort === "oldest")
-        return Date.parse(a.created_at) - Date.parse(b.created_at);
+        return Date.parse(a.createdAt) - Date.parse(b.createdAt);
       if (sort === "name") return a.name.localeCompare(b.name, "ko");
       if (sort === "largest") return b.size - a.size;
-      return Date.parse(b.created_at) - Date.parse(a.created_at);
+      return Date.parse(b.createdAt) - Date.parse(a.createdAt);
     });
     return result;
   }, [files, query, sort]);
@@ -211,17 +224,17 @@ export default function MediaLibrary() {
   }
 
   async function remove(file: MediaFile) {
-    const references = Array.isArray(file.metadata?.references)
-      ? file.metadata.references
-      : [];
+    // Applications record what a file belongs to in its metadata, and the SDK
+    // filters on those fields. Whatever they wrote there is worth repeating
+    // before the file goes away for good.
+    const postId =
+      typeof file.metadata?.postId === "string" ? file.metadata.postId : "";
     if (
       !window.confirm(
         "'" +
           file.name +
           `'을 영구 삭제할까요?${
-            references.length
-              ? ` ${references.length}개 문서 참조가 기록되어 있습니다.`
-              : ""
+            postId ? ` ${postId} 글에 속한 파일로 기록되어 있습니다.` : ""
           } 이 URL을 사용하는 글의 이미지나 다운로드가 깨질 수 있습니다.`,
       )
     )
@@ -448,7 +461,7 @@ export default function MediaLibrary() {
                   {formatBytes(file.size)} · {file.contentType}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {new Date(file.created_at).toLocaleString("ko-KR")}
+                  {new Date(file.createdAt).toLocaleString("ko-KR")}
                 </p>
               </div>
               <div className="flex gap-2">

@@ -33,9 +33,17 @@ import {
   down as filesDown,
 } from "@/migrations/1788264228670_add_site_data_files";
 import {
+  up as fileMetadataUp,
+  down as fileMetadataDown,
+} from "@/migrations/1788296417049_add_site_data_file_metadata";
+import {
   up as versionUp,
   down as versionDown,
 } from "@/migrations/1788299234629_add_site_data_document_version";
+import {
+  up as fileVersionUp,
+  down as fileVersionDown,
+} from "@/migrations/1788944200000_add_site_data_file_version";
 import {
   up as featureUseUp,
   down as featureUseDown,
@@ -63,12 +71,16 @@ export async function setupTestDatabase() {
   await sessionsUp(db);
   await lifetimeUp(db);
   await filesUp(db);
+  await fileMetadataUp(db);
   await versionUp(db);
+  await fileVersionUp(db);
   await featureUseUp(db);
 }
 export async function teardownTestDatabase() {
   await featureUseDown(db);
+  await fileVersionDown(db);
   await versionDown(db);
+  await fileMetadataDown(db);
   await filesDown(db);
   await lifetimeDown(db);
   await sessionsDown(db);

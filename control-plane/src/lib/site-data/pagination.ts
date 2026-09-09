@@ -1,59 +1,78 @@
 import { DataError, name, NAME } from "./validation";
 
-export type Column = "id" | "created_at" | "updated_at";
+export type Column = "id" | "createdAt" | "updatedAt";
 export type Direction = "asc" | "desc";
 export type Sort = {
   /** Cursor identity: the caller's orderBy verbatim. */
   orderBy: string;
   direction: Direction;
+  /** The physical column an `orderBy` of `id`/`createdAt`/`updatedAt` reads. */
+  column: string;
   /** Set when ordering by a document field rather than a column. */
   field?: string;
 };
-const COLUMNS: Column[] = ["id", "created_at", "updated_at"];
+/** Server metadata is camelCase on the wire and snake_case in PostgreSQL. */
+const COLUMNS: Record<Column, string> = {
+  id: "id",
+  createdAt: "created_at",
+  updatedAt: "updated_at",
+};
 const DATA_ORDER = /^data\.([a-zA-Z0-9_-]{1,64})$/;
+/** Distinguishes document cursors from media cursors so neither decodes the
+ * other, even when a collection id and a user id happen to be the same number. */
+export type CursorKind = "d" | "f";
 
 export function sorting(orderBy = "id", direction = "asc"): Sort {
   if (!["asc", "desc"].includes(direction))
     throw new DataError(400, "Use direction=asc or desc.");
   const field = DATA_ORDER.exec(orderBy)?.[1];
-  if (!field && !COLUMNS.includes(orderBy as Column))
+  if (!field && !Object.hasOwn(COLUMNS, orderBy))
     throw new DataError(
       400,
-      "Use orderBy=id, created_at, updated_at or data.<field>.",
+      "Use orderBy=id, createdAt, updatedAt or data.<field>.",
     );
-  return { orderBy, direction: direction as Direction, field };
+  return {
+    orderBy,
+    direction: direction as Direction,
+    column: field ? "" : COLUMNS[orderBy as Column],
+    field,
+  };
 }
 
 export function encodeCursor(
-  collection: number,
+  scope: number,
   sort: Sort,
   id: string,
   value: string | null,
   fingerprint?: string,
+  kind: CursorKind = "d",
 ) {
   return (
     "v1." +
     Buffer.from(
       JSON.stringify({
-        c: collection,
+        c: scope,
         s: sort.orderBy,
         d: sort.direction,
         i: id,
         t: value,
         f: fingerprint,
+        ...(kind === "d" ? {} : { k: kind }),
       }),
     ).toString("base64url")
   );
 }
 export function decodeCursor(
   after: string | undefined,
-  collection: number,
+  scope: number,
   sort: Sort,
   fingerprint?: string,
+  kind: CursorKind = "d",
 ) {
   if (after === undefined) return null;
   // Retain compatibility with the original ID-ascending pagination API.
   if (
+    kind === "d" &&
     !fingerprint &&
     NAME.test(after) &&
     sort.orderBy === "id" &&
@@ -67,10 +86,11 @@ export function decodeCursor(
       Buffer.from(after.slice(3), "base64url").toString("utf8"),
     );
     if (
-      cursor.c !== collection ||
+      cursor.c !== scope ||
       cursor.s !== sort.orderBy ||
       cursor.d !== sort.direction ||
-      cursor.f !== fingerprint
+      cursor.f !== fingerprint ||
+      (cursor.k ?? "d") !== kind
     )
       throw new Error();
     name(cursor.i);

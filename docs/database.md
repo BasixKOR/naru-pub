@@ -58,7 +58,7 @@ Create a collection in the control plane, choose its permissions, then use this 
 </script>
 ```
 
-`get` returns `{ id, data, created_at, updated_at }`; a missing document throws a 404 error. `set` replaces the whole document or creates it if absent. `add` generates a UUID and returns only `{ id }`, without requiring read permission. `delete` is idempotent. JSON null is stored as a value, not treated as deletion. Render user data with `textContent`, not `innerHTML`.
+`get` returns `{ id, data, version, createdAt, updatedAt }`; a missing document throws a 404 error. `set` replaces the whole document or creates it if absent. `add` generates a UUID, without requiring read permission. Every write returns `{ id, version, createdAt, updatedAt }`, so a caller rendering what it just saved uses the server's own timestamps rather than the browser clock. `delete` is idempotent. JSON null is stored as a value, not treated as deletion. Render user data with `textContent`, not `innerHTML`.
 
 SDK declarations are available alongside the module at `/sdk/1.0.0/naru-data.d.ts`. The SDK pins `https://naru.pub` as its control-plane origin, even when bundled/copied. There is no `baseUrl` or example `controlPlaneOrigin` configuration.
 
@@ -167,11 +167,24 @@ Public/website-token root: `/api/data/:site`. Control-plane root: `/api/account/
 | PATCH  | `/:collection`                       | Admin only: `{ read, write }` replaces permissions        |
 | DELETE | `/:collection`                       | Admin only: deletes collection and its documents          |
 | GET    | `/:collection?limit=50&after=cursor` | `{ documents, nextCursor }`                               |
-| POST   | `/:collection`                       | `{ data }` creates document; returns `{ id }`             |
+| POST   | `/:collection`                       | `{ data }` creates document; returns the write result     |
 | GET    | `/:collection/:id`                   | `{ document }`                                            |
-| PUT    | `/:collection/:id`                   | `{ data }` replaces document; returns `{ id }`            |
+| PUT    | `/:collection/:id`                   | `{ data }` replaces document; returns the write result    |
 | DELETE | `/:collection/:id`                   | `{ success: true }`                                       |
 | POST   | `/_batch`                            | Owner-only atomic `{ operations }`; returns `{ results }` |
+| GET    | `/_files?limit=50&after=&where=`     | Owner-only `{ files, nextCursor }`                        |
+| GET    | `/_files?usage=1`                    | Owner-only `{ usage }` without listing the library        |
+| POST   | `/_files`                            | Owner-only upload authorization                           |
+| GET    | `/_files/:id`                        | Owner-only `{ file }`                                     |
+| PUT    | `/_files/:id`                        | Owner-only finalize; verifies the stored bytes            |
+| PATCH  | `/_files/:id`                        | Owner-only `{ data, unset? }` merges metadata             |
+| DELETE | `/_files/:id`                        | `{ success: true }`                                       |
+
+A write result is `{ id, version, createdAt, updatedAt }`; `_batch` returns one
+per operation in order, with `{ success: true }` for deletes. `/_files` accepts
+the same `limit`, `after`, `orderBy`, `direction` and `where` parameters as a
+collection, except that `where` filters the file's `metadata` and `orderBy` has
+no `data.<field>` form. Media listings default to `createdAt` descending.
 
 All JSON request bodies require `Content-Type: application/json`. Errors return `{ error }` with an HTTP status (400 invalid input, 401 no admin session, 403 denied, 404 missing, 409 duplicate/quota, 413 oversized, 415 wrong content type, 429 rate limit). Public preflight needs no authentication. Responses are not cached.
 
@@ -209,21 +222,41 @@ Database documents should store `file.id` or `file.url`, not base64 data.
 ```js
 const image = await owner.files.upload(fileInput.files[0], {
   signal: abortController.signal,
-  onProgress: ({ loaded, total }) => showProgress(loaded / total),
+  onProgress: ({ loaded, total, phase }) =>
+    phase === "resizing" ? showResizing() : showProgress(loaded / total),
   image: { maxDimension: 1600, maxBytes: 300 * 1024 },
-  metadata: {
-    altText: "A pigeon",
-    references: [{ collection: "posts", id: "hello" }],
-  },
+  metadata: { altText: "A pigeon", postId: "hello" },
 });
 await owner.collection("posts").set("hello", {
   title: "Hello",
   coverImage: image.url,
 });
-
-const files = await owner.files.list();
-await owner.files.delete(image.id);
 ```
+
+The library pages like a collection, and `where` filters on the top-level
+fields of each file's `metadata`. Storing what you will need to find a file by
+means the server does the finding; nothing has to walk the whole library.
+
+```js
+for await (const file of owner.files.all({ where: { postId: "hello" } }))
+  await owner.files.delete(file.id);
+
+// Only the metadata is mutable, and it takes the same version check as a
+// document write.
+await owner.files.update(
+  image.id,
+  { postId: "moved" },
+  { ifVersion: image.version },
+);
+
+// The quota readout is its own request and never pages the library.
+const { bytes, maxBytes } = await owner.files.usage();
+```
+
+A large photo is re-encoded in the browser before the upload is authorized,
+which takes seconds with no bytes moving. `onProgress` reports that as
+`phase: "resizing"` once it is certain to happen, so a caller shows the real
+phase instead of guessing which files the SDK will shrink.
 
 사이트 소유자는 **미디어 라이브러리**(`/media`)에서 파일을 끌어
 놓아 업로드하고, 저장 공간을 확인하고, 이름·형식으로 검색하거나 정렬하고, 공개
@@ -291,27 +324,27 @@ The Korean guides are served publicly at `/docs` (index), `/docs/database` and `
 
 ```js
 const posts = db.collection("posts");
-const sort = { orderBy: "created_at", direction: "desc" };
+const sort = { orderBy: "createdAt", direction: "desc" };
 const page = await posts.list({ ...sort, limit: 20 });
 if (page.nextCursor !== null) {
   const next = await posts.list({ ...sort, limit: 20, after: page.nextCursor });
 }
 ```
 
-`orderBy`: `id` (default), `created_at`, or `updated_at`. `direction`: `asc` (default) or `desc`. These are server metadata, not JSON fields. Arbitrary JSON-field sorting is not supported; scalar equality filters are supported as described below. Timestamp ties use document ID in the same direction. Both timestamp orders have composite collection/time/ID indexes.
+`orderBy`: `id` (default), `createdAt`, or `updatedAt`. `direction`: `asc` (default) or `desc`. These are server metadata, not JSON fields. Arbitrary JSON-field sorting is not supported; scalar equality filters are supported as described below. Timestamp ties use document ID in the same direction. Both timestamp orders have composite collection/time/ID indexes.
 
-`get` and `list` return `created_at` as well as `updated_at`. Creation time is assigned by the server, preserved on replacement, and cannot be changed by fields in `data`. The new migration backfills existing documents from their recorded `updated_at`; their original creation time is unknown.
+`get` and `list` return `createdAt` as well as `updatedAt`. Server metadata is camelCase throughout the API; the underlying columns stay snake_case. Creation time is assigned by the server, preserved on replacement, and cannot be changed by fields in `data`. The migration backfills existing documents from their recorded modification time; their original creation time is unknown.
 
 Pass `nextCursor` unchanged as `after` with the same collection, orderBy, direction, and filters. Cursors preserve PostgreSQL timestamp precision and the last ID, and remain usable after that document is deleted. They are bound to the collection's internal ID (including across deletion/recreation), field, direction, and canonical filter fingerprint; mismatches and malformed cursors return 400. They are not credentials: read permissions are checked on every request. Legacy raw ID cursors are accepted only for unfiltered ID ascending, but all new responses return opaque cursors. Changing page size is allowed.
 
-A null cursor marks the end. Cache prior pages or their starting cursors for a Previous button. There are no page numbers, offsets or total counts. Reset the cursor and displayed results when switching sort order or filters. Pagination is not a snapshot: newly inserted records before the cursor require a refresh; changing a sort value during traversal can skip or repeat a record. Prefer immutable `created_at` for feeds. The example uses newest-first server creation time for both posts and guestbook entries.
+A null cursor marks the end. Cache prior pages or their starting cursors for a Previous button. There are no page numbers, offsets or total counts. Reset the cursor and displayed results when switching sort order or filters. Pagination is not a snapshot: newly inserted records before the cursor require a refresh; changing a sort value during traversal can skip or repeat a record. Prefer immutable `createdAt` for feeds. The example uses newest-first server creation time for both posts and guestbook entries.
 
 ## Equality filters and automatic indexes
 
 ```js
 const query = {
   where: { category: "일상", active: true },
-  orderBy: "created_at",
+  orderBy: "createdAt",
   direction: "desc",
   limit: 20,
 };
@@ -323,7 +356,7 @@ if (page.nextCursor) {
 }
 ```
 
-HTTP: `GET /api/data/:site/:collection?where=<URL-encoded JSON object>&orderBy=created_at&direction=desc`. The account API accepts the same parameters. `where` applies only to collection list requests. At most 5 top-level field equalities are ANDed. Field names use the same 1–64 ASCII alphanumeric/underscore/hyphen rules as document IDs. Values are JSON strings, finite numbers, booleans or null. The decoded filter JSON is limited to 2,048 UTF-8 bytes. Absent `where` and `{}` mean no filtering.
+HTTP: `GET /api/data/:site/:collection?where=<URL-encoded JSON object>&orderBy=createdAt&direction=desc`. The account API accepts the same parameters. `where` applies only to collection list requests. At most 5 top-level field equalities are ANDed. Field names use the same 1–64 ASCII alphanumeric/underscore/hyphen rules as document IDs. Values are JSON strings, finite numbers, booleans or null. The decoded filter JSON is limited to 2,048 UTF-8 bytes. Absent `where` and `{}` mean no filtering.
 
 Types match exactly: number 1 differs from string "1"; null matches an explicit null field, not an absent field. Strings match case-sensitively. Arrays/objects do not match scalars. No nested paths, array membership, ranges, OR, substring search, or arbitrary JSON-field sorting. Filters are carried in URLs; do not put secrets in them.
 
@@ -369,4 +402,4 @@ HTTP status (which can be 200). Invalid caller data throws `TypeError`.
 There are no automatic retries. A failed or interrupted response does not prove
 that a write failed: retrying `add()` can create another document. Read back or
 reconcile before retrying. Cursor pagination is not a snapshot: concurrent edits
-can move records between pages, especially when sorting by `updated_at`.
+can move records between pages, especially when sorting by `updatedAt`.

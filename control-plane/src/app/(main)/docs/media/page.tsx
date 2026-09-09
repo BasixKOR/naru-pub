@@ -111,7 +111,8 @@ export default function MediaDocs() {
 
 const image = await owner.files.upload(fileInput.files[0], {
   signal: abortController.signal,
-  onProgress: ({ loaded, total }) => showProgress(loaded / total),
+  onProgress: ({ loaded, total, phase }) =>
+    phase === "resizing" ? showResizing() : showProgress(loaded / total),
 });
 
 await owner.collection("posts").set("hello", {
@@ -142,9 +143,13 @@ await owner.collection("posts").set("hello", {
               </p>
               <p>
                 다시 인코딩하면 EXIF가 사라집니다. 회전은 픽셀에 반영해 넣으니
-                사진이 눕지 않고, 촬영 위치는 공개 주소에 남지 않습니다.
-                <code>onProgress</code>는 전송만 알려 주므로 줄이는 동안에는
-                진행률이 움직이지 않습니다.
+                사진이 눕지 않고, 촬영 위치는 공개 주소에 남지 않습니다. 줄이는
+                동안에는 바이트가 하나도 나가지 않으므로, 정말 다시 인코딩하기로
+                정해지면 <code>onProgress</code>가{" "}
+                <code>phase: &quot;resizing&quot;</code>으로 한 번 알려 줍니다.
+                어떤 파일이 줄어들지 짐작해 볼 필요 없이 그 단계를 그대로 보여
+                주세요. 전송이 시작되면 <code>phase</code>가{" "}
+                <code>&quot;uploading&quot;</code>으로 바뀝니다.
               </p>
               <Code>{`// 기본값 그대로: 긴 변 2048, WebP.
 await owner.files.upload(file);
@@ -164,21 +169,35 @@ await owner.files.upload(file, { original: true });`}</Code>
 
             <Section id="metadata" title="04 · 어떤 글의 파일인지 적어 두기">
               <p>
-                <code>metadata</code>에 넣은 값은 <code>files.list()</code>와{" "}
-                <code>files.get()</code>에 그대로 돌아옵니다. 어떤 문서가 그
-                파일을 쓰는지 적어 두면, 나중에 글을 지울 때 딸린 파일도 함께
-                지워 저장 용량이 새는 것을 막을 수 있습니다.
+                <code>metadata</code>에 넣은 값은 파일을 읽을 때 그대로
+                돌아옵니다. 어떤 글이 그 파일을 쓰는지 적어 두면, 나중에 글을
+                지울 때 딸린 파일도 함께 지워 저장 용량이 새는 것을 막을 수
+                있습니다.
+              </p>
+              <p>
+                <code>files.list()</code>의 <code>where</code>는 이 안의 최상위
+                필드를 컬렉션 질의와 똑같은 규칙으로 거릅니다. 찾을 거리를
+                스칼라로 담아 두면 서버가 찾아 주므로, 파일 한 장을 찾겠다고
+                라이브러리를 통째로 받아 올 일이 없습니다.
               </p>
               <Code>{`await owner.files.upload(file, {
-  metadata: {
-    altText: "비둘기 사진",
-    references: [{ collection: "posts", id: "hello", field: "coverImage" }],
-  },
+  metadata: { altText: "비둘기 사진", postId: "hello" },
 });
 
-const files = await owner.files.list();
-const mine = files.filter((file) =>
-  file.metadata?.references?.some((reference) => reference.id === "hello"),
+// 서버가 찾습니다. 라이브러리를 훑지 않습니다.
+for await (const file of owner.files.all({ where: { postId: "hello" } }))
+  console.log(file.url);`}</Code>
+              <p>
+                올릴 때 적어 둔 값이 더 이상 맞지 않으면{" "}
+                <code>files.update()</code>로 고칠 수 있습니다. 고칠 수 있는
+                것은 <code>metadata</code>뿐이고, 문서 쓰기와 똑같이{" "}
+                <code>ifVersion</code>으로 먼저 읽어 둔 판이 그대로인지 확인할
+                수 있습니다.
+              </p>
+              <Code>{`await owner.files.update(
+  image.id,
+  { postId: "moved" },
+  { ifVersion: image.version },
 );`}</Code>
               <p>
                 <code>altText</code>는 화면 낭독기를 위한 설명입니다. 문서에
@@ -199,8 +218,16 @@ const mine = files.filter((file) =>
                 형식은 스크립트를 품을 수 있어, 공개 주소에서 그대로 열리면
                 방문자에게 위험할 수 있기 때문입니다.
               </p>
+              <p>
+                <code>files.usage()</code>는 목록과는 별개의 요청입니다. 남은
+                용량만 보려고 라이브러리를 훑지 않습니다. 목록은{" "}
+                <code>files.list()</code>가 한 쪽씩, 컬렉션과 똑같이 커서로
+                돌려줍니다.
+              </p>
               <Code>{`const { bytes, maxBytes, count } = await owner.files.usage();
-showQuota(bytes / maxBytes, count);`}</Code>
+showQuota(bytes / maxBytes, count);
+
+const { files, nextCursor } = await owner.files.list({ limit: 50 });`}</Code>
             </Section>
 
             <Section id="cleanup" title="06 · 정리와 삭제">
@@ -211,7 +238,8 @@ showQuota(bytes / maxBytes, count);`}</Code>
                 있는지는 직접 확인해야 합니다. 지운 파일의 주소를 가리키던
                 이미지는 깨집니다.
               </p>
-              <Code>{`for (const file of mine) await owner.files.delete(file.id);`}</Code>
+              <Code>{`for await (const file of owner.files.all({ where: { postId: "hello" } }))
+  await owner.files.delete(file.id);`}</Code>
               <p>
                 끝내 마무리되지 않은 업로드 승인은 한 시간 뒤 배경 정리 작업이
                 치웁니다. 계정을 지우면 그 계정의 미디어도 함께 사라집니다.

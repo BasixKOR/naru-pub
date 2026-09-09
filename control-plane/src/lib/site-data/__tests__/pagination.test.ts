@@ -56,7 +56,7 @@ integration("sorted database pagination", () => {
     if (ready) await teardownTestDatabase();
     await db.destroy();
   });
-  test.each(["id", "created_at", "updated_at"])(
+  test.each(["id", "createdAt", "updatedAt"])(
     "%s traversal handles ties and submillisecond precision in both directions",
     async (orderBy) => {
       for (const direction of ["asc", "desc"]) {
@@ -82,7 +82,7 @@ integration("sorted database pagination", () => {
     },
   );
   test("deleted cursor anchor and new documents before the cursor do not disturb traversal", async () => {
-    const sort = { orderBy: "created_at", direction: "desc" };
+    const sort = { orderBy: "createdAt", direction: "desc" };
     const first = await call("GET", ["posts"], { ...sort, limit: 2 });
     await call("DELETE", ["posts", "c"]);
     await call("PUT", ["posts", "new"], { body: { data: true } });
@@ -96,14 +96,14 @@ integration("sorted database pagination", () => {
   });
   test("cursors reject mismatched order, collection, recreation and malformed input", async () => {
     const first = await call("GET", ["posts"], {
-      orderBy: "created_at",
+      orderBy: "createdAt",
       direction: "desc",
       limit: 1,
     });
     await call("POST", [], { body: { name: "other", read: "world" } });
     for (const extra of [
-      { orderBy: "updated_at", direction: "desc" },
-      { orderBy: "created_at", direction: "asc" },
+      { orderBy: "updatedAt", direction: "desc" },
+      { orderBy: "createdAt", direction: "asc" },
       {},
     ])
       await expect(
@@ -111,20 +111,20 @@ integration("sorted database pagination", () => {
       ).rejects.toMatchObject({ status: 400 });
     await expect(
       call("GET", ["other"], {
-        orderBy: "created_at",
+        orderBy: "createdAt",
         direction: "desc",
         after: first.nextCursor,
       }),
     ).rejects.toMatchObject({ status: 400 });
     for (const after of ["", "v1.bad", "x".repeat(2000), "a"])
       await expect(
-        call("GET", ["posts"], { orderBy: "created_at", after }),
+        call("GET", ["posts"], { orderBy: "createdAt", after }),
       ).rejects.toMatchObject({ status: 400 });
     await call("DELETE", ["posts"]);
     await call("POST", [], { body: { name: "posts" } });
     await expect(
       call("GET", ["posts"], {
-        orderBy: "created_at",
+        orderBy: "createdAt",
         direction: "desc",
         after: first.nextCursor,
       }),
@@ -155,29 +155,29 @@ integration("sorted database pagination", () => {
       body: { data: { created_at: "2099-01-01" } },
     });
     const doc = (await call("GET", ["posts", "a"])).document!;
-    expect(new Date(doc.created_at).toISOString()).toBe(
+    expect(new Date(doc.createdAt).toISOString()).toBe(
       "2026-08-01T00:00:00.000Z",
     );
-    expect(new Date(doc.updated_at).getTime()).toBeGreaterThan(
-      new Date(doc.created_at).getTime(),
+    expect(new Date(doc.updatedAt).getTime()).toBeGreaterThan(
+      new Date(doc.createdAt).getTime(),
     );
     expect(
       (
         await call("GET", ["posts"], {
-          orderBy: "updated_at",
+          orderBy: "updatedAt",
           direction: "desc",
           limit: 1,
         })
       ).documents![0].id,
     ).toBe("a");
     const page = await call("GET", ["posts"], {
-      orderBy: "created_at",
+      orderBy: "createdAt",
       limit: 1,
     });
     await call("PATCH", ["posts"], { body: { read: "admin", write: "admin" } });
     await expect(
       call("GET", ["posts"], {
-        orderBy: "created_at",
+        orderBy: "createdAt",
         after: page.nextCursor,
         adminUserId: undefined,
       }),
@@ -238,7 +238,7 @@ integration("sorted database pagination", () => {
       limit: 1,
     });
     expect(first.nextCursor).toEqual(expect.any(String));
-    for (const orderBy of ["data.title", "created_at", "id"])
+    for (const orderBy of ["data.title", "createdAt", "id"])
       await expect(
         call("GET", ["notes"], { orderBy, after: first.nextCursor }),
       ).rejects.toMatchObject({ status: 400 });

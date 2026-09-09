@@ -3,7 +3,7 @@ import { validateRequest } from "@/lib/auth";
 import { db } from "@/lib/database";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
-import { s3Client } from "@/lib/utils";
+import { s3Client } from "@/lib/s3";
 
 export async function GET() {
   try {
@@ -11,7 +11,7 @@ export async function GET() {
     if (!user) {
       return NextResponse.json(
         { error: "로그인이 필요합니다." },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
@@ -45,12 +45,15 @@ export async function GET() {
         new Date(latestExport.download_expires_at).getTime() - Date.now();
       const expiresIn = Math.floor(remainingMs / 1000);
 
-      // @ts-expect-error - @smithy/types version mismatch between s3-request-presigner and client-s3
-      downloadUrl = await getSignedUrl(s3Client, new GetObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME!,
-        Key: latestExport.r2_key,
-        ResponseContentDisposition: `attachment; filename="${user.loginName}-export.zip"`,
-      }), { expiresIn });
+      downloadUrl = await getSignedUrl(
+        s3Client as any,
+        new GetObjectCommand({
+          Bucket: process.env.S3_BUCKET_NAME!,
+          Key: latestExport.r2_key,
+          ResponseContentDisposition: `attachment; filename="${user.loginName}-export.zip"`,
+        }) as any,
+        { expiresIn },
+      );
     }
 
     return NextResponse.json({
@@ -67,7 +70,7 @@ export async function GET() {
     console.error("Export status error:", error);
     return NextResponse.json(
       { error: "내보내기 상태 조회 중 오류가 발생했습니다." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

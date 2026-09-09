@@ -7,11 +7,9 @@ import {
   isReservedLoginName,
   LOGIN_NAME_REGEX,
 } from "@/lib/const";
-import {
-  PutObjectCommand,
-  HeadObjectCommand,
-} from "@aws-sdk/client-s3";
-import { assertJsonContentType, getUserHomeDirectory, s3Client } from "@/lib/utils";
+import { PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { s3Client } from "@/lib/s3";
+import { assertJsonContentType, getUserHomeDirectory } from "@/lib/utils";
 
 async function prepareUserHomeDirectory(userName: string) {
   const bucketName = process.env.S3_BUCKET_NAME!;
@@ -23,9 +21,9 @@ async function prepareUserHomeDirectory(userName: string) {
         Bucket: bucketName,
         Key: `${getUserHomeDirectory(userName)}/index.html`.replaceAll(
           "//",
-          "/"
+          "/",
         ),
-      })
+      }),
     );
   } catch (error: any) {
     // If file doesn't exist (404), create it
@@ -35,11 +33,11 @@ async function prepareUserHomeDirectory(userName: string) {
           Bucket: bucketName,
           Key: `${getUserHomeDirectory(userName)}/index.html`.replaceAll(
             "//",
-            "/"
+            "/",
           ),
           Body: DEFAULT_INDEX_HTML,
           ContentType: "text/html",
-        })
+        }),
       );
     } else {
       throw error;
@@ -54,7 +52,7 @@ export async function POST(request: NextRequest) {
     } catch {
       return NextResponse.json(
         { success: false, message: "Invalid content type" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -63,7 +61,7 @@ export async function POST(request: NextRequest) {
     if (!login_name || !password) {
       return NextResponse.json(
         { success: false, message: "아이디와 비밀번호를 입력해주세요." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -74,7 +72,7 @@ export async function POST(request: NextRequest) {
     ) {
       return NextResponse.json(
         { success: false, message: "사용할 수 없는 아이디입니다." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -99,7 +97,7 @@ export async function POST(request: NextRequest) {
       if (e.message.includes("users_login_name_key")) {
         return NextResponse.json(
           { success: false, message: "이미 사용 중인 아이디입니다." },
-          { status: 400 }
+          { status: 400 },
         );
       }
       throw e;
@@ -116,7 +114,7 @@ export async function POST(request: NextRequest) {
     console.error("Signup error:", error);
     return NextResponse.json(
       { success: false, message: "가입 중 오류가 발생했습니다." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

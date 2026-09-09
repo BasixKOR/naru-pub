@@ -9,7 +9,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { sql } from "kysely";
 import { db } from "@/lib/database";
-import { s3Client } from "@/lib/utils";
+import { s3Client } from "@/lib/s3";
 import { previewFeatureAccess, userHasFeature } from "@/lib/entitlements";
 import { noteSupporterFeatureUse } from "@/lib/feature-usage";
 import { tokenScope } from "./owner-auth";

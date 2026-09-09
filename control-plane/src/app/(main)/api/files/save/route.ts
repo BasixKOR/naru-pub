@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { validateRequest } from "@/lib/auth";
-import { assertJsonContentType, getUserHomeDirectory, s3Client } from "@/lib/utils";
+import { s3Client } from "@/lib/s3";
+import { assertJsonContentType, getUserHomeDirectory } from "@/lib/utils";
 import { User } from "@/lib/auth";
 import * as Sentry from "@sentry/nextjs";
 import {
@@ -27,7 +28,10 @@ function assertEditableFilename(filename: string) {
   }
 }
 
-async function invalidateCloudflareCacheSingleFile(user: User, filename: string) {
+async function invalidateCloudflareCacheSingleFile(
+  user: User,
+  filename: string,
+) {
   const zoneId = process.env.CLOUDFLARE_ZONE_ID!;
   const userApiToken = process.env.CLOUDFLARE_USER_API_TOKEN!;
   const url = `https://api.cloudflare.com/client/v4/zones/${zoneId}/purge_cache`;
@@ -42,7 +46,7 @@ async function invalidateCloudflareCacheSingleFile(user: User, filename: string)
       files: [
         `${getUserHomeDirectory(user.loginName)}/${filename}`.replaceAll(
           "//",
-          "/"
+          "/",
         ),
       ],
     }),
@@ -60,7 +64,7 @@ export async function POST(request: NextRequest) {
     } catch {
       return NextResponse.json(
         { success: false, message: "Invalid content type" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -68,7 +72,7 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json(
         { success: false, message: "로그인이 필요합니다." },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
@@ -77,7 +81,7 @@ export async function POST(request: NextRequest) {
     if (!filename || contents === undefined) {
       return NextResponse.json(
         { success: false, message: "파일명과 내용이 필요합니다." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -87,7 +91,7 @@ export async function POST(request: NextRequest) {
     } catch (e: any) {
       return NextResponse.json(
         { success: false, message: e.message },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -98,13 +102,13 @@ export async function POST(request: NextRequest) {
           Key: `${getUserHomeDirectory(user.loginName)}/${filename}`,
           Body: contents,
           ContentType: FILE_EXTENSION_MIMETYPE_MAP[filename.split(".").pop()!],
-        })
+        }),
       );
     } catch (e) {
       console.error("S3 save error:", e);
       return NextResponse.json(
         { success: false, message: "파일 저장에 실패했습니다." },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -142,7 +146,7 @@ export async function POST(request: NextRequest) {
     console.error("Save file error:", error);
     return NextResponse.json(
       { success: false, message: "파일 저장에 실패했습니다." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

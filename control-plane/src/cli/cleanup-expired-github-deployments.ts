@@ -1,6 +1,6 @@
 import { DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { db } from "@/lib/database";
-import { s3Client } from "@/lib/utils";
+import { s3Client } from "@/lib/s3";
 
 async function deletePrefix(prefix: string) {
   let continuationToken: string | undefined;

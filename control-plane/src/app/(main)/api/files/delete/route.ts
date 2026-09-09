@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  DeleteObjectsCommand,
-  ListObjectsV2Command,
-} from "@aws-sdk/client-s3";
+import { DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { validateRequest } from "@/lib/auth";
-import { assertJsonContentType, getUserHomeDirectory, s3Client } from "@/lib/utils";
+import { s3Client } from "@/lib/s3";
+import { assertJsonContentType, getUserHomeDirectory } from "@/lib/utils";
 import { User } from "@/lib/auth";
 import * as Sentry from "@sentry/nextjs";
 import { recordSiteEdit } from "@/lib/database";
@@ -19,7 +17,10 @@ function assertNoPathTraversal(filename: string) {
   }
 }
 
-async function invalidateCloudflareCacheSingleFile(user: User, filename: string) {
+async function invalidateCloudflareCacheSingleFile(
+  user: User,
+  filename: string,
+) {
   const zoneId = process.env.CLOUDFLARE_ZONE_ID!;
   const userApiToken = process.env.CLOUDFLARE_USER_API_TOKEN!;
   const url = `https://api.cloudflare.com/client/v4/zones/${zoneId}/purge_cache`;
@@ -34,7 +35,7 @@ async function invalidateCloudflareCacheSingleFile(user: User, filename: string)
       files: [
         `${getUserHomeDirectory(user.loginName)}/${filename}`.replaceAll(
           "//",
-          "/"
+          "/",
         ),
       ],
     }),
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest) {
     } catch {
       return NextResponse.json(
         { success: false, message: "Invalid content type" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json(
         { success: false, message: "로그인이 필요합니다." },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
@@ -69,7 +70,7 @@ export async function POST(request: NextRequest) {
     if (!filename) {
       return NextResponse.json(
         { success: false, message: "파일명이 필요합니다." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -78,21 +79,22 @@ export async function POST(request: NextRequest) {
     } catch (e: any) {
       return NextResponse.json(
         { success: false, message: e.message },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (filename === "/index.html") {
       return NextResponse.json(
         { success: false, message: "홈 페이지는 삭제할 수 없습니다." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const key = `${getUserHomeDirectory(user.loginName)}/${filename}`.replaceAll(
-      "//",
-      "/"
-    );
+    const key =
+      `${getUserHomeDirectory(user.loginName)}/${filename}`.replaceAll(
+        "//",
+        "/",
+      );
 
     try {
       // List all objects with the prefix
@@ -110,14 +112,14 @@ export async function POST(request: NextRequest) {
             Delete: {
               Objects: objects.Contents.map((obj) => ({ Key: obj.Key! })),
             },
-          })
+          }),
         );
       }
 
       for (const obj of objects.Contents ?? []) {
         if (obj.Key) {
           // Extract filename from S3 key safely
-          const keyParts = obj.Key.split('/');
+          const keyParts = obj.Key.split("/");
           const filename = keyParts[keyParts.length - 1];
           await invalidateCloudflareCacheSingleFile(user, filename);
         }
@@ -127,7 +129,7 @@ export async function POST(request: NextRequest) {
       console.error("S3 delete error:", e);
       return NextResponse.json(
         { success: false, message: "파일 삭제에 실패했습니다." },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -142,7 +144,7 @@ export async function POST(request: NextRequest) {
     console.error("Delete error:", error);
     return NextResponse.json(
       { success: false, message: "파일 삭제에 실패했습니다." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

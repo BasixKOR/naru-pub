@@ -1,5 +1,6 @@
 import { db } from "@/lib/database";
-import { getUserHomeDirectory, s3Client } from "@/lib/utils";
+import { s3Client } from "@/lib/s3";
+import { getUserHomeDirectory } from "@/lib/utils";
 import {
   ListObjectsV2Command,
   GetObjectCommand,
@@ -16,10 +17,7 @@ import { join } from "path";
 import { Readable } from "stream";
 import { readFile } from "fs/promises";
 
-async function processExport(exportRow: {
-  id: number;
-  user_id: number;
-}) {
+async function processExport(exportRow: { id: number; user_id: number }) {
   const user = await db
     .selectFrom("users")
     .select(["login_name", "email"])
@@ -43,7 +41,7 @@ async function processExport(exportRow: {
         Bucket: bucketName,
         Prefix: `${userDirectory}/`,
         ContinuationToken: continuationToken,
-      })
+      }),
     );
 
     if (response.Contents) {
@@ -80,7 +78,7 @@ async function processExport(exportRow: {
 
     try {
       const response = await s3Client.send(
-        new GetObjectCommand({ Bucket: bucketName, Key: obj.Key })
+        new GetObjectCommand({ Bucket: bucketName, Key: obj.Key }),
       );
 
       if (response.Body) {
@@ -106,7 +104,7 @@ async function processExport(exportRow: {
       Key: r2Key,
       Body: zipBuffer,
       ContentType: "application/zip",
-    })
+    }),
   );
 
   // Clean up temp file
@@ -130,16 +128,19 @@ async function processExport(exportRow: {
     .execute();
 
   // Generate presigned URL for email (72h TTL)
-  // @ts-expect-error - @smithy/types version mismatch between s3-request-presigner and client-s3
-  const downloadUrl = await getSignedUrl(s3Client, new GetObjectCommand({
-    Bucket: bucketName,
-    Key: r2Key,
-    ResponseContentDisposition: `attachment; filename="${user.login_name}-export.zip"`,
-  }), { expiresIn: 72 * 60 * 60 });
+  const downloadUrl = await getSignedUrl(
+    s3Client as any,
+    new GetObjectCommand({
+      Bucket: bucketName,
+      Key: r2Key,
+      ResponseContentDisposition: `attachment; filename="${user.login_name}-export.zip"`,
+    }) as any,
+    { expiresIn: 72 * 60 * 60 },
+  );
   await sendExportReadyEmail(user.email, downloadUrl, user.login_name);
 
   console.log(
-    `[export] Completed export ${exportRow.id} for ${user.login_name} (${zipBuffer.length} bytes)`
+    `[export] Completed export ${exportRow.id} for ${user.login_name} (${zipBuffer.length} bytes)`,
   );
 }
 
@@ -195,7 +196,7 @@ async function cleanupExpiredExports() {
           eb("status", "=", "failed"),
           eb("created_at", "<", sql<Date>`now() - interval '7 days'`),
         ]),
-      ])
+      ]),
     )
     .execute();
 
@@ -203,7 +204,9 @@ async function cleanupExpiredExports() {
     return;
   }
 
-  console.log(`[export] Cleaning up ${expiredExports.length} expired export(s)`);
+  console.log(
+    `[export] Cleaning up ${expiredExports.length} expired export(s)`,
+  );
 
   for (const exportRow of expiredExports) {
     // Delete R2 object if exists
@@ -213,12 +216,12 @@ async function cleanupExpiredExports() {
           new DeleteObjectCommand({
             Bucket: process.env.S3_BUCKET_NAME!,
             Key: exportRow.r2_key,
-          })
+          }),
         );
       } catch (error) {
         console.error(
           `[export] Failed to delete R2 object ${exportRow.r2_key}:`,
-          error
+          error,
         );
       }
     }

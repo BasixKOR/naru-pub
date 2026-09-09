@@ -5,13 +5,11 @@ import {
   NotFound,
 } from "@aws-sdk/client-s3";
 import { validateRequest } from "@/lib/auth";
-import { assertJsonContentType, getUserHomeDirectory, s3Client } from "@/lib/utils";
+import { s3Client } from "@/lib/s3";
+import { assertJsonContentType, getUserHomeDirectory } from "@/lib/utils";
 import { revalidatePath } from "next/cache";
 import { User } from "@/lib/auth";
-import {
-  DEFAULT_INDEX_HTML,
-  FILE_EXTENSION_MIMETYPE_MAP,
-} from "@/lib/const";
+import { DEFAULT_INDEX_HTML, FILE_EXTENSION_MIMETYPE_MAP } from "@/lib/const";
 import { recordSiteEdit } from "@/lib/database";
 
 function assertNoPathTraversal(filename: string) {
@@ -30,7 +28,7 @@ export async function POST(request: NextRequest) {
     } catch {
       return NextResponse.json(
         { success: false, message: "Invalid content type" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -38,7 +36,7 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json(
         { success: false, message: "로그인이 필요합니다." },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
@@ -47,7 +45,7 @@ export async function POST(request: NextRequest) {
     if (!directory) {
       return NextResponse.json(
         { success: false, message: "디렉토리명이 필요합니다." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -59,12 +57,12 @@ export async function POST(request: NextRequest) {
     } catch (e: any) {
       return NextResponse.json(
         { success: false, message: e.message },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     const key = `${getUserHomeDirectory(
-      user.loginName
+      user.loginName,
     )}/${directory}/index.html`.replaceAll("//", "/");
 
     try {
@@ -72,7 +70,7 @@ export async function POST(request: NextRequest) {
         new HeadObjectCommand({
           Bucket: process.env.S3_BUCKET_NAME!,
           Key: key,
-        })
+        }),
       );
     } catch (e) {
       if (e instanceof NotFound) {
@@ -83,13 +81,13 @@ export async function POST(request: NextRequest) {
               Key: key,
               Body: DEFAULT_INDEX_HTML,
               ContentType: FILE_EXTENSION_MIMETYPE_MAP["html"],
-            })
+            }),
           );
         } catch (e) {
           console.error("S3 create directory error:", e);
           return NextResponse.json(
             { success: false, message: "파일 생성에 실패했습니다." },
-            { status: 500 }
+            { status: 500 },
           );
         }
       }
@@ -106,7 +104,7 @@ export async function POST(request: NextRequest) {
     console.error("Create directory error:", error);
     return NextResponse.json(
       { success: false, message: "디렉토리 생성에 실패했습니다." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

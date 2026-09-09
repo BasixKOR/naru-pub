@@ -17,7 +17,8 @@ import {
   ALLOWED_FILE_EXTENSIONS,
   FILE_EXTENSION_MIMETYPE_MAP,
 } from "@/lib/const";
-import { getUserHomeDirectory, s3Client } from "@/lib/utils";
+import { s3Client } from "@/lib/s3";
+import { getUserHomeDirectory } from "@/lib/utils";
 import { GitHubActionsClaims } from "./githubOidc";
 
 const MAX_USER_DIRECTORY_SIZE_BYTES = 1024 * 1024 * 1024;

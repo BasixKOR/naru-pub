@@ -2,7 +2,8 @@ import { parseArgs } from "node:util";
 import { GetObjectCommand, NoSuchKey } from "@aws-sdk/client-s3";
 import { db } from "@/lib/database";
 import { extractHtmlTitle } from "@/lib/html";
-import { getUserHomeDirectory, s3Client } from "@/lib/utils";
+import { s3Client } from "@/lib/s3";
+import { getUserHomeDirectory } from "@/lib/utils";
 
 // Usage:
 //   pnpm exec tsx src/cli/backfill-site-titles.ts
@@ -20,7 +21,7 @@ async function readIndexHtml(loginName: string): Promise<string | null> {
         new GetObjectCommand({
           Bucket: process.env.S3_BUCKET_NAME!,
           Key: `${home}/${name}`,
-        })
+        }),
       );
       return (await res.Body?.transformToString("utf-8")) ?? null;
     } catch (err) {
@@ -55,7 +56,7 @@ async function main() {
 
   if (values.user && targets.length === 0) {
     console.error(
-      `[backfill-site-titles] no such user (or already has site_title): ${values.user}`
+      `[backfill-site-titles] no such user (or already has site_title): ${values.user}`,
     );
     process.exitCode = 1;
     return;
@@ -93,7 +94,7 @@ async function main() {
   }
 
   console.log(
-    `[backfill-site-titles] done — ${updated} titled, ${empty} empty, ${missing} no-index`
+    `[backfill-site-titles] done — ${updated} titled, ${empty} empty, ${missing} no-index`,
   );
 }
 

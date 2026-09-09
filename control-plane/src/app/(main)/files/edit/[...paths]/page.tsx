@@ -1,18 +1,14 @@
 import path from "path";
 import { validateRequest } from "@/lib/auth";
-import {
-  HeadObjectCommand,
-  NotFound,
-} from "@aws-sdk/client-s3";
-import { getUserHomeDirectory, s3Client } from "@/lib/utils";
+import { HeadObjectCommand, NotFound } from "@aws-sdk/client-s3";
+import { s3Client } from "@/lib/s3";
+import { getUserHomeDirectory } from "@/lib/utils";
 import { buildFileTree } from "@/lib/fileUtils";
 import FileExplorerWithSelected from "@/components/browser/FileExplorerWithSelected";
 
-export default async function EditPage(
-  props: {
-    params: Promise<{ paths: string[] }>;
-  }
-) {
+export default async function EditPage(props: {
+  params: Promise<{ paths: string[] }>;
+}) {
   const params = await props.params;
   const { user } = await validateRequest();
 
@@ -38,7 +34,7 @@ export default async function EditPage(
     Bucket: process.env.S3_BUCKET_NAME,
     Key: actualFilename,
   });
-  
+
   let fileExists = true;
   try {
     await s3Client.send(headCommand);
@@ -54,8 +50,8 @@ export default async function EditPage(
 
   return (
     <div className="w-full h-full">
-      <FileExplorerWithSelected 
-        initialFiles={fileTree} 
+      <FileExplorerWithSelected
+        initialFiles={fileTree}
         userLoginName={user.loginName}
         initialSelectedFile={fileExists ? filename : null}
       />

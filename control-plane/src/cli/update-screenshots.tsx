@@ -1,7 +1,8 @@
 import { parseArgs } from "node:util";
 import { db } from "@/lib/database";
 import { dispatchActorUpdate } from "@/lib/federation";
-import { getHomepageUrl, getRenderedSiteUrl, s3Client } from "@/lib/utils";
+import { s3Client } from "@/lib/s3";
+import { getHomepageUrl, getRenderedSiteUrl } from "@/lib/utils";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { Browser, BrowserContext, chromium } from "playwright";
 
@@ -24,7 +25,7 @@ type TargetUser = { id: number; login_name: string };
 
 async function selectTargets(
   loginName: string | undefined,
-  force: boolean
+  force: boolean,
 ): Promise<TargetUser[]> {
   let query = db
     .selectFrom("users")
@@ -41,7 +42,7 @@ async function selectTargets(
       eb.or([
         eb("site_rendered_at", "is", null),
         eb("site_rendered_at", "<", eb.ref("site_updated_at")),
-      ])
+      ]),
     );
   }
 
@@ -63,11 +64,11 @@ async function purgeCloudflareCache(url: string): Promise<void> {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ files: [url] }),
-      }
+      },
     );
     if (!res.ok) {
       console.error(
-        `Cloudflare purge failed for ${url}: ${res.status} ${await res.text()}`
+        `Cloudflare purge failed for ${url}: ${res.status} ${await res.text()}`,
       );
       return;
     }
@@ -79,7 +80,7 @@ async function purgeCloudflareCache(url: string): Promise<void> {
 
 async function renderUser(
   context: BrowserContext,
-  user: TargetUser
+  user: TargetUser,
 ): Promise<void> {
   const homepageUrl = getHomepageUrl(user.login_name);
 
@@ -101,7 +102,7 @@ async function renderUser(
       Key: `${user.login_name}.png`,
       Body: screenshot,
       ContentType: "image/png",
-    })
+    }),
   );
   console.log(`Uploaded screenshot for ${user.login_name}`);
 
@@ -131,13 +132,15 @@ async function main() {
   const targets = await selectTargets(values.user, values.force ?? false);
 
   if (values.user && targets.length === 0) {
-    console.error(`[update-screenshots] no such discoverable user: ${values.user}`);
+    console.error(
+      `[update-screenshots] no such discoverable user: ${values.user}`,
+    );
     process.exitCode = 1;
     return;
   }
 
   console.log(
-    `[update-screenshots] ${targets.length} target(s), concurrency=${concurrency}`
+    `[update-screenshots] ${targets.length} target(s), concurrency=${concurrency}`,
   );
 
   let browser: Browser | null = null;

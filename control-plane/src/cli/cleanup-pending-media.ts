@@ -1,7 +1,7 @@
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { sql } from "kysely";
 import { db } from "@/lib/database";
-import { s3Client } from "@/lib/utils";
+import { s3Client } from "@/lib/s3";
 
 async function main() {
   const bucket = process.env.SITE_DATA_MEDIA_BUCKET || "naru-media";

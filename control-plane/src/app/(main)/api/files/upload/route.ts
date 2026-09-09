@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { validateRequest } from "@/lib/auth";
-import { getUserHomeDirectory, s3Client } from "@/lib/utils";
+import { s3Client } from "@/lib/s3";
+import { getUserHomeDirectory } from "@/lib/utils";
 import { revalidatePath } from "next/cache";
 import { User } from "@/lib/auth";
 import * as Sentry from "@sentry/nextjs";
@@ -23,8 +24,31 @@ function validateFilename(filename: string) {
   }
 
   // Reserved names on Windows
-  const reservedNames = ['CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9', 'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'];
-  const nameWithoutExt = filename.split('.')[0].toUpperCase();
+  const reservedNames = [
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
+  ];
+  const nameWithoutExt = filename.split(".")[0].toUpperCase();
   if (reservedNames.includes(nameWithoutExt)) {
     throw new Error("예약된 파일명입니다.");
   }
@@ -55,13 +79,16 @@ function assertAllowedFilename(filename: string) {
   if (!ALLOWED_FILE_EXTENSIONS.includes(extension)) {
     throw new Error(
       `지원하지 않는 파일 형식입니다. ${ALLOWED_FILE_EXTENSIONS.join(
-        ", "
-      )} 파일만 생성할 수 있습니다.`
+        ", ",
+      )} 파일만 생성할 수 있습니다.`,
     );
   }
 }
 
-async function invalidateCloudflareCacheSingleFile(user: User, filename: string) {
+async function invalidateCloudflareCacheSingleFile(
+  user: User,
+  filename: string,
+) {
   const zoneId = process.env.CLOUDFLARE_ZONE_ID!;
   const userApiToken = process.env.CLOUDFLARE_USER_API_TOKEN!;
   const url = `https://api.cloudflare.com/client/v4/zones/${zoneId}/purge_cache`;
@@ -76,7 +103,7 @@ async function invalidateCloudflareCacheSingleFile(user: User, filename: string)
       files: [
         `${getUserHomeDirectory(user.loginName)}/${filename}`.replaceAll(
           "//",
-          "/"
+          "/",
         ),
       ],
     }),
@@ -93,7 +120,10 @@ async function uploadSingleFile(user: User, directory: string, file: File) {
   }
 
   if (file.size > 1024 * 1024 * 10) {
-    return { success: false, message: "10MB 이하의 파일만 업로드할 수 있습니다." };
+    return {
+      success: false,
+      message: "10MB 이하의 파일만 업로드할 수 있습니다.",
+    };
   }
 
   try {
@@ -118,11 +148,11 @@ async function uploadSingleFile(user: User, directory: string, file: File) {
         Key: key,
         Body: Buffer.from(data),
         ContentType: FILE_EXTENSION_MIMETYPE_MAP[file.name.split(".").pop()!],
-      })
+      }),
     );
 
     // Extract filename from S3 key safely for cache invalidation
-    const keyParts = key.split('/');
+    const keyParts = key.split("/");
     const filename = keyParts[keyParts.length - 1];
     await invalidateCloudflareCacheSingleFile(user, filename);
   } catch (e) {
@@ -143,7 +173,7 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json(
         { success: false, message: "로그인이 필요합니다." },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
@@ -154,19 +184,28 @@ export async function POST(request: NextRequest) {
     if (!files.length) {
       return NextResponse.json(
         { success: false, message: "파일을 선택해주세요." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (request.headers.get("accept")?.includes("application/x-ndjson")) {
-      return new Response(streamUpload(files,
-        file => uploadSingleFile(user, directory, file),
-        async () => { revalidatePath("/files", "layout"); await recordSiteEdit(user.id); },
-      ), { headers: {
-        "Content-Type": "application/x-ndjson; charset=utf-8",
-        "Cache-Control": "no-store, no-transform",
-        "X-Accel-Buffering": "no",
-      } });
+      return new Response(
+        streamUpload(
+          files,
+          (file) => uploadSingleFile(user, directory, file),
+          async () => {
+            revalidatePath("/files", "layout");
+            await recordSiteEdit(user.id);
+          },
+        ),
+        {
+          headers: {
+            "Content-Type": "application/x-ndjson; charset=utf-8",
+            "Cache-Control": "no-store, no-transform",
+            "X-Accel-Buffering": "no",
+          },
+        },
+      );
     }
 
     for (const file of files) {
@@ -174,7 +213,7 @@ export async function POST(request: NextRequest) {
       if (!result.success) {
         return NextResponse.json(
           { success: false, message: result.message },
-          { status: 400 }
+          { status: 400 },
         );
       }
     }
@@ -190,7 +229,7 @@ export async function POST(request: NextRequest) {
     console.error("Upload error:", error);
     return NextResponse.json(
       { success: false, message: "파일 업로드에 실패했습니다." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

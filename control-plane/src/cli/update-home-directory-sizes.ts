@@ -1,9 +1,10 @@
 import { db } from "@/lib/database";
-import { getUserHomeDirectory, s3Client } from "@/lib/utils";
+import { s3Client } from "@/lib/s3";
+import { getUserHomeDirectory } from "@/lib/utils";
 import { ListObjectsV2Command } from "@aws-sdk/client-s3";
 
 async function calculateUserHomeDirectorySize(
-  loginName: string
+  loginName: string,
 ): Promise<number> {
   const prefix = `${getUserHomeDirectory(loginName)}/`;
 
@@ -37,14 +38,14 @@ async function calculateUserHomeDirectorySize(
 }
 
 async function processUserBatch(
-  users: Array<{ id: number; login_name: string }>
+  users: Array<{ id: number; login_name: string }>,
 ) {
   const batchPromises = users.map(async (user) => {
     try {
       console.log(`Processing user: ${user.login_name}`);
 
       const directorySize = await calculateUserHomeDirectorySize(
-        user.login_name
+        user.login_name,
       );
       const now = new Date();
 
@@ -94,7 +95,7 @@ async function updateHomeDirectorySizes() {
 
     console.log(`Found ${users.length} users to process`);
     console.log(
-      `Processing in batches of ${BATCH_SIZE} with ${CONCURRENT_BATCHES} concurrent batches`
+      `Processing in batches of ${BATCH_SIZE} with ${CONCURRENT_BATCHES} concurrent batches`,
     );
 
     let processedCount = 0;
@@ -134,7 +135,7 @@ async function updateHomeDirectorySizes() {
 
       const progress = Math.min(
         i + BATCH_SIZE * CONCURRENT_BATCHES,
-        users.length
+        users.length,
       );
       const percentage = ((progress / users.length) * 100).toFixed(1);
       console.log(`Progress: ${progress}/${users.length} (${percentage}%)`);
@@ -148,7 +149,7 @@ async function updateHomeDirectorySizes() {
     console.log(`Successfully processed: ${processedCount} users`);
     console.log(`Errors: ${errorCount} users`);
     console.log(
-      `Average time per user: ${(duration / users.length).toFixed(2)} seconds`
+      `Average time per user: ${(duration / users.length).toFixed(2)} seconds`,
     );
   } catch (error) {
     console.error("Failed to update home directory sizes:", error);

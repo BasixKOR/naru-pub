@@ -19,7 +19,8 @@ import { CreateFileButton } from "./CreateFileButton";
 import DirectoryBreadcrumb from "./DirectoryBreadcrumb";
 import { validateRequest } from "@/lib/auth";
 import { EDITABLE_FILE_EXTENSIONS } from "@/lib/const";
-import { getPublicAssetUrl, getUserHomeDirectory, s3Client } from "@/lib/utils";
+import { s3Client } from "@/lib/s3";
+import { getPublicAssetUrl, getUserHomeDirectory } from "@/lib/utils";
 import EditFilenameButton from "./EditFilenameButton";
 
 export default async function DirectoryListing({ paths }: { paths: string[] }) {
@@ -32,7 +33,7 @@ export default async function DirectoryListing({ paths }: { paths: string[] }) {
   const decodedPaths = paths.map((p) => decodeURIComponent(p));
   const prefix = path.join(
     getUserHomeDirectory(user.loginName),
-    ...decodedPaths
+    ...decodedPaths,
   );
 
   // List objects in S3 with the given prefix
@@ -53,7 +54,7 @@ export default async function DirectoryListing({ paths }: { paths: string[] }) {
     ...(response.Contents?.filter(
       (content) =>
         // Filter out the current directory
-        content.Key !== prefix
+        content.Key !== prefix,
     ).map((content) => ({
       name: path.basename(content.Key!),
       isDirectory: () => false,
@@ -94,12 +95,12 @@ export default async function DirectoryListing({ paths }: { paths: string[] }) {
               </TableCell>
               <TableCell>
                 {EDITABLE_FILE_EXTENSIONS.includes(
-                  file.name.split(".").pop() ?? ""
+                  file.name.split(".").pop() ?? "",
                 ) || file.isDirectory() ? (
                   <Link
                     href={`/files/edit/${path.join(
                       decodedPaths.join("/"),
-                      file.name
+                      file.name,
                     )}`}
                   >
                     {file.name}
@@ -108,7 +109,7 @@ export default async function DirectoryListing({ paths }: { paths: string[] }) {
                   <Link
                     href={getPublicAssetUrl(
                       user.loginName,
-                      path.join(decodedPaths.join("/"), file.name)
+                      path.join(decodedPaths.join("/"), file.name),
                     )}
                     target="_blank"
                   >

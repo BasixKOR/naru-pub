@@ -31,16 +31,6 @@ render_gateway_config() {
   local slot=$1
   local destination=$2
 
-  # Only believe CF-Connecting-IP where the application is configured to believe
-  # it too; otherwise a client could pick its own rate-limit bucket. The value
-  # is read from the same .env the containers get it from, so the gateway and
-  # the application can never disagree about whether the header is trusted.
-  local client_key_trusted='$binary_remote_addr'
-  if [[ -f .env ]] &&
-    grep -Eq '^[[:space:]]*SITE_DATA_TRUST_CLOUDFLARE_IP[[:space:]]*=[[:space:]]*"?1"?[[:space:]]*$' .env; then
-    client_key_trusted='$http_cf_connecting_ip'
-  fi
-
   cat > "$destination" <<EOF
 map \$http_x_forwarded_proto \$naru_forwarded_proto {
     default \$http_x_forwarded_proto;
@@ -58,22 +48,33 @@ map \$http_upgrade \$naru_connection_upgrade {
 # one site from becoming a sign-in outage for everyone else. Per-client, so a
 # busy site with many real visitors is unaffected.
 #
-# \$naru_client_key is what "per-client" means here, and behind a CDN the peer
-# address is the CDN, not the visitor — keying on it would put every visitor in
-# one bucket and throttle the whole service. This follows the application's own
-# trust decision (SITE_DATA_TRUST_CLOUDFLARE_IP) rather than inventing a second
-# one: the header is only believed where the ingress is known to overwrite it
-# and direct access is blocked, because a client that can set it freely can also
-# rotate it to escape the limit.
-map \$http_cf_connecting_ip \$naru_client_key {
-    default        ${client_key_trusted};
-    ""             \$binary_remote_addr;
-}
+# Every request reaches this gateway through the Cloudflare Tunnel running on the
+# host, so the peer address is the tunnel, identical for the whole internet. A
+# limit keyed on it would be one bucket for every visitor at once — which is not
+# a rate limit, it is an outage waiting for a busy afternoon.
+#
+# real_ip rewrites \$remote_addr to the visitor Cloudflare saw, but only when the
+# peer is one of these private ranges. The tunnel is the only thing that can be:
+# it connects outbound and the published ports are not routable from outside the
+# host's own network, so the header cannot be supplied by a caller off the
+# internet. Logs get the real address out of this too.
+#
+# The application's own CF-Connecting-IP trust (SITE_DATA_TRUST_CLOUDFLARE_IP)
+# stays a separate, still-unset decision. Getting this wrong costs an attacker
+# their own rate-limit bucket; getting that wrong costs the write limits their
+# meaning, so it is not a switch to flip on the gateway's behalf.
+set_real_ip_from 10.0.0.0/8;
+set_real_ip_from 172.16.0.0/12;
+set_real_ip_from 192.168.0.0/16;
+set_real_ip_from 127.0.0.0/8;
+set_real_ip_from ::1/128;
+set_real_ip_from fd00::/8;
+real_ip_header CF-Connecting-IP;
 
-limit_req_zone \$naru_client_key zone=naru_data:16m rate=30r/s;
-limit_req_zone \$naru_client_key zone=naru_data_auth:8m rate=2r/s;
+limit_req_zone \$binary_remote_addr zone=naru_data:16m rate=30r/s;
+limit_req_zone \$binary_remote_addr zone=naru_data_auth:8m rate=2r/s;
 limit_req_status 429;
-limit_conn_zone \$naru_client_key zone=naru_conn:16m;
+limit_conn_zone \$binary_remote_addr zone=naru_conn:16m;
 limit_conn_status 429;
 
 upstream naru_control_plane {

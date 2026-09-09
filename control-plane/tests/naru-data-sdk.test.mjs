@@ -1726,7 +1726,12 @@ function fakeImagePipeline({ width, height, encoded }) {
     }
     async convertToBlob({ type, quality }) {
       drawn.push({ type, quality });
-      return encoded(type);
+      return encoded({
+        type,
+        quality,
+        width: this.width,
+        height: this.height,
+      });
     }
   };
   return {
@@ -1756,7 +1761,7 @@ test("oversized photos are downscaled before authorization so the declared size 
   const image = fakeImagePipeline({
     width: 8000,
     height: 6000,
-    encoded: (type) => new Blob(["x".repeat(1024)], { type }),
+    encoded: ({ type }) => new Blob(["x".repeat(1024)], { type }),
   });
   const calls = captureUpload();
   try {
@@ -1791,7 +1796,7 @@ test("resizing keeps the original when it is already small, would grow, or is de
   const oldWindow = globalThis.window,
     oldFetch = globalThis.fetch;
   const cases = [
-    // Within the pixel box and under minBytes: a hand-tuned PNG stays exact.
+    // Within the pixel box and under maxBytes: a hand-tuned PNG stays exact.
     { width: 800, height: 600, size: 4096, options: {} },
     // Re-encoding an efficient image can cost bytes; the smaller one wins.
     { width: 8000, height: 6000, size: 4096, options: {} },
@@ -1811,7 +1816,7 @@ test("resizing keeps the original when it is already small, would grow, or is de
       const image = fakeImagePipeline({
         width,
         height,
-        encoded: (type) =>
+        encoded: ({ type }) =>
           new Blob(["x".repeat(size)], { type: encodedType || type }),
       });
       const calls = captureUpload();
@@ -1843,7 +1848,8 @@ test("image options are validated and a shrunk file still faces the upload limit
   const image = fakeImagePipeline({
     width: 8000,
     height: 6000,
-    encoded: (type) => new Blob([new Uint8Array(26 * 1024 * 1024)], { type }),
+    encoded: ({ type }) =>
+      new Blob([new Uint8Array(26 * 1024 * 1024)], { type }),
   });
   captureUpload();
   try {
@@ -1859,7 +1865,9 @@ test("image options are validated and a shrunk file still faces the upload limit
       { quality: 1.1 },
       { type: "image/gif" },
       { type: "image/svg+xml" },
-      { minBytes: -1 },
+      { maxBytes: 0 },
+      { maxBytes: -1 },
+      { maxBytes: 1.5 },
     ])
       await assert.rejects(
         owner.files.upload(photo, { image: bad }),
@@ -1880,6 +1888,113 @@ test("image options are validated and a shrunk file still faces the upload limit
       name: "TypeError",
       message: "File must be between 1 byte and 25 MiB.",
     });
+  } finally {
+    image.restore();
+    globalThis.window = oldWindow;
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("encoding spends quality then pixels until the byte budget is met", async () => {
+  const oldWindow = globalThis.window,
+    oldFetch = globalThis.fetch;
+  const budget = 500 * 1024;
+  const cases = [
+    {
+      label: "quality alone reaches the budget",
+      // A lossy encoder: bytes track pixels and quality together.
+      encoded: ({ width, height, quality }) =>
+        Math.round(width * height * quality * 0.35),
+      qualities: [0.82, 0.7, 0.58, 0.46],
+      // Every attempt redraws, so the box repeats until quality suffices.
+      sizes: [
+        [2048, 1365],
+        [2048, 1365],
+        [2048, 1365],
+        [2048, 1365],
+      ],
+    },
+    {
+      label: "lossless output can only shed pixels",
+      type: "image/png",
+      encoded: ({ width, height }) => Math.round(width * height * 0.3),
+      // Quality never moves for a lossless type; only the box shrinks, and a
+      // near miss still takes a real step rather than stalling over budget.
+      qualities: [0.82, 0.82, 0.82],
+      sizes: [
+        [2048, 1365],
+        [1600, 1067],
+        [1520, 1014],
+      ],
+    },
+  ];
+  try {
+    for (const { label, type, encoded, qualities, sizes } of cases) {
+      const image = fakeImagePipeline({
+        width: 6000,
+        height: 4000,
+        encoded: (options) =>
+          new Blob(["x".repeat(encoded(options))], { type: options.type }),
+      });
+      const calls = captureUpload();
+      try {
+        const owner = await restoreTestOwner();
+        await owner.files.upload(
+          new File([new Uint8Array(12 * 1024 * 1024)], "photo.jpg", {
+            type: "image/jpeg",
+          }),
+          type ? { image: { type } } : {},
+        );
+        const declared = JSON.parse(calls[0].options.body);
+        assert.ok(
+          declared.size <= budget,
+          `${label}: ${declared.size} exceeds the budget`,
+        );
+        // Each attempt draws at its size, then encodes at its quality.
+        assert.deepEqual(
+          image.drawn.filter(Array.isArray),
+          sizes,
+          `${label}: drawn sizes`,
+        );
+        assert.deepEqual(
+          image.drawn
+            .filter((entry) => !Array.isArray(entry))
+            .map((e) => e.quality),
+          qualities,
+          `${label}: qualities tried`,
+        );
+      } finally {
+        image.restore();
+      }
+    }
+  } finally {
+    globalThis.window = oldWindow;
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("an unreachable budget still uploads the smallest attempt", async () => {
+  const oldWindow = globalThis.window,
+    oldFetch = globalThis.fetch;
+  // Nothing this encoder produces fits, so the search exhausts its attempts.
+  const image = fakeImagePipeline({
+    width: 6000,
+    height: 4000,
+    encoded: ({ type }) => new Blob(["x".repeat(700 * 1024)], { type }),
+  });
+  const calls = captureUpload();
+  try {
+    const owner = await restoreTestOwner();
+    await owner.files.upload(
+      new File([new Uint8Array(12 * 1024 * 1024)], "photo.jpg", {
+        type: "image/jpeg",
+      }),
+    );
+    const declared = JSON.parse(calls[0].options.body);
+    assert.equal(declared.size, 700 * 1024);
+    assert.equal(declared.contentType, "image/webp");
+    // Six attempts, and the giving up is bounded rather than a spin.
+    assert.equal(image.drawn.filter(Array.isArray).length, 6);
   } finally {
     image.restore();
     globalThis.window = oldWindow;

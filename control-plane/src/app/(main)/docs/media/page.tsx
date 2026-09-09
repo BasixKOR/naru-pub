@@ -128,11 +128,17 @@ await owner.collection("posts").set("hello", {
                 내려받는 양도 줄어듭니다.
               </p>
               <p>
-                JPEG, PNG, WebP는 긴 변이 2048 픽셀을 넘거나 파일이 1 MiB보다
-                무거울 때만 다시 인코딩합니다. 줄인 쪽이 오히려 커지면 원본을
-                그대로 올리니, 공들여 줄여 둔 작은 이미지는 손대지 않습니다.
-                아이폰이 저장하는 HEIC는 사파리에서 받는 형식으로 바꿔 주므로,
-                원래대로면 거절당했을 사진도 올릴 수 있습니다.
+                JPEG, PNG, WebP는 긴 변이 2048 픽셀을 넘거나 파일이{" "}
+                <strong>500 KiB</strong>보다 무거울 때만 다시 인코딩합니다.
+                공들여 줄여 둔 작은 이미지는 손대지 않고, 줄인 쪽이 오히려
+                커지면 원본을 그대로 올립니다. 아이폰이 저장하는 HEIC는
+                사파리에서 받는 형식으로 바꿔 주므로, 원래대로면 거절당했을
+                사진도 올릴 수 있습니다.
+              </p>
+              <p>
+                500 KiB에 맞출 때는 품질을 먼저 낮추고, 그래도 모자라면 크기를
+                줄입니다. 여섯 번 안에 맞추지 못하면 그중 가장 작은 결과를
+                올립니다. 다른 용량을 원하면 <code>maxBytes</code>로 정하세요.
               </p>
               <p>
                 다시 인코딩하면 EXIF가 사라집니다. 회전은 픽셀에 반영해 넣으니
@@ -145,7 +151,7 @@ await owner.files.upload(file);
 
 // 원하는 크기로.
 await owner.files.upload(file, {
-  image: { maxDimension: 1600, quality: 0.8, type: "image/jpeg" },
+  image: { maxDimension: 1600, maxBytes: 300 * 1024, type: "image/jpeg" },
 });
 
 // 원본 그대로 올리기.

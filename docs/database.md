@@ -210,7 +210,7 @@ Database documents should store `file.id` or `file.url`, not base64 data.
 const image = await owner.files.upload(fileInput.files[0], {
   signal: abortController.signal,
   onProgress: ({ loaded, total }) => showProgress(loaded / total),
-  image: { maxDimension: 1600 },
+  image: { maxDimension: 1600, maxBytes: 300 * 1024 },
   metadata: {
     altText: "A pigeon",
     references: [{ collection: "posts", id: "hello" }],
@@ -243,15 +243,21 @@ the background cleanup after one hour.
 The SDK downscales large photos in the browser before it asks for an
 authorization, so the declared size matches what R2 stores and the 25 MiB limit
 applies to the shrunk copy. A JPEG, PNG or WebP is re-encoded only when its long
-edge exceeds `maxDimension` (2048) or the file exceeds `minBytes` (1 MiB), and
-the original is kept whenever re-encoding would produce more bytes; small
-hand-tuned images therefore upload untouched. HEIC and HEIF are always
+edge exceeds `maxDimension` (2048) or the file exceeds `maxBytes` (500 KiB), so
+small hand-tuned images upload untouched. Re-encoding then chases that budget:
+quality steps down from `quality` (0.82) to a 0.4 floor, and if that is not
+enough the box shrinks — by the square root of the overshoot, capped at 0.95 per
+step so a near miss still makes progress. A lossless `type` skips the quality
+steps, having no such dial. Six attempts are allowed; if none fits, the smallest
+is uploaded, and the original is kept whenever re-encoding produced more bytes.
+The 2048 default matches the long edge X serves its "large" variant at; the byte
+budget is ours, as X publishes no such figure. HEIC and HEIF are always
 transcoded where the browser can decode them — Safari can, which is how an
 iPhone photo lands in an accepted type instead of a 415. Re-encoding drops EXIF,
 so orientation is baked into the pixels and capture coordinates do not reach the
 public origin, and the stored name takes the new extension. Pass
 `original: true` to upload the bytes as given, or tune `image` with
-`maxDimension`, `quality`, `type` and `minBytes`. `onProgress` covers the
+`maxDimension`, `quality`, `type` and `maxBytes`. `onProgress` covers the
 transfer only; it reports nothing while an image is being re-encoded. The media
 library at `/media` uploads originals and does not resize.
 

@@ -213,7 +213,7 @@ function imageSettings(image = {}, original = false) {
     maxDimension = 2048,
     quality = 0.82,
     type = "image/webp",
-    minBytes = 1024 * 1024,
+    maxBytes = 500 * 1024,
   } = image;
   if (
     !Number.isInteger(maxDimension) ||
@@ -229,9 +229,9 @@ function imageSettings(image = {}, original = false) {
     throw new TypeError(
       "image type must be image/webp, image/jpeg or image/png.",
     );
-  if (!Number.isInteger(minBytes) || minBytes < 0)
-    throw new TypeError("minBytes must be a non-negative integer.");
-  return { maxDimension, quality, type, minBytes };
+  if (!Number.isInteger(maxBytes) || maxBytes < 1)
+    throw new TypeError("maxBytes must be a positive integer.");
+  return { maxDimension, quality, type, maxBytes };
 }
 // Browsers substitute image/png when they cannot encode the requested type, so
 // callers check blob.type before trusting it.
@@ -248,6 +248,56 @@ function newCanvas(width, height) {
   canvas.width = width;
   canvas.height = height;
   return canvas;
+}
+// Quality alone rarely reaches a byte budget from a 12 megapixel photo, and
+// pixels alone throw away detail the budget could have afforded. Spend quality
+// first down to a floor worth looking at, then shed pixels.
+const MIN_QUALITY = 0.4;
+const QUALITY_STEP = 0.12;
+const ATTEMPTS = 6;
+async function encodeWithin(bitmap, settings, size) {
+  let [width, height] = size;
+  let quality = settings.quality;
+  let best;
+  for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
+    const canvas = newCanvas(width, height);
+    const context = canvas?.getContext("2d", {
+      alpha: settings.type !== "image/jpeg",
+    });
+    if (!context) return best;
+    context.drawImage(bitmap, 0, 0, width, height);
+    const blob = await encodeCanvas(canvas, { type: settings.type, quality });
+    // An encoder that ignored the requested type cannot be reasoned about, and
+    // its bytes would be declared under a type they are not.
+    if (!blob?.size || blob.type !== settings.type) return best;
+    if (!best || blob.size < best.size) best = blob;
+    if (blob.size <= settings.maxBytes) return blob;
+    // PNG is lossless, so quality is not a dial it has; only fewer pixels help.
+    if (quality > MIN_QUALITY && settings.type !== "image/png") {
+      // Rounded so repeated subtraction does not drift into 0.45999999999999996.
+      quality = Math.max(
+        MIN_QUALITY,
+        Math.round((quality - QUALITY_STEP) * 100) / 100,
+      );
+      continue;
+    }
+    // Bytes track area, so each edge moves by the square root of how far over
+    // the last attempt landed: never more than half at a time, and never so
+    // little that rounding cancels it — landing barely over budget is exactly
+    // when a step of zero would strand the result above it.
+    const ratio = Math.min(
+      0.95,
+      Math.max(0.5, Math.sqrt(settings.maxBytes / blob.size)),
+    );
+    const next = [
+      Math.max(1, Math.round(width * ratio)),
+      Math.max(1, Math.round(height * ratio)),
+    ];
+    // Rounding can stall on tiny images; stop rather than spin.
+    if (next[0] === width && next[1] === height) return best;
+    [width, height] = next;
+  }
+  return best;
 }
 // The object key takes its extension from the name while the content type is
 // declared separately; a .heic key served as WebP is a confusing public URL.
@@ -280,28 +330,23 @@ async function downscaleImage(file, settings) {
     const longest = Math.max(bitmap.width, bitmap.height);
     if (!longest) return file;
     const scale = Math.min(1, settings.maxDimension / longest);
-    // A small hand-tuned PNG should survive byte-identical; only pixel count or
-    // sheer weight justifies a lossy pass. Undecodable types have no such
+    // A small hand-tuned PNG should survive byte-identical; only excess pixels
+    // or excess bytes justify a lossy pass. Undecodable types have no such
     // choice, since uploading them unchanged is a rejection.
     if (
       scale === 1 &&
-      file.size <= settings.minBytes &&
+      file.size <= settings.maxBytes &&
       Object.hasOwn(ENCODABLE, file.type)
     )
       return file;
-    const width = Math.max(1, Math.round(bitmap.width * scale));
-    const height = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = newCanvas(width, height);
-    const context = canvas?.getContext("2d", {
-      alpha: settings.type !== "image/jpeg",
-    });
-    if (!context) return file;
-    context.drawImage(bitmap, 0, 0, width, height);
-    const blob = await encodeCanvas(canvas, settings);
-    // Re-encoding an already efficient file can cost bytes. Keep the smaller of
-    // the two, and never trust an encoder that ignored the requested type.
-    if (!blob?.size || blob.type !== settings.type || blob.size >= file.size)
-      return file;
+    const blob = await encodeWithin(bitmap, settings, [
+      Math.max(1, Math.round(bitmap.width * scale)),
+      Math.max(1, Math.round(bitmap.height * scale)),
+    ]);
+    // Re-encoding an already efficient file can cost bytes; keep the smaller of
+    // the two. A budget that could not be met still yields the best attempt,
+    // which beats sending the original.
+    if (!blob?.size || blob.size >= file.size) return file;
     return new File(
       [blob],
       renameExtension(

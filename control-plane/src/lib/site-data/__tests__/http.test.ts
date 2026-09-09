@@ -129,6 +129,25 @@ test("untrusted IP headers do not select a separate rate limit bucket", async ()
   }
 });
 
+test("trusted ingress IP selects the public-write rate limit bucket", async () => {
+  const previous = process.env.SITE_DATA_TRUST_CLOUDFLARE_IP;
+  process.env.SITE_DATA_TRUST_CLOUDFLARE_IP = "1";
+  try {
+    await dataRequest(
+      new Request("https://naru.pub/api/data/alice/posts", {
+        headers: { "cf-connecting-ip": "2001:db8::99" },
+      }),
+      ["posts"],
+      "alice",
+    );
+    expect(execute.mock.calls[0][0].clientIp).toBe("2001:db8::99");
+  } finally {
+    if (previous === undefined)
+      delete process.env.SITE_DATA_TRUST_CLOUDFLARE_IP;
+    else process.env.SITE_DATA_TRUST_CLOUDFLARE_IP = previous;
+  }
+});
+
 test("canonical control-plane origin works behind a proxy without trusting forwarded host", async () => {
   const { sameOrigin } = await import("../validation");
   const previous = process.env.SITE_DATA_CONTROL_PLANE_ORIGIN;

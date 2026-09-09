@@ -56,10 +56,9 @@ map \$http_upgrade \$naru_connection_upgrade {
 # The real address is recovered per server block (see below), so these zones key
 # on the visitor rather than on the tunnel every request shares.
 #
-# The application's own CF-Connecting-IP trust (SITE_DATA_TRUST_CLOUDFLARE_IP)
-# stays a separate, still-unset decision. Getting the gateway's key wrong costs
-# an attacker their own rate-limit bucket; getting the application's wrong costs
-# the public write limits their meaning, so it is not a switch to flip here.
+# The gateway overwrites CF-Connecting-IP before proxying to the application.
+# This gives the database write limiter the same verified address while making
+# a value supplied by an internet client irrelevant.
 limit_req_zone \$binary_remote_addr zone=naru_data:16m rate=30r/s;
 limit_req_zone \$binary_remote_addr zone=naru_data_auth:8m rate=2r/s;
 limit_req_status 429;
@@ -117,6 +116,7 @@ server {
         proxy_set_header Host \$http_host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header CF-Connecting-IP \$remote_addr;
         proxy_set_header X-Forwarded-Proto \$naru_forwarded_proto;
         proxy_read_timeout 60s;
         proxy_send_timeout 60s;
@@ -135,6 +135,7 @@ server {
         proxy_set_header Host \$http_host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header CF-Connecting-IP \$remote_addr;
         proxy_set_header X-Forwarded-Proto \$naru_forwarded_proto;
         proxy_read_timeout 60s;
         proxy_send_timeout 60s;
@@ -147,6 +148,7 @@ server {
         proxy_set_header Host \$http_host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header CF-Connecting-IP \$remote_addr;
         proxy_set_header X-Forwarded-Proto \$naru_forwarded_proto;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection \$naru_connection_upgrade;

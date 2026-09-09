@@ -8,12 +8,13 @@ export const metadata: Metadata = {
     "나루 제어판과 웹 SDK로 블로그, 방명록, 관리자 글쓰기를 만드는 방법",
 };
 const sections = [
-  ["start", "01 · 제어판에서 시작하기"],
-  ["permissions", "02 · 공개 범위 정하기"],
-  ["sdk", "03 · 웹 SDK 사용하기"],
-  ["owner", "04 · 웹사이트에서 관리자 로그인"],
-  ["example", "05 · 예제 블로그 설치"],
-  ["limits", "06 · 한도와 문제 해결"],
+  ["recipes", "01 · 만들고 싶은 기능부터 찾기"],
+  ["start", "02 · 제어판에서 시작하기"],
+  ["permissions", "03 · 공개 범위 정하기"],
+  ["sdk", "04 · 웹 SDK 사용하기"],
+  ["owner", "05 · 웹사이트에서 관리자 로그인"],
+  ["example", "06 · 예제 블로그 설치"],
+  ["limits", "07 · 한도와 문제 해결"],
 ];
 function Section({
   id,
@@ -71,7 +72,76 @@ export default function DatabaseDocs() {
             </ul>
           </nav>
           <article className="min-w-0 space-y-12 leading-8 [&_a]:underline [&_a]:underline-offset-4">
-            <Section id="start" title="01 · 제어판에서 시작하기">
+            <Section id="recipes" title="01 · 만들고 싶은 기능부터 찾기">
+              <p>
+                데이터베이스 구조보다 만들 기능을 먼저 고르세요. 아래 이름대로
+                컬렉션과 공개 범위를 정하면 대부분의 작은 사이트 기능을 바로
+                시작할 수 있습니다.
+              </p>
+              <div className="grid gap-4 md:grid-cols-2">
+                {[
+                  {
+                    id: "recipe-posts",
+                    title: "글과 작품을 공개하기",
+                    collection: "posts · 공개 읽기 / 관리자 쓰기",
+                    body: "방문자는 목록과 글을 읽고, 소유자만 새 글을 공개하거나 고칩니다.",
+                    code: 'db.collection("posts").list({ orderBy: "createdAt", direction: "desc" })',
+                  },
+                  {
+                    id: "recipe-guestbook",
+                    title: "방명록과 댓글 받기",
+                    collection: "guestbook · 공개 읽기 / 공개 생성만",
+                    body: "방문자는 새 인사를 남길 수 있지만 기존 인사를 고치거나 지울 수 없습니다.",
+                    code: 'db.collection("guestbook").add({ name, message })',
+                  },
+                  {
+                    id: "recipe-submissions",
+                    title: "비공개 문의와 신청 받기",
+                    collection: "submissions · 관리자 읽기 / 공개 생성만",
+                    body: "방문자가 보낸 내용은 목록에 공개되지 않고 소유자만 제어판이나 관리자 페이지에서 읽습니다.",
+                    code: 'db.collection("submissions").add({ email, message })',
+                  },
+                  {
+                    id: "recipe-drafts",
+                    title: "초안을 저장한 뒤 공개하기",
+                    collection: "drafts · 관리자 읽기 / 관리자 쓰기",
+                    body: "초안은 비공개로 두고, 공개할 때 posts 저장과 drafts 삭제를 한 batch로 묶습니다.",
+                    code: 'owner.batch([{ type: "set", ...post }, { type: "delete", ...draft }])',
+                  },
+                  {
+                    id: "recipe-media",
+                    title: "글에 이미지와 파일 붙이기",
+                    collection: "Naru Media · 관리자 업로드",
+                    body: "파일을 미디어 저장소에 올리고 반환된 공개 URL이나 ID만 문서에 저장합니다.",
+                    code: "owner.files.upload(file)",
+                  },
+                ].map((recipe) => (
+                  <section
+                    id={recipe.id}
+                    key={recipe.id}
+                    className="scroll-mt-8 space-y-3 rounded-lg border p-5"
+                  >
+                    <h3 className="font-bold">{recipe.title}</h3>
+                    <p className="text-sm font-medium">{recipe.collection}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {recipe.body}
+                    </p>
+                    <code className="block overflow-x-auto rounded bg-muted px-3 py-2 text-xs leading-5">
+                      {recipe.code}
+                    </code>
+                  </section>
+                ))}
+              </div>
+              <p>
+                먼저 <a href="#start">컬렉션을 만든 뒤</a>, 방문자가 무엇을 할
+                수 있는지 <a href="#permissions">공개 범위</a>에서 확인하세요.
+                소유자만 할 수 있는 저장·삭제·업로드에는{" "}
+                <a href="#owner">웹사이트 관리자 로그인</a>이 필요합니다. 완성된
+                구성을 보고 시작하려면 <a href="#example">예제 블로그</a>를
+                설치하세요.
+              </p>
+            </Section>
+            <Section id="start" title="02 · 제어판에서 시작하기">
               <p>
                 데이터베이스는 사이트별 JSON 문서 저장소입니다.{" "}
                 <strong>컬렉션</strong>은 문서를 모으는 공간이고,{" "}
@@ -108,7 +178,7 @@ export default function DatabaseDocs() {
                 허용합니다.
               </p>
             </Section>
-            <Section id="permissions" title="02 · 공개 범위 정하기">
+            <Section id="permissions" title="03 · 공개 범위 정하기">
               <p>
                 읽기와 쓰기는 독립적인 설정입니다. 공개 쓰기를 허용해도 읽기가
                 자동으로 공개되지는 않습니다.
@@ -182,7 +252,7 @@ export default function DatabaseDocs() {
                 표시하고 HTML로 실행하지 마세요.
               </p>
             </Section>
-            <Section id="sdk" title="03 · 웹 SDK 사용하기">
+            <Section id="sdk" title="04 · 웹 SDK 사용하기">
               <p>
                 빌드 도구 없이 HTML의 모듈 스크립트에서 사용할 수 있습니다.{" "}
                 <code>site</code>에는 전체 도메인이 아니라 나루 로그인 이름을
@@ -418,7 +488,7 @@ try {
                 <code>set()</code>으로 새 ID를 만드는 것도 금지됩니다.
               </p>
             </Section>
-            <Section id="owner" title="04 · 웹사이트에서 관리자 로그인">
+            <Section id="owner" title="05 · 웹사이트에서 관리자 로그인">
               <p>
                 정적 웹사이트에서도 관리자 글쓰기를 할 수 있습니다. 사이트에
                 비밀번호나 장기 API 키를 넣지 않습니다. 사용자가 나루에서
@@ -569,7 +639,7 @@ await owner.batch([
                 주소만 지정할 수 있습니다.
               </p>
             </Section>
-            <Section id="example" title="05 · 예제 블로그 설치">
+            <Section id="example" title="06 · 예제 블로그 설치">
               <p>
                 ‘작은 기록’은 분류별 글 목록·글 상세·방명록·관리자 편집·비공개
                 초안을 갖춘 정적 웹사이트입니다. 프레임워크나 빌드 과정 없이
@@ -646,7 +716,7 @@ await owner.batch([
                 닫으세요.
               </p>
             </Section>
-            <Section id="limits" title="06 · 한도와 문제 해결">
+            <Section id="limits" title="07 · 한도와 문제 해결">
               <ul className="list-disc space-y-3 pl-6">
                 <li>
                   사이트당 컬렉션 100개, 문서 10,000개, JSON 데이터 10 MiB까지

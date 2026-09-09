@@ -55,12 +55,12 @@ export default function DatabaseManager({
   }
   async function load(collection: string, after?: string) {
     const result = await api(
-      `/${collection}${after ? `?after=${encodeURIComponent(after)}` : ""}`,
+      `/${collection}${after ? `?pageToken=${encodeURIComponent(after)}` : ""}`,
     );
     setDocuments((previous) =>
       after ? [...previous, ...result.documents] : result.documents,
     );
-    setCursor(result.nextCursor);
+    setCursor(result.nextPageToken);
     // The list is paged, so the collection's real size comes from the server
     // rather than from however many rows happen to be on screen.
     if (!after) setTotal((await api(`/${collection}?count=1`)).count);

@@ -8,6 +8,23 @@ export class NaruDataError extends Error {
       code || (status === 401 ? "OWNER_SESSION_EXPIRED" : "REQUEST_FAILED");
   }
 }
+/** A latest-request-wins cancellation channel for search and navigation UIs. */
+export function createRequestChannel() {
+  let active;
+  return Object.freeze({
+    next(
+      reason = new DOMException("Superseded by a newer request.", "AbortError"),
+    ) {
+      active?.abort(reason);
+      active = new AbortController();
+      return active.signal;
+    },
+    cancel(reason = new DOMException("Request cancelled.", "AbortError")) {
+      active?.abort(reason);
+      active = undefined;
+    },
+  });
+}
 // One scope keeps the deadline active until the response body has been read.
 function requestScope({ signal, timeoutMs = 30000, fresh } = {}) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > 2147483647)
@@ -136,7 +153,7 @@ function validateResponse(url, method, body, result, status) {
       valid =
         Array.isArray(result.files) &&
         result.files.every(fileValue) &&
-        cursorValue(result.nextCursor);
+        cursorValue(result.nextPageToken);
   } else if (method === "DELETE") valid = success(result);
   else if (method !== "GET") valid = written(result);
   else if (path.length > 1) valid = documentValue(result.document);
@@ -146,7 +163,9 @@ function validateResponse(url, method, body, result, status) {
     valid =
       Array.isArray(result.documents) &&
       result.documents.every(documentValue) &&
-      cursorValue(result.nextCursor);
+      cursorValue(result.nextPageToken) &&
+      (result.total === undefined ||
+        (Number.isSafeInteger(result.total) && result.total >= 0));
   if (!valid) throw invalidResponse(status);
 }
 // Reject values JSON.stringify would silently discard or coerce.
@@ -466,7 +485,27 @@ function filterJson(where) {
   return JSON.stringify(where);
 }
 function queryOptions({ orderBy, direction } = {}, fields = ORDER_FIELDS) {
-  if (
+  const validPair = (pair) =>
+    Array.isArray(pair) &&
+    pair.length === 2 &&
+    typeof pair[0] === "string" &&
+    fields.test(pair[0]) &&
+    (pair[1] === "asc" || pair[1] === "desc");
+  if (Array.isArray(orderBy)) {
+    if (
+      fields !== ORDER_FIELDS ||
+      orderBy.length < 1 ||
+      orderBy.length > 2 ||
+      !orderBy.every(validPair) ||
+      new Set(orderBy.map(([field]) => field)).size !== orderBy.length ||
+      orderBy.some(([field]) => field === "id")
+    )
+      throw new TypeError(
+        "Multi-field orderBy requires one or two unique [field, direction] pairs; id is automatic.",
+      );
+    if (direction !== undefined)
+      throw new TypeError("Do not combine direction with multi-field orderBy.");
+  } else if (
     orderBy !== undefined &&
     (typeof orderBy !== "string" || !fields.test(orderBy))
   )
@@ -475,7 +514,12 @@ function queryOptions({ orderBy, direction } = {}, fields = ORDER_FIELDS) {
         ? "orderBy must be id, createdAt, updatedAt or data.<field>."
         : "orderBy must be id, createdAt or updatedAt.",
     );
-  if (direction !== undefined && direction !== "asc" && direction !== "desc")
+  if (
+    !Array.isArray(orderBy) &&
+    direction !== undefined &&
+    direction !== "asc" &&
+    direction !== "desc"
+  )
     throw new TypeError("direction must be asc or desc.");
 }
 function listOptions(options = {}, fields = ORDER_FIELDS) {
@@ -489,10 +533,10 @@ function listOptions(options = {}, fields = ORDER_FIELDS) {
   )
     throw new TypeError("limit must be a positive integer.");
   if (
-    options.after !== undefined &&
-    (typeof options.after !== "string" || options.after.length === 0)
+    options.pageToken !== undefined &&
+    (typeof options.pageToken !== "string" || options.pageToken.length === 0)
   )
-    throw new TypeError("after must be a non-empty cursor string.");
+    throw new TypeError("pageToken must be a non-empty string.");
 }
 /** One page request, spelled the same way for documents and for files. */
 function pageParameters(options, fields) {
@@ -500,11 +544,21 @@ function pageParameters(options, fields) {
   const parameters = new URLSearchParams();
   if (options.where !== undefined)
     parameters.set("where", filterJson(options.where));
-  if (options.orderBy !== undefined) parameters.set("orderBy", options.orderBy);
+  if (options.orderBy !== undefined)
+    parameters.set(
+      "orderBy",
+      Array.isArray(options.orderBy)
+        ? JSON.stringify(options.orderBy)
+        : options.orderBy,
+    );
   if (options.direction !== undefined)
     parameters.set("direction", options.direction);
   parameters.set("limit", String(options.limit ?? 50));
-  if (options.after !== undefined) parameters.set("after", options.after);
+  if (options.pageToken !== undefined)
+    parameters.set("pageToken", options.pageToken);
+  if (options.includeTotal === true) parameters.set("includeTotal", "1");
+  else if (options.includeTotal !== undefined && options.includeTotal !== false)
+    throw new TypeError("includeTotal must be a boolean.");
   return parameters;
 }
 // `all()` reads like a loop over an array and is not one: each page is a
@@ -524,19 +578,20 @@ function walkLimit(max) {
 // Walking every page is the same job whichever collection is being walked: keep
 // asking until the cursor runs out, and refuse to loop on a repeated one.
 async function* walk(readPage, key, { max, ...options } = {}) {
-  let after;
+  let pageToken;
   let walked = 0;
   const ceiling = walkLimit(max);
   const seen = new Set();
   do {
-    const page = await readPage({ limit: 100, ...options, after });
-    if (page.nextCursor !== null && seen.has(page.nextCursor))
+    const page = await readPage({ limit: 100, ...options, pageToken });
+    const nextPageToken = page.nextPageToken;
+    if (nextPageToken !== null && seen.has(nextPageToken))
       throw new NaruDataError(
         200,
         "Pagination cursor repeated.",
         "INVALID_PAGINATION",
       );
-    if (page.nextCursor !== null) seen.add(page.nextCursor);
+    if (nextPageToken !== null) seen.add(nextPageToken);
     for (const item of page[key]) {
       if (options.signal?.aborted) {
         const scope = requestScope(options);
@@ -557,8 +612,8 @@ async function* walk(readPage, key, { max, ...options } = {}) {
       walked += 1;
       yield item;
     }
-    after = page.nextCursor ?? undefined;
-  } while (after);
+    pageToken = nextPageToken ?? undefined;
+  } while (pageToken);
 }
 const base64url = (bytes) =>
   btoa(String.fromCharCode(...bytes))
@@ -572,6 +627,7 @@ export function createDatabase({
   site,
   controlPlaneOrigin = CONTROL_PLANE_ORIGIN,
   schemas = {},
+  collections = {},
 }) {
   if (typeof site !== "string" || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(site))
     throw new TypeError("A valid Naru site login name is required.");
@@ -588,6 +644,22 @@ export function createDatabase({
     );
   const root = `${base.origin}/api/data/${encodeURIComponent(site)}`;
   const storageKey = `naru:owner:${base.origin}:${site}`;
+  // An owner write can leave a ten-second public response in a shared cache.
+  // Keep this browser's reads fresh for that same window so an editor does not
+  // have to remember fresh:true after every mutation.
+  const recentlyWritten = new Map();
+  const freshUntil = (collectionName) =>
+    (recentlyWritten.get(collectionName) ?? 0) > Date.now();
+  const noteWrite = (url, body) => {
+    const path = new URL(url).pathname.slice(new URL(root).pathname.length + 1);
+    const names =
+      path === "_batch"
+        ? [...new Set((body?.operations ?? []).map((item) => item.collection))]
+        : path && !path.startsWith("_")
+          ? [decodeURIComponent(path.split("/")[0])]
+          : [];
+    for (const name of names) recentlyWritten.set(name, Date.now() + 10_000);
+  };
   if (!schemas || typeof schemas !== "object" || Array.isArray(schemas))
     throw new TypeError("schemas must be an object of validator functions.");
   // Snapshot own data properties without executing registry getters. Later
@@ -600,27 +672,89 @@ export function createDatabase({
       throw new TypeError(`Schema for ${name} must be a function property.`);
     validators.set(name, descriptor.value);
   }
-  function validateDocument(collectionName, data) {
-    validateJson(data);
-    const validator = validators.get(collectionName);
-    if (validator === undefined) return;
-    const result = validator(data);
-    if (result !== undefined && typeof result !== "boolean") {
-      if (result !== null && typeof result.then === "function") {
-        // An async validator may already have rejected. Observe that rejection
-        // while rejecting the write synchronously, before any request is sent.
-        Promise.resolve(result).catch(() => {});
-      }
+  if (
+    !collections ||
+    typeof collections !== "object" ||
+    Array.isArray(collections)
+  )
+    throw new TypeError(
+      "collections must be an object of collection definitions.",
+    );
+  const definitions = new Map();
+  for (const name of Reflect.ownKeys(collections)) {
+    segment(name);
+    const descriptor = Object.getOwnPropertyDescriptor(collections, name);
+    if (
+      !("value" in descriptor) ||
+      !descriptor.value ||
+      typeof descriptor.value !== "object" ||
+      Array.isArray(descriptor.value)
+    )
       throw new TypeError(
-        `Schema for ${collectionName} must return a boolean or undefined synchronously.`,
+        `Collection definition for ${name} must be an object.`,
       );
+    const definition = {};
+    for (const key of ["parse", "serialize", "map"]) {
+      const member = Object.getOwnPropertyDescriptor(descriptor.value, key);
+      if (member === undefined) continue;
+      if (!("value" in member) || typeof member.value !== "function")
+        throw new TypeError(`${key} for ${name} must be a function property.`);
+      definition[key] = member.value;
     }
-    if (result === false)
-      throw new TypeError(
-        `Document does not match the ${collectionName} schema.`,
-      );
-    // Validators can mutate their argument; retain the lossless JSON contract.
-    validateJson(data);
+    definitions.set(name, Object.freeze(definition));
+  }
+  const synchronous = (result, label) => {
+    if (
+      result !== null &&
+      result !== undefined &&
+      typeof result.then === "function"
+    ) {
+      Promise.resolve(result).catch(() => {});
+      throw new TypeError(`${label} must return synchronously.`);
+    }
+    return result;
+  };
+  function validateDocument(collectionName, data, serializer) {
+    let prepared = data;
+    const definition = definitions.get(collectionName);
+    const write = serializer ?? definition?.serialize;
+    if (write) {
+      prepared = synchronous(write(data), `serialize for ${collectionName}`);
+    }
+    validateJson(prepared);
+    const validator = validators.get(collectionName);
+    if (validator !== undefined) {
+      const result = validator(prepared);
+      if (result !== undefined && typeof result !== "boolean") {
+        if (result !== null && typeof result.then === "function") {
+          // An async validator may already have rejected. Observe that rejection
+          // while rejecting the write synchronously, before any request is sent.
+          Promise.resolve(result).catch(() => {});
+        }
+        throw new TypeError(
+          `Schema for ${collectionName} must return a boolean or undefined synchronously.`,
+        );
+      }
+      if (result === false)
+        throw new TypeError(
+          `Document does not match the ${collectionName} schema.`,
+        );
+    } else if (definition?.parse) {
+      try {
+        synchronous(definition.parse(prepared), `parse for ${collectionName}`);
+      } catch (cause) {
+        if (cause !== null && typeof cause === "object" && "then" in cause) {
+          // An async validator may already have rejected. Observe that rejection
+          // while rejecting the write synchronously, before any request is sent.
+          Promise.resolve(cause).catch(() => {});
+        }
+        throw cause;
+      }
+    }
+    // Validators and converters can mutate their argument; retain the lossless
+    // JSON contract after they run.
+    validateJson(prepared);
+    return prepared;
   }
   async function request(url, method = "GET", body, token, options) {
     const scope = requestScope(options);
@@ -635,7 +769,19 @@ export function createDatabase({
       // carrying a credential, and anything that is not a read, still bypasses
       // the cache entirely — as does a caller that asks for `fresh`, which is
       // what a read immediately after one's own write wants.
-      const cacheable = method === "GET" && !token && !options?.fresh;
+      const requestUrl = new URL(url);
+      const relative = requestUrl.pathname.slice(
+        new URL(root).pathname.length + 1,
+      );
+      const collectionName =
+        relative && !relative.startsWith("_")
+          ? decodeURIComponent(relative.split("/")[0])
+          : undefined;
+      const cacheable =
+        method === "GET" &&
+        !token &&
+        !options?.fresh &&
+        !freshUntil(collectionName);
       try {
         response = await fetch(url, {
           method,
@@ -693,6 +839,11 @@ export function createDatabase({
           result,
           response.status,
         );
+      if (token && method !== "GET")
+        noteWrite(
+          url,
+          serialized === undefined ? undefined : JSON.parse(serialized),
+        );
       return result;
     } finally {
       scope.close();
@@ -710,23 +861,26 @@ export function createDatabase({
       }
     };
     const api = {
-      collection(collectionName, { parse } = {}) {
+      collection(collectionName, options = {}) {
         const path = `${root}/${segment(collectionName)}`;
+        if (!options || typeof options !== "object" || Array.isArray(options))
+          throw new TypeError("collection options must be an object.");
+        const definition = definitions.get(collectionName) ?? {};
+        const { parse, serialize, map } = { ...definition, ...options };
         if (parse !== undefined && typeof parse !== "function")
           throw new TypeError("parse must be a synchronous function.");
+        if (serialize !== undefined && typeof serialize !== "function")
+          throw new TypeError("serialize must be a synchronous function.");
+        if (map !== undefined && typeof map !== "function")
+          throw new TypeError("map must be a synchronous function.");
         const readDocument = (document) => {
-          if (parse === undefined) return document;
           try {
-            const data = parse(document.data);
-            if (
-              data !== null &&
-              data !== undefined &&
-              typeof data.then === "function"
-            ) {
-              Promise.resolve(data).catch(() => {});
-              throw new TypeError("parse must return synchronously.");
-            }
-            return { ...document, data };
+            const data =
+              parse === undefined
+                ? document.data
+                : synchronous(parse(document.data), "parse");
+            const parsed = { ...document, data };
+            return map === undefined ? parsed : synchronous(map(parsed), "map");
           } catch (cause) {
             const error = new NaruDataError(
               200,
@@ -745,11 +899,12 @@ export function createDatabase({
             "GET",
             undefined,
             options,
-          ).then((page) =>
-            parse === undefined
-              ? page
-              : { ...page, documents: page.documents.map(readDocument) },
-          );
+          ).then((page) => ({
+            ...page,
+            ...(parse === undefined && map === undefined
+              ? {}
+              : { documents: page.documents.map(readDocument) }),
+          }));
         return {
           async get(id, options) {
             return readDocument(
@@ -778,15 +933,15 @@ export function createDatabase({
             return walk(list, "documents", options);
           },
           add(data, options) {
-            validateDocument(collectionName, data);
-            return send(path, "POST", { data }, options);
+            const prepared = validateDocument(collectionName, data, serialize);
+            return send(path, "POST", { data: prepared }, options);
           },
           set(id, data, { ifVersion, ...options } = {}) {
-            validateDocument(collectionName, data);
+            const prepared = validateDocument(collectionName, data, serialize);
             return send(
               `${path}/${segment(id)}${condition(ifVersion)}`,
               "PUT",
-              { data },
+              { data: prepared },
               options,
             );
           },
@@ -837,16 +992,16 @@ export function createDatabase({
             throw new TypeError("add assigns the document ID itself.");
           if (operation.ifVersion !== undefined)
             throw new TypeError("add cannot take ifVersion.");
-          validateDocument(collection, operation.data);
-          return { type: "add", collection, data: operation.data };
+          const data = validateDocument(collection, operation.data);
+          return { type: "add", collection, data };
         }
         segment(operation.id);
         const base = { collection, id: operation.id };
         if (operation.ifVersion !== undefined)
           base.ifVersion = checkVersion(operation.ifVersion);
         if (operation.type === "set") {
-          validateDocument(collection, operation.data);
-          return { ...base, type: "set", data: operation.data };
+          const data = validateDocument(collection, operation.data);
+          return { ...base, type: "set", data };
         }
         if (operation.type === "update") {
           // A patch is a fragment, so whole-document schemas cannot judge it.
@@ -886,6 +1041,34 @@ export function createDatabase({
       all(options = {}) {
         return walk(fileList, "files", options);
       },
+      forDocument(collection, id) {
+        segment(collection);
+        segment(id);
+        const where = { _naruCollection: collection, _naruDocument: id };
+        return Object.freeze({
+          list(options = {}) {
+            if (options.where !== undefined)
+              throw new TypeError("forDocument already defines its filter.");
+            return fileList({ ...options, where });
+          },
+          all(options = {}) {
+            if (options.where !== undefined)
+              throw new TypeError("forDocument already defines its filter.");
+            return walk(fileList, "files", { ...options, where });
+          },
+          async deleteAll(options = {}) {
+            let deleted = 0;
+            for await (const file of walk(fileList, "files", {
+              ...options,
+              where,
+            })) {
+              await api.files.delete(file.id, options);
+              deleted += 1;
+            }
+            return { deleted };
+          },
+        });
+      },
       async usage(options) {
         // A quota readout is one aggregate row; asking for it never pages the
         // library the way sharing the listing response used to.
@@ -894,13 +1077,40 @@ export function createDatabase({
       },
       async upload(
         source,
-        { image, original, onProgress, metadata = {}, ...options } = {},
+        {
+          image,
+          original,
+          onProgress,
+          metadata = {},
+          attachedTo,
+          ...options
+        } = {},
       ) {
         if (!(source instanceof Blob))
           throw new TypeError("upload requires a File or Blob.");
         if (onProgress !== undefined && typeof onProgress !== "function")
           throw new TypeError("onProgress must be a function.");
         validateJson(metadata);
+        if (
+          Object.hasOwn(metadata, "_naruCollection") ||
+          Object.hasOwn(metadata, "_naruDocument")
+        )
+          throw new TypeError(
+            "_naruCollection and _naruDocument are reserved metadata fields.",
+          );
+        if (attachedTo !== undefined) {
+          if (!object(attachedTo))
+            throw new TypeError(
+              "attachedTo must identify a collection and document.",
+            );
+          segment(attachedTo.collection);
+          segment(attachedTo.id);
+          metadata = {
+            ...metadata,
+            _naruCollection: attachedTo.collection,
+            _naruDocument: attachedTo.id,
+          };
+        }
         const settings = imageSettings(image, original);
         // Shrinking precedes the limit check on purpose: a 40 MB photo the
         // site would downscale for display anyway should upload, not fail.
@@ -1112,9 +1322,25 @@ export function createDatabase({
   function ownerClient(saved, key) {
     let token = saved.accessToken;
     const expiresAt = saved.expiresAt;
-    function clear() {
+    let status = "active";
+    const listeners = new Set();
+    const notify = () => {
+      const snapshot = Object.freeze({ status, expiresAt });
+      for (const listener of listeners) listener(snapshot);
+    };
+    const expire = () => {
+      if (status === "active") clear("expired");
+    };
+    const expiryTimer = setTimeout(expire, Math.max(0, expiresAt - Date.now()));
+    expiryTimer.unref?.();
+    function clear(nextStatus = "signed-out") {
       const current = token;
       token = null;
+      clearTimeout(expiryTimer);
+      if (status !== nextStatus) {
+        status = nextStatus;
+        notify();
+      }
       if (activeOwner === owner) activeOwner = null;
       // An older client must not erase a newer sign-in on the same page.
       try {
@@ -1138,7 +1364,7 @@ export function createDatabase({
       ...client(
         () => {
           if (!token || Date.now() >= expiresAt) {
-            clear();
+            clear(Date.now() >= expiresAt ? "expired" : status);
             throw new NaruDataError(
               401,
               "Owner session expired or signed out. Sign in again.",
@@ -1146,13 +1372,24 @@ export function createDatabase({
           }
           return token;
         },
-        clear,
+        () => clear("expired"),
         true,
       ),
       expiresAt,
+      get session() {
+        if (status === "active" && Date.now() >= expiresAt) expire();
+        return Object.freeze({ status, expiresAt });
+      },
+      onSessionChange(listener) {
+        if (typeof listener !== "function")
+          throw new TypeError("Session listener must be a function.");
+        listeners.add(listener);
+        listener(owner.session);
+        return () => listeners.delete(listener);
+      },
       async signOut(options) {
         const current = token;
-        clear();
+        clear("signed-out");
         if (current)
           await request(
             `${base.origin}/api/data-auth/revoke`,

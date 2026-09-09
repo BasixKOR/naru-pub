@@ -53,7 +53,7 @@ type MediaCommand = {
   adminUserId?: number;
   bearer?: { token: string; origin: string | null };
   body?: Record<string, unknown>;
-  after?: string;
+  pageToken?: string;
   limit?: number;
   orderBy?: string;
   direction?: string;
@@ -202,7 +202,7 @@ export async function executeMedia(command: MediaCommand) {
     const sort = mediaSort(command);
     const filter = filters(command.where);
     const cursor = decodeCursor(
-      command.after,
+      command.pageToken,
       owner.id,
       sort,
       filter.fingerprint,
@@ -237,7 +237,7 @@ export async function executeMedia(command: MediaCommand) {
     const last = page.at(-1);
     return {
       files: page.map(output),
-      nextCursor:
+      nextPageToken:
         rows.length > limit && last
           ? encodeCursor(
               owner.id,

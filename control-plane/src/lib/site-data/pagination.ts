@@ -1,4 +1,4 @@
-import { DataError, name, NAME } from "./validation";
+import { DataError, name } from "./validation";
 
 export type Column = "id" | "createdAt" | "updatedAt";
 export type Direction = "asc" | "desc";
@@ -11,6 +11,7 @@ export type Sort = {
   /** Set when ordering by a document field rather than a column. */
   field?: string;
 };
+export type SortInput = string | [string, Direction][];
 /** Server metadata is camelCase on the wire and snake_case in PostgreSQL. */
 const COLUMNS: Record<Column, string> = {
   id: "id",
@@ -39,6 +40,51 @@ export function sorting(orderBy = "id", direction = "asc"): Sort {
   };
 }
 
+/** A query may choose two keys; the document id is always the final stable
+ * tie-breaker. The wire keeps the original one-key form and uses JSON only for
+ * the new tuple form, so frozen clients and their cursors remain valid. */
+export function sortings(raw = "id", direction = "asc"): Sort[] {
+  if (!raw.startsWith("[")) return [sorting(raw, direction)];
+  let input: unknown;
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    throw new DataError(400, "orderBy must be a field or a JSON sort tuple.");
+  }
+  if (
+    !Array.isArray(input) ||
+    input.length < 1 ||
+    input.length > 2 ||
+    input.some(
+      (item) =>
+        !Array.isArray(item) ||
+        item.length !== 2 ||
+        typeof item[0] !== "string" ||
+        (item[1] !== "asc" && item[1] !== "desc"),
+    )
+  )
+    throw new DataError(
+      400,
+      "Multi-field orderBy requires one or two [field, direction] pairs.",
+    );
+  if (direction !== "asc")
+    throw new DataError(
+      400,
+      "Do not combine direction with multi-field orderBy.",
+    );
+  const result = (input as [string, Direction][]).map(
+    ([field, itemDirection]) => sorting(field, itemDirection),
+  );
+  if (new Set(result.map((item) => item.orderBy)).size !== result.length)
+    throw new DataError(400, "Multi-field orderBy fields must be unique.");
+  if (result.some((item) => item.orderBy === "id"))
+    throw new DataError(
+      400,
+      "The document id is already the final multi-field tie-breaker.",
+    );
+  return result;
+}
+
 export function encodeCursor(
   scope: number,
   sort: Sort,
@@ -63,27 +109,18 @@ export function encodeCursor(
   );
 }
 export function decodeCursor(
-  after: string | undefined,
+  pageToken: string | undefined,
   scope: number,
   sort: Sort,
   fingerprint?: string,
   kind: CursorKind = "d",
 ) {
-  if (after === undefined) return null;
-  // Retain compatibility with the original ID-ascending pagination API.
-  if (
-    kind === "d" &&
-    !fingerprint &&
-    NAME.test(after) &&
-    sort.orderBy === "id" &&
-    sort.direction === "asc"
-  )
-    return { id: after, value: null };
+  if (pageToken === undefined) return null;
   try {
-    if (after.length > 1024 || !/^v1\.[A-Za-z0-9_-]+$/.test(after))
+    if (pageToken.length > 1024 || !/^v1\.[A-Za-z0-9_-]+$/.test(pageToken))
       throw new Error();
     const cursor = JSON.parse(
-      Buffer.from(after.slice(3), "base64url").toString("utf8"),
+      Buffer.from(pageToken.slice(3), "base64url").toString("utf8"),
     );
     if (
       cursor.c !== scope ||
@@ -111,6 +148,74 @@ export function decodeCursor(
         throw new Error();
     }
     return { id: cursor.i as string, value: cursor.t as string | null };
+  } catch {
+    throw new DataError(
+      400,
+      "Invalid cursor or cursor does not match this collection, sort order and filters.",
+    );
+  }
+}
+
+export function encodeMultiCursor(
+  scope: number,
+  sorts: Sort[],
+  id: string,
+  values: string[],
+  fingerprint?: string,
+) {
+  return (
+    "v2." +
+    Buffer.from(
+      JSON.stringify({
+        c: scope,
+        s: sorts.map(({ orderBy, direction }) => [orderBy, direction]),
+        i: id,
+        t: values,
+        f: fingerprint,
+      }),
+    ).toString("base64url")
+  );
+}
+
+export function decodeMultiCursor(
+  pageToken: string | undefined,
+  scope: number,
+  sorts: Sort[],
+  fingerprint?: string,
+) {
+  if (pageToken === undefined) return null;
+  try {
+    if (pageToken.length > 2048 || !/^v2\.[A-Za-z0-9_-]+$/.test(pageToken))
+      throw new Error();
+    const cursor = JSON.parse(
+      Buffer.from(pageToken.slice(3), "base64url").toString("utf8"),
+    );
+    const identity = sorts.map(({ orderBy, direction }) => [
+      orderBy,
+      direction,
+    ]);
+    if (
+      cursor.c !== scope ||
+      JSON.stringify(cursor.s) !== JSON.stringify(identity) ||
+      cursor.f !== fingerprint ||
+      !Array.isArray(cursor.t) ||
+      cursor.t.length !== sorts.length
+    )
+      throw new Error();
+    name(cursor.i);
+    for (let index = 0; index < sorts.length; index += 1) {
+      const sort = sorts[index];
+      const value = cursor.t[index];
+      if (typeof value !== "string") throw new Error();
+      if (sort.field) JSON.parse(value);
+      else if (sort.orderBy === "id") throw new Error();
+      else if (
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/.test(value) ||
+        new Date(value).toISOString() !== value.slice(0, 23) + "Z"
+      )
+        throw new Error();
+    }
+    return { id: cursor.i as string, values: cursor.t as string[] };
   } catch {
     throw new DataError(
       400,

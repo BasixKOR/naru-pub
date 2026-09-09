@@ -61,20 +61,20 @@ integration("sorted database pagination", () => {
     async (orderBy) => {
       for (const direction of ["asc", "desc"]) {
         const ids: string[] = [];
-        let after: string | undefined;
+        let pageToken: string | undefined;
         do {
           const page = await call("GET", ["posts"], {
             orderBy,
             direction,
             limit: 1,
-            after,
+            pageToken,
             adminUserId: undefined,
           });
           ids.push(...page.documents!.map((d) => d.id));
           expect(page.documents![0]).not.toHaveProperty("cursor_value");
-          after = page.nextCursor ?? undefined;
+          pageToken = page.nextPageToken ?? undefined;
           expect(ids.length).toBeLessThanOrEqual(4);
-        } while (after);
+        } while (pageToken);
         expect(ids).toEqual(
           direction === "asc" ? ["a", "b", "c", "d"] : ["d", "c", "b", "a"],
         );
@@ -88,11 +88,21 @@ integration("sorted database pagination", () => {
     await call("PUT", ["posts", "new"], { body: { data: true } });
     const next = await call("GET", ["posts"], {
       ...sort,
-      after: first.nextCursor,
+      pageToken: first.nextPageToken,
       limit: 10,
     });
     expect(next.documents!.map((d) => d.id)).toEqual(["b", "a"]);
-    expect(next.nextCursor).toBeNull();
+    expect(next.nextPageToken).toBeNull();
+  });
+  test("includeTotal counts the filtered result without changing the page", async () => {
+    const page = await call("GET", ["posts"], {
+      limit: 2,
+      includeTotal: true,
+      adminUserId: undefined,
+    });
+    expect(page.documents).toHaveLength(2);
+    expect(page.nextPageToken).toEqual(expect.any(String));
+    expect(page.total).toBe(4);
   });
   test("cursors reject mismatched order, collection, recreation and malformed input", async () => {
     const first = await call("GET", ["posts"], {
@@ -107,18 +117,18 @@ integration("sorted database pagination", () => {
       {},
     ])
       await expect(
-        call("GET", ["posts"], { ...extra, after: first.nextCursor }),
+        call("GET", ["posts"], { ...extra, pageToken: first.nextPageToken }),
       ).rejects.toMatchObject({ status: 400 });
     await expect(
       call("GET", ["other"], {
         orderBy: "createdAt",
         direction: "desc",
-        after: first.nextCursor,
+        pageToken: first.nextPageToken,
       }),
     ).rejects.toMatchObject({ status: 400 });
     for (const after of ["", "v1.bad", "x".repeat(2000), "a"])
       await expect(
-        call("GET", ["posts"], { orderBy: "createdAt", after }),
+        call("GET", ["posts"], { orderBy: "createdAt", pageToken: after }),
       ).rejects.toMatchObject({ status: 400 });
     await call("DELETE", ["posts"]);
     await call("POST", [], { body: { name: "posts" } });
@@ -126,11 +136,11 @@ integration("sorted database pagination", () => {
       call("GET", ["posts"], {
         orderBy: "createdAt",
         direction: "desc",
-        after: first.nextCursor,
+        pageToken: first.nextPageToken,
       }),
     ).rejects.toMatchObject({ status: 400 });
   });
-  test("sort inputs are allowlisted and legacy ID cursors remain supported", async () => {
+  test("sort inputs are allowlisted and raw ID page tokens are rejected", async () => {
     for (const extra of [
       { orderBy: "data." },
       { orderBy: "data.nested.title" },
@@ -144,11 +154,9 @@ integration("sorted database pagination", () => {
       await expect(call("GET", ["posts"], extra)).rejects.toMatchObject({
         status: 400,
       });
-    expect(
-      (await call("GET", ["posts"], { after: "b" })).documents!.map(
-        (d) => d.id,
-      ),
-    ).toEqual(["c", "d"]);
+    await expect(
+      call("GET", ["posts"], { pageToken: "b" }),
+    ).rejects.toMatchObject({ status: 400 });
   });
   test("replacement preserves server creation time, updates modification time, and rules still apply", async () => {
     await call("PUT", ["posts", "a"], {
@@ -178,7 +186,7 @@ integration("sorted database pagination", () => {
     await expect(
       call("GET", ["posts"], {
         orderBy: "createdAt",
-        after: page.nextCursor,
+        pageToken: page.nextPageToken,
         adminUserId: undefined,
       }),
     ).rejects.toMatchObject({ status: 403 });
@@ -208,20 +216,20 @@ integration("sorted database pagination", () => {
     ];
     for (const direction of ["asc", "desc"]) {
       const ids: string[] = [];
-      let after: string | undefined;
+      let pageToken: string | undefined;
       do {
         const page = await call("GET", ["notes"], {
           orderBy: "data.date",
           direction,
           limit: 2,
-          after,
+          pageToken,
           adminUserId: undefined,
         });
         ids.push(...page.documents!.map((d) => d.id));
         expect(page.documents![0]).not.toHaveProperty("cursor_value");
-        after = page.nextCursor ?? undefined;
+        pageToken = page.nextPageToken ?? undefined;
         expect(ids.length).toBeLessThanOrEqual(ascending.length);
-      } while (after);
+      } while (pageToken);
       expect(ids).toEqual(
         direction === "asc" ? ascending : [...ascending].reverse(),
       );
@@ -237,16 +245,16 @@ integration("sorted database pagination", () => {
       orderBy: "data.date",
       limit: 1,
     });
-    expect(first.nextCursor).toEqual(expect.any(String));
+    expect(first.nextPageToken).toEqual(expect.any(String));
     for (const orderBy of ["data.title", "createdAt", "id"])
       await expect(
-        call("GET", ["notes"], { orderBy, after: first.nextCursor }),
+        call("GET", ["notes"], { orderBy, pageToken: first.nextPageToken }),
       ).rejects.toMatchObject({ status: 400 });
     expect(
       (
         await call("GET", ["notes"], {
           orderBy: "data.date",
-          after: first.nextCursor,
+          pageToken: first.nextPageToken,
         })
       ).documents!.map((d) => d.id),
     ).toEqual(["two"]);
@@ -262,6 +270,44 @@ integration("sorted database pagination", () => {
     expect(JSON.stringify(plan.rows)).toContain(
       "site_data_documents_created_at_idx",
     );
+  });
+
+  test("two-field ordering remains global across page tokens", async () => {
+    await call("PUT", ["posts", "a"], {
+      body: { data: { title: "a", day: "2026-09-01" } },
+    });
+    await call("PUT", ["posts", "b"], {
+      body: { data: { title: "b", day: "2026-09-01" } },
+    });
+    await call("PUT", ["posts", "c"], {
+      body: { data: { title: "c", day: "2026-09-02" } },
+    });
+    await sql`update site_data_documents set created_at='2026-09-01T01:00:00Z' where id='a'`.execute(
+      db,
+    );
+    await sql`update site_data_documents set created_at='2026-09-01T03:00:00Z' where id='b'`.execute(
+      db,
+    );
+    await sql`update site_data_documents set created_at='2026-09-01T02:00:00Z' where id='c'`.execute(
+      db,
+    );
+    const orderBy = JSON.stringify([
+      ["data.day", "desc"],
+      ["createdAt", "desc"],
+    ]);
+    const ids: string[] = [];
+    let pageToken: string | undefined;
+    do {
+      const page = await call("GET", ["posts"], {
+        orderBy,
+        pageToken,
+        limit: 1,
+        adminUserId: undefined,
+      });
+      ids.push(page.documents![0].id);
+      pageToken = page.nextPageToken ?? undefined;
+    } while (pageToken);
+    expect(ids.slice(0, 3)).toEqual(["c", "b", "a"]);
   });
   test("migration backfills creation time without changing data and supports rollback", async () => {
     await down(db);

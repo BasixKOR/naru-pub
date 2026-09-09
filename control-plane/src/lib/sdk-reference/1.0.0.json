@@ -86,15 +86,23 @@
           }
         ]
       ],
-      "signature": "createDatabase(options: {\n  controlPlaneOrigin?: string;\n  schemas?: Record<string, (data: Json) => boolean | void>;\n  site: string;\n}): Database & {\n  completeOwnerSignIn(\n    options?: RequestOptions,\n  ): Promise<OwnerDatabase | null>;\n  signInAsOwner(\n    options: RequestOptions & {\n      clientId?: string;\n      collections: string[];\n      redirectUri?: string;\n    },\n  ): Promise<void>;\n}",
+      "signature": "createDatabase(options: {\n  collections?: Record<string, CollectionOptions<any, any, any>>;\n  controlPlaneOrigin?: string;\n  schemas?: Record<string, (data: Json) => boolean | void>;\n  site: string;\n}): Database & {\n  completeOwnerSignIn(\n    options?: RequestOptions,\n  ): Promise<OwnerDatabase | null>;\n  signInAsOwner(\n    options: RequestOptions & {\n      clientId?: string;\n      collections: string[];\n      redirectUri?: string;\n    },\n  ): Promise<void>;\n}",
       "parameters": [
         {
           "name": "options",
-          "type": "{ controlPlaneOrigin?: string; schemas?: Record<string, (data: Json) => boolean | void>; site: string }",
+          "type": "{ collections?: Record<string, CollectionOptions<any, any, any>>; controlPlaneOrigin?: string; schemas?: Record<string, (data: Json) => boolean | void>; site: string }",
           "summary": [],
           "throws": []
         }
       ]
+    },
+    {
+      "name": "createRequestChannel",
+      "kind": "function",
+      "summary": [],
+      "throws": [],
+      "signature": "createRequestChannel(): RequestChannel",
+      "parameters": []
     },
     {
       "name": "Collection",
@@ -140,13 +148,13 @@
         }
       ],
       "throws": [],
-      "signature": "interface Collection<T = Json>",
+      "signature": "interface Collection<T = Json, M = Document<T>, W = T>",
       "extends": [],
       "members": [
         {
           "name": "add",
           "optional": false,
-          "signature": "add(data: T, options?: RequestOptions): Promise<Written>",
+          "signature": "add(data: W, options?: RequestOptions): Promise<Written>",
           "summary": [
             {
               "type": "paragraph",
@@ -172,7 +180,7 @@
         {
           "name": "all",
           "optional": false,
-          "signature": "all(\n  options?: Omit<ListOptions<T>, \"after\"> & WalkOptions,\n): AsyncIterableIterator<Document<T>>",
+          "signature": "all(\n  options?: Omit<ListOptions<T>, \"pageToken\" | \"includeTotal\"> &\n    WalkOptions,\n): AsyncIterableIterator<M>",
           "summary": [
             {
               "type": "paragraph",
@@ -296,7 +304,7 @@
         {
           "name": "get",
           "optional": false,
-          "signature": "get(id: string, options?: RequestOptions): Promise<Document<T>>",
+          "signature": "get(id: string, options?: RequestOptions): Promise<M>",
           "summary": [
             {
               "type": "paragraph",
@@ -333,7 +341,7 @@
         {
           "name": "list",
           "optional": false,
-          "signature": "list(\n  options?: ListOptions<T>,\n): Promise<{ documents: Document<T>[]; nextCursor: string | null }>",
+          "signature": "list(\n  options?: ListOptions<T>,\n): Promise<{\n  documents: M[];\n  nextPageToken: string | null;\n  total?: number;\n}>",
           "summary": [
             {
               "type": "paragraph",
@@ -353,11 +361,11 @@
                 },
                 {
                   "type": "code",
-                  "value": "nextCursor"
+                  "value": "nextPageToken"
                 },
                 {
                   "type": "text",
-                  "value": "가 "
+                  "value": "이 "
                 },
                 {
                   "type": "code",
@@ -369,11 +377,11 @@
                 },
                 {
                   "type": "code",
-                  "value": "after"
+                  "value": "pageToken"
                 },
                 {
                   "type": "text",
-                  "value": "로 넘기되 "
+                  "value": "으로 넘기되 "
                 },
                 {
                   "type": "code",
@@ -413,7 +421,7 @@
             {
               "type": "code",
               "language": "javascript",
-              "code": "let after;\ndo {\n  const page = await posts.list({ limit: 20, after });\n  render(page.documents);\n  after = page.nextCursor ?? undefined;\n} while (after);"
+              "code": "let pageToken;\ndo {\n  const page = await posts.list({ limit: 20, pageToken });\n  render(page.documents);\n  pageToken = page.nextPageToken ?? undefined;\n} while (pageToken);"
             }
           ],
           "throws": []
@@ -421,7 +429,7 @@
         {
           "name": "set",
           "optional": false,
-          "signature": "set(\n  id: string,\n  data: T,\n  options?: RequestOptions & Conditional,\n): Promise<Written>",
+          "signature": "set(\n  id: string,\n  data: W,\n  options?: RequestOptions & Conditional,\n): Promise<Written>",
           "summary": [
             {
               "type": "paragraph",
@@ -539,9 +547,26 @@
         }
       ],
       "throws": [],
-      "signature": "interface CollectionOptions<T>",
+      "signature": "interface CollectionOptions<T, M = Document<T>, W = T>",
       "extends": [],
       "members": [
+        {
+          "name": "map",
+          "optional": true,
+          "signature": "map?: (document: Document<T>) => M",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "parse 뒤의 문서와 서버 메타데이터를 애플리케이션 값으로 바꿉니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
         {
           "name": "parse",
           "optional": true,
@@ -569,6 +594,23 @@
               "type": "code",
               "language": "javascript",
               "code": "const posts = db.collection(\"posts\", {\n  parse(data) {\n    if (!data || typeof data !== \"object\" || Array.isArray(data) ||\n        typeof data.title !== \"string\") throw new Error(\"title must be a string\");\n    return { title: data.title };\n  },\n});\nconst post = await posts.get(\"hello\"); // post.data.title: string"
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "serialize",
+          "optional": true,
+          "signature": "serialize?: (data: W) => Json",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "완성된 쓰기 값을 저장할 JSON으로 바꾸는 동기 함수입니다."
+                }
+              ]
             }
           ],
           "throws": []
@@ -670,7 +712,7 @@
         {
           "name": "collection",
           "optional": false,
-          "signature": "collection<T = Json>(\n  name: string,\n  options?: CollectionOptions<T>,\n): Collection<T>",
+          "signature": "collection<T = Json, M = Document<T>, W = T>(\n  name: string,\n  options?: CollectionOptions<T, M, W>,\n): Collection<T, M, W>",
           "summary": [
             {
               "type": "paragraph",
@@ -864,23 +906,6 @@
       ],
       "members": [
         {
-          "name": "after",
-          "optional": true,
-          "signature": "after?: string",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "같은 정렬, 같은 필터에서 받은 커서입니다."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
           "name": "direction",
           "optional": true,
           "signature": "direction?: \"desc\" | \"asc\"",
@@ -948,6 +973,23 @@
           "throws": []
         },
         {
+          "name": "pageToken",
+          "optional": true,
+          "signature": "pageToken?: string",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "같은 정렬, 같은 필터에서 받은 페이지 토큰입니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
           "name": "where",
           "optional": true,
           "signature": "where?: Record<\n  string,\n  string | number | boolean | RangeFilter<string | number> | null\n>",
@@ -995,7 +1037,7 @@
         {
           "name": "all",
           "optional": false,
-          "signature": "all(\n  options?: Omit<FileListOptions, \"after\"> & WalkOptions,\n): AsyncIterableIterator<StoredFile>",
+          "signature": "all(\n  options?: Omit<FileListOptions, \"pageToken\"> & WalkOptions,\n): AsyncIterableIterator<StoredFile>",
           "summary": [
             {
               "type": "paragraph",
@@ -1035,6 +1077,23 @@
           "throws": []
         },
         {
+          "name": "forDocument",
+          "optional": false,
+          "signature": "forDocument(\n  collection: string,\n  id: string,\n): {\n  all(\n    options?: Omit<FileListOptions, \"where\" | \"pageToken\"> & WalkOptions,\n  ): AsyncIterableIterator<StoredFile>;\n  deleteAll(\n    options?: Omit<FileListOptions, \"where\" | \"pageToken\"> & WalkOptions,\n  ): Promise<{ deleted: number }>;\n  list(\n    options?: Omit<FileListOptions, \"where\">,\n  ): Promise<{ files: StoredFile[]; nextPageToken: string | null }>;\n}",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "문서에 붙인 파일만 다루는 손잡이입니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
           "name": "get",
           "optional": false,
           "signature": "get(id: string, options?: RequestOptions): Promise<StoredFile>",
@@ -1064,7 +1123,7 @@
         {
           "name": "list",
           "optional": false,
-          "signature": "list(\n  options?: FileListOptions,\n): Promise<{ files: StoredFile[]; nextCursor: string | null }>",
+          "signature": "list(\n  options?: FileListOptions,\n): Promise<{ files: StoredFile[]; nextPageToken: string | null }>",
           "summary": [
             {
               "type": "paragraph",
@@ -1178,7 +1237,7 @@
         {
           "name": "upload",
           "optional": false,
-          "signature": "upload(\n  file: Blob | File,\n  options?: RequestOptions & {\n    image?: ImageOptions;\n    metadata?: Json;\n    onProgress?: (progress: {\n      loaded: number;\n      phase: \"resizing\" | \"uploading\";\n      total: number;\n    }) => void;\n    original?: boolean;\n  },\n): Promise<StoredFile>",
+          "signature": "upload(\n  file: Blob | File,\n  options?: RequestOptions & {\n    attachedTo?: { collection: string; id: string };\n    image?: ImageOptions;\n    metadata?: Json;\n    onProgress?: (progress: {\n      loaded: number;\n      phase: \"resizing\" | \"uploading\";\n      total: number;\n    }) => void;\n    original?: boolean;\n  },\n): Promise<StoredFile>",
           "summary": [
             {
               "type": "paragraph",
@@ -1444,16 +1503,24 @@
       ],
       "members": [
         {
-          "name": "after",
+          "name": "includeTotal",
           "optional": true,
-          "signature": "after?: string",
+          "signature": "includeTotal?: boolean",
           "summary": [
             {
               "type": "paragraph",
               "spans": [
                 {
                   "type": "text",
-                  "value": "같은 컬렉션, 같은 정렬, 같은 필터에서 받은 커서입니다."
+                  "value": "참이면 같은 필터의 전체 개수를 응답의 "
+                },
+                {
+                  "type": "code",
+                  "value": "total"
+                },
+                {
+                  "type": "text",
+                  "value": "에 함께 받습니다."
                 }
               ]
             }
@@ -1471,6 +1538,23 @@
                 {
                   "type": "text",
                   "value": "한 쪽에 담을 문서 수입니다. 기본값은 50이고, 지금 서버가 받는 최댓값은 100입니다. 한도는 서버가 정하며 넘으면 서버가 400으로 거절합니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "pageToken",
+          "optional": true,
+          "signature": "pageToken?: string",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "같은 컬렉션, 같은 정렬, 같은 필터에서 받은 페이지 토큰입니다."
                 }
               ]
             }
@@ -1642,6 +1726,23 @@
           "throws": []
         },
         {
+          "name": "session",
+          "optional": false,
+          "signature": "session: Readonly<{\n  expiresAt: number;\n  status: \"active\" | \"expired\" | \"signed-out\";\n}>",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "현재 관리자 세션 상태. 401, 만료, 로그아웃이 즉시 반영됩니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
           "name": "batch",
           "optional": false,
           "signature": "batch<const T extends readonly BatchOperation[]>(\n  operations: T,\n  options?: RequestOptions,\n): Promise<{ results: BatchResults<T> }>",
@@ -1668,6 +1769,23 @@
               "type": "code",
               "language": "javascript",
               "code": "await owner.batch([\n  { type: \"set\", collection: \"posts\", id: \"hello\", data: post },\n  { type: \"delete\", collection: \"drafts\", id: \"hello\" },\n]);"
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "onSessionChange",
+          "optional": false,
+          "signature": "onSessionChange(\n  listener: (\n    session: Readonly<{\n      expiresAt: number;\n      status: \"active\" | \"expired\" | \"signed-out\";\n    }>,\n  ) => void,\n): () => void",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "현재 상태를 즉시 한 번 알리고 이후 변경을 구독합니다."
+                }
+              ]
             }
           ],
           "throws": []
@@ -1741,7 +1859,7 @@
               "spans": [
                 {
                   "type": "text",
-                  "value": "기본값은 "
+                  "value": "단일 orderBy의 기본값은 "
                 },
                 {
                   "type": "code",
@@ -1749,7 +1867,7 @@
                 },
                 {
                   "type": "text",
-                  "value": "입니다."
+                  "value": "입니다. 배열 orderBy와 함께 쓰지 않습니다."
                 }
               ]
             }
@@ -1759,7 +1877,7 @@
         {
           "name": "orderBy",
           "optional": true,
-          "signature": "orderBy?: OrderBy<T>",
+          "signature": "orderBy?: OrderBy<T> | MultiOrderBy<T>",
           "summary": [
             {
               "type": "paragraph",
@@ -1774,7 +1892,7 @@
                 },
                 {
                   "type": "text",
-                  "value": "입니다."
+                  "value": "입니다. 배열은 두 키까지 받으며 ID가 마지막에 자동으로 붙습니다."
                 }
               ]
             }
@@ -1888,6 +2006,50 @@
                 {
                   "type": "text",
                   "value": "이하."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        }
+      ]
+    },
+    {
+      "name": "RequestChannel",
+      "kind": "interface",
+      "summary": [],
+      "throws": [],
+      "signature": "interface RequestChannel",
+      "extends": [],
+      "members": [
+        {
+          "name": "cancel",
+          "optional": false,
+          "signature": "cancel(reason?: unknown): void",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Aborts the current request, if any."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "next",
+          "optional": false,
+          "signature": "next(reason?: unknown): AbortSignal",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Aborts the previous request and returns a signal for the new request."
                 }
               ]
             }
@@ -2918,6 +3080,23 @@
       ],
       "throws": [],
       "signature": "type Json =\n  | null\n  | boolean\n  | number\n  | string\n  | Json[]\n  | { [key: string]: Json }"
+    },
+    {
+      "name": "MultiOrderBy",
+      "kind": "type",
+      "summary": [
+        {
+          "type": "paragraph",
+          "spans": [
+            {
+              "type": "text",
+              "value": "둘째 정렬 키까지 지정합니다. 문서 ID는 마지막 키로 자동 추가됩니다."
+            }
+          ]
+        }
+      ],
+      "throws": [],
+      "signature": "type MultiOrderBy<T = Json> =\n  | readonly [readonly [OrderBy<T>, \"asc\" | \"desc\"]]\n  | readonly [\n      readonly [OrderBy<T>, \"asc\" | \"desc\"],\n      readonly [OrderBy<T>, \"asc\" | \"desc\"],\n    ]"
     },
     {
       "name": "OrderBy",

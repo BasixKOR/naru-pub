@@ -90,6 +90,7 @@ export async function dataRequest(
       body,
       where: parseWhereQuery(url.searchParams.get("where")),
       count: url.searchParams.get("count") === "1",
+      includeTotal: url.searchParams.get("includeTotal") === "1",
       cacheability,
       // The media listing and its quota readout are separate queries, so a
       // caller that only wants the quota never pays to page the library.
@@ -102,7 +103,7 @@ export async function dataRequest(
             : NaN,
       orderBy: url.searchParams.get("orderBy") ?? undefined,
       direction: url.searchParams.get("direction") ?? undefined,
-      after: url.searchParams.get("after") ?? undefined,
+      pageToken: url.searchParams.get("pageToken") ?? undefined,
       limit: url.searchParams.has("limit")
         ? Number(url.searchParams.get("limit"))
         : undefined,

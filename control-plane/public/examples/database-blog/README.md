@@ -43,7 +43,7 @@ SDK 1.0.0을 사용합니다. 빌드나 패키지 설치가 필요 없습니다.
 
 글과 방명록은 서버 생성 시각(createdAt) 내림차순, 관리자 목록은 수정 시각(updatedAt) 내림차순입니다.
 같은 시각이면 ID 내림차순입니다. 공개 목록의 분류 필터는 `where: { category: "일상" }`로 정확히 비교합니다.
-더 보기에는 같은 where/orderBy/direction과 응답의 nextCursor를 after로 보냅니다.
+더 보기에는 같은 where/orderBy/direction과 응답의 nextPageToken를 after로 보냅니다.
 분류를 바꾸면 목록과 커서를 초기화합니다. 빈 분류는 전체 목록입니다.
 JSON 필터와 시각 정렬 인덱스는 나루가 자동으로 관리합니다.
 createdAt은 서버가 정하며 수정해도 유지됩니다. 기존 문서는 마이그레이션 당시 updatedAt으로 채워집니다.

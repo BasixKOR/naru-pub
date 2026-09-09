@@ -227,7 +227,7 @@ for await (const file of owner.files.all({ where: { postId: "hello" } }))
               <Code>{`const { bytes, maxBytes, count } = await owner.files.usage();
 showQuota(bytes / maxBytes, count);
 
-const { files, nextCursor } = await owner.files.list({ limit: 50 });`}</Code>
+const { files, nextPageToken } = await owner.files.list({ limit: 50 });`}</Code>
             </Section>
 
             <Section id="cleanup" title="06 · 정리와 삭제">

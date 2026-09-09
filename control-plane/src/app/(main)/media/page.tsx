@@ -69,7 +69,7 @@ const image = await owner.files.upload(input.files[0], {
   metadata: { postId: "hello" },
 });
 // image.url 을 문서에 저장해 두고 그대로 사용합니다.
-const { files, nextCursor } = await owner.files.list({ limit: 50 });`}
+const { files, nextPageToken } = await owner.files.list({ limit: 50 });`}
         </pre>
       </section>
     </div>

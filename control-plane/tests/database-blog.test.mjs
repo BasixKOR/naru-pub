@@ -101,9 +101,9 @@ test("post list paginates and renders hostile input as text", async () => {
                     },
                   },
                 ],
-                nextCursor: "a",
+                nextPageToken: "a",
               }
-            : { documents: [{ id: "b", data: null }], nextCursor: null };
+            : { documents: [{ id: "b", data: null }], nextPageToken: null };
         },
       };
     },
@@ -112,7 +112,7 @@ test("post list paginates and renders hostile input as text", async () => {
   assert.match(app.$("entries").textContent, /<img/);
   assert.equal(app.$("more").hidden, false);
   await app.fire("more", "click");
-  assert.equal(requests[1].after, "a");
+  assert.equal(requests[1].pageToken, "a");
   assert.ok(
     requests.every((r) => r.orderBy === "createdAt" && r.direction === "desc"),
   );
@@ -142,7 +142,7 @@ test("guestbook submits via add only and resets after success", async () => {
     collection(name) {
       assert.equal(name, "guestbook");
       return {
-        list: async () => ({ documents: [], nextCursor: null }),
+        list: async () => ({ documents: [], nextPageToken: null }),
         add: async (data) => {
           writes.push(data);
           return { id: "generated" };
@@ -228,7 +228,7 @@ test("guestbook distinguishes successful save from failed list refresh", async (
     collection: () => ({
       list: async () => {
         if (++reads > 1) throw new Error("offline");
-        return { documents: [], nextCursor: null };
+        return { documents: [], nextPageToken: null };
       },
       add: async () => ({ id: "saved" }),
     }),
@@ -270,7 +270,7 @@ test("category changes reset the cursor and preserve filters on subsequent pages
               data: { title: "제목", category: "일상" },
             },
           ],
-          nextCursor: "v1.next",
+          nextPageToken: "v1.next",
         };
       },
     }),
@@ -278,16 +278,16 @@ test("category changes reset the cursor and preserve filters on subsequent pages
   await app.fire("more", "click");
   app.$("filter-category").value = "일상";
   await app.fire("filter-form", "submit");
-  assert.equal(calls[2].after, undefined);
+  assert.equal(calls[2].pageToken, undefined);
   assert.equal(calls[2].where.category, "일상");
   assert.equal(app.$("entries").children.length, 1);
   await app.fire("more", "click");
-  assert.equal(calls[3].after, "v1.next");
+  assert.equal(calls[3].pageToken, "v1.next");
   assert.equal(calls[3].where.category, "일상");
   app.$("filter-category").value = "";
   await app.fire("filter-form", "submit");
   assert.equal(calls[4].where, undefined);
-  assert.equal(calls[4].after, undefined);
+  assert.equal(calls[4].pageToken, undefined);
 });
 function editorBackend() {
   const rows = { posts: new Map(), drafts: new Map() },
@@ -343,7 +343,7 @@ function editorBackend() {
                 id,
                 data: structuredClone(data),
               })),
-              nextCursor: null,
+              nextPageToken: null,
             };
           },
         };

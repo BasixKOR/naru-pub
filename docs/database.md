@@ -46,9 +46,12 @@ Create a collection in the control plane, choose its permissions, then use this 
     const { id } = await entries.add({ name: "Visitor", message: "Hello!" });
     const document = await entries.get(id);
     // set() and delete() require owner access or full public write permission.
-    const { documents, nextCursor } = await entries.list({ limit: 20 });
-    if (nextCursor) {
-      const nextPage = await entries.list({ limit: 20, after: nextCursor });
+    const { documents, nextPageToken } = await entries.list({ limit: 20 });
+    if (nextPageToken) {
+      const nextPage = await entries.list({
+        limit: 20,
+        pageToken: nextPageToken,
+      });
     }
   } catch (error) {
     if (error instanceof NaruDataError)
@@ -92,6 +95,9 @@ Minimal editor-page wiring (replace the site login name):
   await run(async () => {
     // Call early on the callback page; strips code/state before network access.
     admin = await db.completeOwnerSignIn();
+    admin?.onSessionChange(({ status: ownerStatus }) => {
+      if (ownerStatus !== "active") status.textContent = "Sign in again";
+    });
   });
   document.querySelector("#save").disabled = !admin;
   document.querySelector("#logout").disabled = !admin;
@@ -160,31 +166,31 @@ Schema validators run before requests and are developer feedback, not a security
 
 Public/website-token root: `/api/data/:site`. Control-plane root: `/api/account/database` (site derived from the session). Collection management is restricted to the control-plane root.
 
-| Method | Path relative to root                | Body / result                                             |
-| ------ | ------------------------------------ | --------------------------------------------------------- |
-| GET    | `/`                                  | Admin only: `{ collections }`                             |
-| POST   | `/`                                  | Admin only: `{ name, read?, write? }` creates collection  |
-| PATCH  | `/:collection`                       | Admin only: `{ read, write }` replaces permissions        |
-| DELETE | `/:collection`                       | Admin only: deletes collection and its documents          |
-| GET    | `/:collection?limit=50&after=cursor` | `{ documents, nextCursor }`; accepts sorting and filters  |
-| GET    | `/:collection?count=1&where=...`     | `{ count }` without paging documents                      |
-| POST   | `/:collection`                       | `{ data }` creates document; returns the write result     |
-| GET    | `/:collection/:id`                   | `{ document }`                                            |
-| PUT    | `/:collection/:id?ifVersion=`        | `{ data }` replaces document; returns the write result    |
-| PATCH  | `/:collection/:id?ifVersion=`        | `{ data, unset? }` shallow-merges an object document      |
-| DELETE | `/:collection/:id?ifVersion=`        | `{ success: true }`                                       |
-| POST   | `/_batch`                            | Owner-only atomic `{ operations }`; returns `{ results }` |
-| GET    | `/_files?limit=50&after=&where=`     | Owner-only `{ files, nextCursor }`                        |
-| GET    | `/_files?usage=1`                    | Owner-only `{ usage }` without listing the library        |
-| POST   | `/_files`                            | Owner-only upload authorization                           |
-| GET    | `/_files/:id`                        | Owner-only `{ file }`                                     |
-| PUT    | `/_files/:id`                        | Owner-only finalize; verifies the stored bytes            |
-| PATCH  | `/_files/:id`                        | Owner-only `{ data, unset? }` merges metadata             |
-| DELETE | `/_files/:id`                        | `{ success: true }`                                       |
+| Method | Path relative to root                   | Body / result                                                       |
+| ------ | --------------------------------------- | ------------------------------------------------------------------- |
+| GET    | `/`                                     | Admin only: `{ collections }`                                       |
+| POST   | `/`                                     | Admin only: `{ name, read?, write? }` creates collection            |
+| PATCH  | `/:collection`                          | Admin only: `{ read, write }` replaces permissions                  |
+| DELETE | `/:collection`                          | Admin only: deletes collection and its documents                    |
+| GET    | `/:collection?limit=50&pageToken=token` | `{ documents, nextPageToken, total? }`; accepts sorting and filters |
+| GET    | `/:collection?count=1&where=...`        | `{ count }` without paging documents                                |
+| POST   | `/:collection`                          | `{ data }` creates document; returns the write result               |
+| GET    | `/:collection/:id`                      | `{ document }`                                                      |
+| PUT    | `/:collection/:id?ifVersion=`           | `{ data }` replaces document; returns the write result              |
+| PATCH  | `/:collection/:id?ifVersion=`           | `{ data, unset? }` shallow-merges an object document                |
+| DELETE | `/:collection/:id?ifVersion=`           | `{ success: true }`                                                 |
+| POST   | `/_batch`                               | Owner-only atomic `{ operations }`; returns `{ results }`           |
+| GET    | `/_files?limit=50&pageToken=&where=`    | Owner-only `{ files, nextPageToken }`                               |
+| GET    | `/_files?usage=1`                       | Owner-only `{ usage }` without listing the library                  |
+| POST   | `/_files`                               | Owner-only upload authorization                                     |
+| GET    | `/_files/:id`                           | Owner-only `{ file }`                                               |
+| PUT    | `/_files/:id`                           | Owner-only finalize; verifies the stored bytes                      |
+| PATCH  | `/_files/:id`                           | Owner-only `{ data, unset? }` merges metadata                       |
+| DELETE | `/_files/:id`                           | `{ success: true }`                                                 |
 
 A write result is `{ id, version, createdAt, updatedAt }`; `_batch` returns one
 per operation in order, with `{ success: true }` for deletes. `/_files` accepts
-the same `limit`, `after`, `orderBy`, `direction` and `where` parameters as a
+the same `limit`, `pageToken`, `orderBy`, `direction` and `where` parameters as a
 collection, except that `where` filters the file's `metadata` and `orderBy` has
 no `data.<field>` form. Media listings default to `createdAt` descending.
 
@@ -229,7 +235,8 @@ const image = await owner.files.upload(fileInput.files[0], {
   onProgress: ({ loaded, total, phase }) =>
     phase === "resizing" ? showResizing() : showProgress(loaded / total),
   image: { maxDimension: 1600, maxBytes: 300 * 1024 },
-  metadata: { altText: "A pigeon", postId: "hello" },
+  metadata: { altText: "A pigeon" },
+  attachedTo: { collection: "posts", id: "hello" },
 });
 await owner.collection("posts").set("hello", {
   title: "Hello",
@@ -242,16 +249,7 @@ fields of each file's `metadata`. Storing what you will need to find a file by
 means the server does the finding; nothing has to walk the whole library.
 
 ```js
-for await (const file of owner.files.all({ where: { postId: "hello" } }))
-  await owner.files.delete(file.id);
-
-// Only the metadata is mutable, and it takes the same version check as a
-// document write.
-await owner.files.update(
-  image.id,
-  { postId: "moved" },
-  { ifVersion: image.version },
-);
+await owner.files.forDocument("posts", "hello").deleteAll();
 
 // The quota readout is its own request and never pages the library.
 const { bytes, maxBytes } = await owner.files.usage();
@@ -357,18 +355,65 @@ The Korean guides are served publicly at `/docs` (index), `/docs/database` and `
 const posts = db.collection("posts");
 const sort = { orderBy: "createdAt", direction: "desc" };
 const page = await posts.list({ ...sort, limit: 20 });
-if (page.nextCursor !== null) {
-  const next = await posts.list({ ...sort, limit: 20, after: page.nextCursor });
+if (page.nextPageToken !== null) {
+  const next = await posts.list({
+    ...sort,
+    limit: 20,
+    pageToken: page.nextPageToken,
+  });
 }
 ```
 
-`orderBy`: `id` (default), `createdAt`, `updatedAt`, or `data.<field>` for one top-level document field. `direction`: `asc` (default) or `desc`. Metadata timestamp ties use document ID in the same direction. JSON-field values use PostgreSQL JSONB ordering; missing fields sort at the same position as JSON null, followed by strings and then numbers. Equal values are ordered by document ID in the same direction. The metadata orders have composite collection/time/ID indexes; JSON-field sorting scans the narrowed collection and has no per-field index.
+`orderBy`: `id` (default), `createdAt`, `updatedAt`, or `data.<field>` for one top-level document field. `direction`: `asc` (default) or `desc`. For a meaningful tie-breaker, pass one or two `[field, direction]` pairs; ID is always appended automatically:
+
+```js
+const page = await posts.list({
+  orderBy: [
+    ["data.publishedOn", "desc"],
+    ["createdAt", "desc"],
+  ],
+  includeTotal: true,
+  limit: 20,
+});
+console.log(page.total, page.nextPageToken);
+```
+
+Metadata timestamp ties use document ID in the last direction. JSON-field values use PostgreSQL JSONB ordering; missing fields sort at the same position as JSON null, followed by strings and then numbers. The metadata orders have composite collection/time/ID indexes; JSON-field sorting scans the narrowed collection and has no per-field index.
 
 `get` and `list` return `createdAt` as well as `updatedAt`. Server metadata is camelCase throughout the API; the underlying columns stay snake_case. Creation time is assigned by the server, preserved on replacement, and cannot be changed by fields in `data`. The migration backfills existing documents from their recorded modification time; their original creation time is unknown.
 
-Pass `nextCursor` unchanged as `after` with the same collection, orderBy, direction, and filters. Cursors preserve PostgreSQL timestamp precision and the last ID, and remain usable after that document is deleted. They are bound to the collection's internal ID (including across deletion/recreation), field, direction, and canonical filter fingerprint; mismatches and malformed cursors return 400. They are not credentials: read permissions are checked on every request. Legacy raw ID cursors are accepted only for unfiltered ID ascending, but all new responses return opaque cursors. Changing page size is allowed.
+Pass `nextPageToken` unchanged as `pageToken` with the same collection, ordering, and filters. Page tokens are opaque, query-bound continuation state: applications must not inspect or construct them. They preserve PostgreSQL timestamp precision and the last ID, remain usable after that document is deleted, and are bound to the collection's internal ID, every sort key and direction, and the canonical filter fingerprint. Mismatches and malformed tokens return 400. They are not credentials; read permissions are checked on every request. Changing page size is allowed.
 
-A null cursor marks the end. Cache prior pages or their starting cursors for a Previous button. There are no page numbers or offsets; use `count({ where })` when a total is needed. Reset the cursor and displayed results when switching sort order or filters. Pagination is not a snapshot: newly inserted records before the cursor require a refresh; changing a sort value during traversal can skip or repeat a record. Prefer immutable `createdAt` for feeds. The example uses newest-first server creation time for both posts and guestbook entries.
+A null page token marks the end. Cache prior pages or their starting tokens for a Previous button. There are no page numbers or offsets. Use `includeTotal: true` when a page and its filtered total are both needed; use `count({ where })` when only the number is needed. Reset the token and displayed results when switching sort order or filters. Pagination is not a snapshot: newly inserted records before the token require a refresh; changing a sort value during traversal can skip or repeat a record.
+
+## Define a collection once
+
+Use `collections` when an application has a domain model. `parse` validates and normalizes reads, `serialize` prepares writes, and `map` turns the document envelope into the value the UI consumes. Every handle, including owner handles and batches, shares the definition.
+
+```js
+const db = createDatabase({
+  site: "your-login-name",
+  collections: {
+    posts: {
+      parse: parsePost,
+      serialize: ({ heading, ...post }) => ({ ...post, title: heading }),
+      map: (document) => ({ id: document.id, ...document.data }),
+    },
+  },
+});
+```
+
+## Cancel superseded reads
+
+`createRequestChannel()` implements the common latest-request-wins interaction. `next()` aborts the preceding signal. SDK operations consistently surface that as `NaruDataError.code === "REQUEST_ABORTED"`.
+
+```js
+const channel = createRequestChannel();
+search.oninput = async () => {
+  const page = await posts.list({ signal: channel.next(), where: query() });
+  render(page.documents);
+};
+```
 
 ## Equality and range filters with automatic indexes
 
@@ -383,10 +428,10 @@ const query = {
   limit: 20,
 };
 const page = await db.collection("posts").list(query);
-if (page.nextCursor) {
+if (page.nextPageToken) {
   const next = await db
     .collection("posts")
-    .list({ ...query, after: page.nextCursor });
+    .list({ ...query, pageToken: page.nextPageToken });
 }
 ```
 

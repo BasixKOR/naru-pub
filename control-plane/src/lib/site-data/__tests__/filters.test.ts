@@ -232,7 +232,7 @@ integration("indexed filtered queries", () => {
         await call("GET", ["posts"], {
           ...sort,
           where: { count: { lte: 2, gte: 1 } },
-          after: first.nextCursor,
+          pageToken: first.nextPageToken,
         })
       ).documents!.map((d) => d.id),
     ).toEqual(["c"]);
@@ -241,7 +241,7 @@ integration("indexed filtered queries", () => {
         call("GET", ["posts"], {
           ...sort,
           where: other,
-          after: first.nextCursor,
+          pageToken: first.nextPageToken,
         }),
       ).rejects.toMatchObject({ status: 400 });
   });
@@ -256,10 +256,10 @@ integration("indexed filtered queries", () => {
     const next = await call("GET", ["posts"], {
       ...sort,
       where: { active: true, category: "일상" },
-      after: first.nextCursor,
+      pageToken: first.nextPageToken,
     });
     expect(next.documents!.map((d) => d.id)).toEqual(["a"]);
-    expect(next.nextCursor).toBeNull();
+    expect(next.nextPageToken).toBeNull();
     for (const where of [
       undefined,
       {},
@@ -267,16 +267,16 @@ integration("indexed filtered queries", () => {
       { category: "일상" },
     ])
       await expect(
-        call("GET", ["posts"], { ...sort, where, after: first.nextCursor }),
+        call("GET", ["posts"], { ...sort, where, pageToken: first.nextPageToken }),
       ).rejects.toMatchObject({ status: 400 });
     await expect(
-      call("GET", ["posts"], { where: { category: "일상" }, after: "a" }),
+      call("GET", ["posts"], { where: { category: "일상" }, pageToken: "a" }),
     ).rejects.toMatchObject({ status: 400 });
     const plain = await call("GET", ["posts"], { limit: 1 });
     await expect(
       call("GET", ["posts"], {
         where: { category: "일상" },
-        after: plain.nextCursor,
+        pageToken: plain.nextPageToken,
       }),
     ).rejects.toMatchObject({ status: 400 });
   });

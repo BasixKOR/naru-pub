@@ -101,7 +101,7 @@ async function loadList(reset = true) {
     limit: 20,
     orderBy: "updatedAt",
     direction: "desc",
-    ...(cursor ? { after: cursor } : {}),
+    ...(cursor ? { pageToken: cursor } : {}),
   });
   for (const doc of page.documents) {
     const row = element("div", "", "manage-row");
@@ -139,7 +139,7 @@ async function loadList(reset = true) {
     row.append(button, element("span", date(doc.updatedAt), "meta"));
     $("manage-list").append(row);
   }
-  cursor = page.nextCursor;
+  cursor = page.nextPageToken;
   $("manage-more").hidden = !cursor;
   if (!$("manage-list").children.length)
     $("manage-list").append(element("p", "저장된 글이 없습니다.", "hint"));

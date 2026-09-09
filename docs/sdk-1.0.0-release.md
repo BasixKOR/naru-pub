@@ -46,7 +46,7 @@ The blog tests exercise public browsing/guestbook and admin draft/publishing flo
 - Confirm the frozen shapes one last time, since a new versioned directory is
   the only way to change them afterwards: server metadata is camelCase
   (`createdAt`/`updatedAt`), every write returns `{ id, version, createdAt,
-  updatedAt }`, `files.list()` returns a `{ files, nextCursor }` page rather
+  updatedAt }`, `files.list()` returns a `{ files, nextPageToken }` page rather
   than an array, `files.usage()` is its own request, `files.update()` exists so
   metadata is not write-once, `onProgress` carries a `phase`, and the anonymous
   client exposes neither `batch` nor `files`.

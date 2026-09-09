@@ -13,7 +13,14 @@ import {
   writePermission,
 } from "./validation";
 import { COMPARISONS, filters } from "./filters";
-import { sorting, decodeCursor, encodeCursor } from "./pagination";
+import {
+  sorting,
+  sortings,
+  decodeCursor,
+  encodeCursor,
+  decodeMultiCursor,
+  encodeMultiCursor,
+} from "./pagination";
 import { tokenScope, limitPublicWrite } from "./owner-auth";
 import { previewFeatureAccess, userHasFeature } from "@/lib/entitlements";
 import { noteSupporterFeatureUse } from "@/lib/feature-usage";
@@ -26,12 +33,13 @@ export type DataCommand = {
   bearer?: { token: string; origin: string | null };
   clientIp?: string;
   body?: Record<string, unknown>;
-  after?: string;
+  pageToken?: string;
   limit?: number;
   orderBy?: string;
   direction?: string;
   where?: unknown;
   count?: boolean;
+  includeTotal?: boolean;
   ifVersion?: number;
   /**
    * Filled in by the service when the response it produced is one any stranger
@@ -290,61 +298,153 @@ export async function executeData(command: DataCommand) {
       const limit = command.limit ?? 50;
       if (!Number.isInteger(limit) || limit < 1 || limit > 100)
         throw new DataError(400, "Limit must be 1–100.");
-      const sort = sorting(command.orderBy, command.direction);
-      const cursor = decodeCursor(
-        command.after,
-        collection.id,
-        sort,
-        filter.fingerprint,
-      );
-      const comparison = sort.direction === "asc" ? ">" : "<";
+      const sorts = sortings(command.orderBy, command.direction);
+      const sort = sorts[0];
+      const multiple = sorts.length > 1;
+      const cursor = multiple
+        ? decodeMultiCursor(
+            command.pageToken,
+            collection.id,
+            sorts,
+            filter.fingerprint,
+          )
+        : decodeCursor(
+            command.pageToken,
+            collection.id,
+            sort,
+            filter.fingerprint,
+          );
       // A missing field collapses to JSON null, the lowest JSONB value, so the
       // sort key is never SQL NULL and the tuple comparison stays a total order.
-      const sortValue = sort.field
-        ? sql`coalesce(data -> ${sort.field}, 'null'::jsonb)`
-        : sql.ref(sort.column);
+      const sortValues = sorts.map((item) =>
+        item.field
+          ? sql`coalesce(data -> ${item.field}, 'null'::jsonb)`
+          : sql.ref(item.column),
+      );
+      const sortValue = sortValues[0];
       let query = documents()
         .select(["id", "data", "version"])
-        .select(TIMESTAMPS)
-        .select(
-          (sort.orderBy === "id"
+        .select(TIMESTAMPS);
+      for (let index = 0; index < sorts.length; index += 1) {
+        const item = sorts[index];
+        const value = sortValues[index];
+        query = query.select(
+          (item.orderBy === "id"
             ? sql<string | null>`null`
-            : sort.field
-              ? sql<string>`(${sortValue})::text`
-              : sql<string>`to_char(${sortValue} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
-          ).as("cursor_value"),
-        )
-        .orderBy(sortValue, sort.direction)
-        .limit(limit + 1);
-      for (const condition of conditions) query = query.where(condition);
-      if (sort.orderBy !== "id") query = query.orderBy("id", sort.direction);
-      if (cursor) {
-        if (sort.orderBy === "id")
-          query = query.where("id", comparison, cursor.id);
-        else
-          query = query.where(
-            sql<boolean>`(${sortValue}, id) ${sql.raw(comparison)} (${
-              sort.field
-                ? sql`${cursor.value}::jsonb`
-                : sql`${cursor.value}::timestamptz`
-            }, ${cursor.id})`,
-          );
+            : item.field
+              ? sql<string>`(${value})::text`
+              : sql<string>`to_char(${value} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
+          ).as(`cursor_value_${index}`),
+        );
+        query = query.orderBy(value, item.direction);
       }
-      const rows = await query.execute();
+      query = query.limit(limit + 1);
+      for (const condition of conditions) query = query.where(condition);
+      if (!sorts.some((item) => item.orderBy === "id"))
+        query = query.orderBy("id", sorts.at(-1)!.direction);
+      if (cursor) {
+        if (!multiple) {
+          const single = cursor as { id: string; value: string | null };
+          const comparison = sort.direction === "asc" ? ">" : "<";
+          if (sort.orderBy === "id")
+            query = query.where("id", comparison, single.id);
+          else
+            query = query.where(
+              sql<boolean>`(${sortValue}, id) ${sql.raw(comparison)} (${
+                sort.field
+                  ? sql`${single.value}::jsonb`
+                  : sql`${single.value}::timestamptz`
+              }, ${single.id})`,
+            );
+        } else {
+          const multi = cursor as { id: string; values: string[] };
+          const cursorValues = sorts.map((item, index) =>
+            item.field
+              ? sql`${multi.values[index]}::jsonb`
+              : sql`${multi.values[index]}::timestamptz`,
+          );
+          const branches = sorts.map((item, index) => {
+            const equal = sortValues
+              .slice(0, index)
+              .map(
+                (value, before) =>
+                  sql<boolean>`${value} = ${cursorValues[before]}`,
+              );
+            const comparison = item.direction === "asc" ? ">" : "<";
+            return sql<boolean>`(${sql.join(
+              [
+                ...equal,
+                sql<boolean>`${sortValues[index]} ${sql.raw(comparison)} ${cursorValues[index]}`,
+              ],
+              sql` and `,
+            )})`;
+          });
+          const idComparison = sorts.at(-1)!.direction === "asc" ? ">" : "<";
+          branches.push(
+            sql<boolean>`(${sql.join(
+              [
+                ...sortValues.map(
+                  (value, index) =>
+                    sql<boolean>`${value} = ${cursorValues[index]}`,
+                ),
+                sql<boolean>`id ${sql.raw(idComparison)} ${multi.id}`,
+              ],
+              sql` and `,
+            )})`,
+          );
+          query = query.where(sql<boolean>`(${sql.join(branches, sql` or `)})`);
+        }
+      }
+      const rows = (await query.execute()) as Array<{
+        id: string;
+        data: unknown;
+        version: number;
+        createdAt: Date;
+        updatedAt: Date;
+        cursor_value_0?: string | null;
+        cursor_value_1?: string | null;
+      }>;
       const page = rows.slice(0, limit);
       const last = page.at(-1);
+      let total: number | undefined;
+      if (command.includeTotal) {
+        let counter = documents().select(
+          tx.fn.countAll<string>().as("matched"),
+        );
+        for (const condition of conditions) counter = counter.where(condition);
+        total = Number((await counter.executeTakeFirstOrThrow()).matched);
+      }
       return {
-        documents: page.map(({ cursor_value: _, ...document }) => document),
-        nextCursor:
+        documents: page.map((row) => {
+          const document = { ...row };
+          delete document.cursor_value_0;
+          delete document.cursor_value_1;
+          return document;
+        }),
+        nextPageToken:
           rows.length > limit && last
-            ? encodeCursor(
-                collection.id,
-                sort,
-                last.id,
-                last.cursor_value,
-                filter.fingerprint,
-              )
+            ? multiple
+              ? encodeMultiCursor(
+                  collection.id,
+                  sorts,
+                  last.id,
+                  sorts.map(
+                    (_, index) =>
+                      (index === 0
+                        ? last.cursor_value_0
+                        : last.cursor_value_1) as string,
+                  ),
+                  filter.fingerprint,
+                )
+              : encodeCursor(
+                  collection.id,
+                  sort,
+                  last.id,
+                  last.cursor_value_0 as string | null,
+                  filter.fingerprint,
+                )
             : null,
+        total,
       };
     }
     const creating = method === "POST" && path.length === 1;

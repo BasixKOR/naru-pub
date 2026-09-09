@@ -119,14 +119,14 @@ export default function MediaLibrary() {
     // so this walks the cursor to the end rather than showing a truncated set
     // that would make a search look like it found nothing.
     const collected: MediaFile[] = [];
-    let after: string | undefined;
+    let pageToken: string | undefined;
     do {
       const page = await api(
-        `?limit=100${after ? `&after=${encodeURIComponent(after)}` : ""}`,
+        `?limit=100${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`,
       );
       collected.push(...page.files);
-      after = page.nextCursor ?? undefined;
-    } while (after);
+      pageToken = page.nextPageToken ?? undefined;
+    } while (pageToken);
     setFiles(collected);
     // The quota is its own request and no longer rides along with the listing.
     setUsage((await api("?usage=1")).usage);

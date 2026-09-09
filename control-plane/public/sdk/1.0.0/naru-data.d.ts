@@ -143,6 +143,15 @@ export class NaruDataError extends Error {
   constructor(status: number, message: string, code?: string);
 }
 
+export interface RequestChannel {
+  /** Aborts the previous request and returns a signal for the new request. */
+  next(reason?: unknown): AbortSignal;
+  /** Aborts the current request, if any. */
+  cancel(reason?: unknown): void;
+}
+
+export function createRequestChannel(): RequestChannel;
+
 /** 범위 비교는 JSONB 타입 안에서만 이루어집니다. 문자열 경계는 수 필드와 절대
  * 맞지 않고, 그 필드가 없는 문서는 결과에서 빠집니다. */
 export interface RangeFilter<T extends string | number = string | number> {
@@ -223,13 +232,21 @@ export type OrderBy<T = Json> =
   | "updatedAt"
   | `data.${FieldNames<T>}`;
 
+/** 둘째 정렬 키까지 지정합니다. 문서 ID는 마지막 키로 자동 추가됩니다. */
+export type MultiOrderBy<T = Json> =
+  | readonly [readonly [OrderBy<T>, "asc" | "desc"]]
+  | readonly [
+      readonly [OrderBy<T>, "asc" | "desc"],
+      readonly [OrderBy<T>, "asc" | "desc"],
+    ];
+
 /** `list`, `all`, `count`가 함께 쓰는 거르기와 정렬 옵션입니다. */
 export interface QueryOptions<T = Json> extends RequestOptions {
   /** 거르지 않으려면 생략하거나 `{}`를 넘기세요. */
   where?: Filter<T>;
-  /** 기본값은 `id`입니다. */
-  orderBy?: OrderBy<T>;
-  /** 기본값은 `asc`입니다. */
+  /** 기본값은 `id`입니다. 배열은 두 키까지 받으며 ID가 마지막에 자동으로 붙습니다. */
+  orderBy?: OrderBy<T> | MultiOrderBy<T>;
+  /** 단일 orderBy의 기본값은 `asc`입니다. 배열 orderBy와 함께 쓰지 않습니다. */
   direction?: "asc" | "desc";
 }
 
@@ -253,8 +270,10 @@ export interface ListOptions<T = Json> extends QueryOptions<T> {
   /** 한 쪽에 담을 문서 수입니다. 기본값은 50이고, 지금 서버가 받는 최댓값은
    * 100입니다. 한도는 서버가 정하며 넘으면 서버가 400으로 거절합니다. */
   limit?: number;
-  /** 같은 컬렉션, 같은 정렬, 같은 필터에서 받은 커서입니다. */
-  after?: string;
+  /** 같은 컬렉션, 같은 정렬, 같은 필터에서 받은 페이지 토큰입니다. */
+  pageToken?: string;
+  /** 참이면 같은 필터의 전체 개수를 응답의 `total`에 함께 받습니다. */
+  includeTotal?: boolean;
 }
 
 /**
@@ -265,17 +284,17 @@ export interface ListOptions<T = Json> extends QueryOptions<T> {
  * 적용되지만, 서버는 이를 검사하지 않습니다. `T`를 바꾸기 전에 저장한 문서는
  * 예전 형태 그대로 돌아옵니다.
  */
-export interface Collection<T = Json> {
+export interface Collection<T = Json, M = Document<T>, W = T> {
   /**
    * ID로 문서 하나를 가져옵니다.
    *
    * @throws 문서가 없으면 `status: 404`인 NaruDataError.
    */
-  get(id: string, options?: RequestOptions): Promise<Document<T>>;
+  get(id: string, options?: RequestOptions): Promise<M>;
   /**
    * 한 쪽을 가져옵니다.
    *
-   * 컬렉션 끝에 이르면 `nextCursor`가 `null`입니다. 그 값을 그대로 `after`로
+   * 컬렉션 끝에 이르면 `nextPageToken`이 `null`입니다. 그 값을 그대로 `pageToken`으로
    * 넘기되 `where`, `orderBy`, `direction`은 똑같이 유지하세요. 커서는 그것을
    * 만든 질의에 묶여 있어서, 필터가 달라지면 400으로 거부됩니다. 쪽 크기는
    * 중간에 바꿔도 됩니다.
@@ -284,17 +303,20 @@ export interface Collection<T = Json> {
    * 문서는 처음부터 다시 읽어야 보입니다.
    *
    * ```js
-   * let after;
+   * let pageToken;
    * do {
-   *   const page = await posts.list({ limit: 20, after });
+   *   const page = await posts.list({ limit: 20, pageToken });
    *   render(page.documents);
-   *   after = page.nextCursor ?? undefined;
-   * } while (after);
+   *   pageToken = page.nextPageToken ?? undefined;
+   * } while (pageToken);
    * ```
    */
-  list(
-    options?: ListOptions<T>,
-  ): Promise<{ documents: Document<T>[]; nextCursor: string | null }>;
+  list(options?: ListOptions<T>): Promise<{
+    documents: M[];
+    nextPageToken: string | null;
+    /** includeTotal이 참일 때만 있습니다. */
+    total?: number;
+  }>;
   /** 조건에 맞는 모든 문서를 필요할 때마다 한 쪽씩 가져옵니다. `limit`은 쪽
    * 크기입니다.
    *
@@ -310,8 +332,8 @@ export interface Collection<T = Json> {
    * ```
    */
   all(
-    options?: Omit<ListOptions<T>, "after"> & WalkOptions,
-  ): AsyncIterableIterator<Document<T>>;
+    options?: Omit<ListOptions<T>, "pageToken" | "includeTotal"> & WalkOptions,
+  ): AsyncIterableIterator<M>;
   /** 조건에 맞는 문서 수를 서버가 쪽 나눔 없이 세어 돌려줍니다.
    *
    * 셀 뿐이라 정렬할 쪽이 없습니다. `orderBy`나 `direction`을 넘기면 요청 전에
@@ -323,7 +345,7 @@ export interface Collection<T = Json> {
    * 새로 만들기만 하므로 기존 문서를 덮어쓰지 않습니다. 읽기 권한도 필요 없어서,
    * 아무도 목록을 볼 수 없는 컬렉션에도 방명록을 만들 수 있습니다.
    */
-  add(data: T, options?: RequestOptions): Promise<Written>;
+  add(data: W, options?: RequestOptions): Promise<Written>;
   /**
    * 문서 전체를 바꾸고, 없으면 새로 만듭니다.
    *
@@ -332,7 +354,7 @@ export interface Collection<T = Json> {
    */
   set(
     id: string,
-    data: T,
+    data: W,
     options?: RequestOptions & Conditional,
   ): Promise<Written>;
   /** 얕은 합치기입니다. 패치에 있는 필드가 저장된 필드를 대신하고, `unset`에
@@ -370,14 +392,14 @@ export interface Collection<T = Json> {
 export interface Database {
   /** T만 지정하면 읽은 값을 검증하지 않습니다. parse를 지정하면 반환 타입에서
    * T를 추론하고 get, list, all로 읽는 각 문서의 data에 실행합니다. */
-  collection<T = Json>(
+  collection<T = Json, M = Document<T>, W = T>(
     name: string,
-    options?: CollectionOptions<T>,
-  ): Collection<T>;
+    options?: CollectionOptions<T, M, W>,
+  ): Collection<T, M, W>;
 }
 
 /** 선택적인 읽기 검사입니다. 서버의 스키마나 쓰기 검사를 바꾸지 않습니다. */
-export interface CollectionOptions<T> {
+export interface CollectionOptions<T, M = Document<T>, W = T> {
   /** JSON을 검사한 뒤 사용할 값을 반환하는 동기 함수입니다. 검사에 실패하면
    * 오류를 던지세요. false나 undefined도 정상 반환값이며 실패 신호가 아닙니다.
    * 반환값이 문서의 data가 되고 ID, 시각, 버전은 서버 값 그대로 유지됩니다.
@@ -401,6 +423,10 @@ export interface CollectionOptions<T> {
   parse?: (
     data: Json,
   ) => T & (T extends PromiseLike<unknown> ? never : unknown);
+  /** 완성된 쓰기 값을 저장할 JSON으로 바꾸는 동기 함수입니다. */
+  serialize?: (data: W) => Json;
+  /** parse 뒤의 문서와 서버 메타데이터를 애플리케이션 값으로 바꿉니다. */
+  map?: (document: Document<T>) => M;
 }
 
 /** `OwnerDatabase.batch`에 담기는 작업 하나입니다. 문서 하나를 다루는 메서드와
@@ -498,8 +524,8 @@ export interface FileListOptions extends RequestOptions {
   /** 한 쪽에 담을 파일 수입니다. 기본값은 50이고, 지금 서버가 받는 최댓값은
    * 100입니다. 한도는 서버가 정하며 넘으면 서버가 400으로 거절합니다. */
   limit?: number;
-  /** 같은 정렬, 같은 필터에서 받은 커서입니다. */
-  after?: string;
+  /** 같은 정렬, 같은 필터에서 받은 페이지 토큰입니다. */
+  pageToken?: string;
 }
 
 /** 관리자 세션에서만 닿을 수 있는 미디어 라이브러리입니다. */
@@ -521,14 +547,31 @@ export interface FileStore {
    * });
    * ```
    */
-  list(
-    options?: FileListOptions,
-  ): Promise<{ files: StoredFile[]; nextCursor: string | null }>;
+  list(options?: FileListOptions): Promise<{
+    files: StoredFile[];
+    nextPageToken: string | null;
+  }>;
   /** 조건에 맞는 모든 파일을 필요할 때마다 한 쪽씩 가져옵니다. `Collection.all`과
    * 같은 규칙입니다. */
   all(
-    options?: Omit<FileListOptions, "after"> & WalkOptions,
+    options?: Omit<FileListOptions, "pageToken"> & WalkOptions,
   ): AsyncIterableIterator<StoredFile>;
+  /** 문서에 붙인 파일만 다루는 손잡이입니다. */
+  forDocument(
+    collection: string,
+    id: string,
+  ): {
+    list(options?: Omit<FileListOptions, "where">): Promise<{
+      files: StoredFile[];
+      nextPageToken: string | null;
+    }>;
+    all(
+      options?: Omit<FileListOptions, "where" | "pageToken"> & WalkOptions,
+    ): AsyncIterableIterator<StoredFile>;
+    deleteAll(
+      options?: Omit<FileListOptions, "where" | "pageToken"> & WalkOptions,
+    ): Promise<{ deleted: number }>;
+  };
   /** 이 사이트의 미디어 한도에서 쓰고 있는 양입니다. 목록과는 별개의 요청이라,
    * 남은 용량만 보려고 라이브러리를 훑지 않습니다. */
   usage(options?: RequestOptions): Promise<MediaUsage>;
@@ -596,6 +639,8 @@ export interface FileStore {
       /** 대체 텍스트나 이 파일을 쓰는 문서 목록처럼 애플리케이션이 정하는
        * 값입니다. */
       metadata?: Json;
+      /** 이 파일을 소유하는 문서. SDK가 검색 가능한 예약 메타데이터로 저장합니다. */
+      attachedTo?: { collection: string; id: string };
     },
   ): Promise<StoredFile>;
   /**
@@ -641,6 +686,15 @@ export interface FileStore {
 export interface OwnerDatabase extends Database {
   /** 관리자 세션이 끝나는 시각(최대 24시간)이며 유닉스 밀리초입니다. */
   expiresAt: number;
+  /** 현재 관리자 세션 상태. 401, 만료, 로그아웃이 즉시 반영됩니다. */
+  readonly session: Readonly<{
+    status: "active" | "expired" | "signed-out";
+    expiresAt: number;
+  }>;
+  /** 현재 상태를 즉시 한 번 알리고 이후 변경을 구독합니다. */
+  onSessionChange(
+    listener: (session: OwnerDatabase["session"]) => void,
+  ): () => void;
   files: FileStore;
   /** 전부 반영하거나 전부 되돌립니다.
    *
@@ -699,6 +753,8 @@ export function createDatabase(options: {
    * 상속된 속성은 무시하고 getter와 함수가 아닌 속성은 거부합니다.
    * 이후 원본 schemas를 바꿔도 이미 만든 클라이언트에는 영향을 주지 않습니다. */
   schemas?: Record<string, (data: Json) => boolean | void>;
+  /** 컬렉션별 읽기 검사, 쓰기 직렬화, 문서 변환을 한 번 등록합니다. */
+  collections?: Record<string, CollectionOptions<any, any, any>>;
 }): Database & {
   /** 화면을 전환합니다. 등록해 둔 콜백 페이지에서 completeOwnerSignIn()을
    * 부르세요.

@@ -1,9 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  createRequestChannel,
   createDatabase,
   NaruDataError,
 } from "../public/sdk/1.0.0/naru-data.js";
+
+test("request channels cancel the previous request and normalize through the SDK", () => {
+  const channel = createRequestChannel();
+  const first = channel.next();
+  const second = channel.next();
+  assert.equal(first.aborted, true);
+  assert.equal(second.aborted, false);
+  channel.cancel();
+  assert.equal(second.aborted, true);
+});
 
 const writtenFixture = (id = "one", version = 1) => ({
   id,
@@ -26,7 +37,7 @@ test("SDK sends cross-origin CRUD requests without credentials", async () => {
       success: true,
       document: documentFixture("one"),
       documents: [],
-      nextCursor: null,
+      nextPageToken: null,
     });
   };
   try {
@@ -35,7 +46,7 @@ test("SDK sends cross-origin CRUD requests without credentials", async () => {
       baseUrl: "https://naru.pub/",
     }).collection("guestbook");
     assert.deepEqual(await entries.get("one"), documentFixture("one"));
-    await entries.list({ limit: 2, after: "one" });
+    await entries.list({ limit: 2, pageToken: "one" });
     await entries.add({ message: "hi" });
     await entries.set("one", null);
     await entries.delete("one");
@@ -46,7 +57,7 @@ test("SDK sends cross-origin CRUD requests without credentials", async () => {
     assert.ok(calls.every((c) => c.options.credentials === "omit"));
     assert.equal(
       calls[1].url,
-      "https://naru.pub/api/data/alice/guestbook?limit=2&after=one",
+      "https://naru.pub/api/data/alice/guestbook?limit=2&pageToken=one",
     );
     assert.equal(calls[3].options.body, '{"data":null}');
   } finally {
@@ -100,6 +111,7 @@ test("owner file upload authorizes, uploads directly, finalizes and exposes meta
     const owner = await createDatabase({ site: "alice" }).completeOwnerSignIn();
     const file = await owner.files.upload(
       new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" }),
+      { attachedTo: { collection: "posts", id: "hello" } },
     );
     assert.equal(file.url, "https://media.naru.pub/1/file_one.png");
     assert.deepEqual(
@@ -111,6 +123,10 @@ test("owner file upload authorizes, uploads directly, finalizes and exposes meta
       ],
     );
     assert.equal(calls[1].options.body.size, 3);
+    assert.deepEqual(JSON.parse(calls[0].options.body).metadata, {
+      _naruCollection: "posts",
+      _naruDocument: "hello",
+    });
     assert.equal(
       calls[0].options.headers.Authorization,
       `Bearer ${"t".repeat(43)}`,
@@ -196,7 +212,7 @@ test("owner redirect uses PKCE; callback exchanges once and keeps public calls a
       });
     return Response.json({
       documents: [],
-      nextCursor: null,
+      nextPageToken: null,
       ...writtenFixture(),
     });
   };
@@ -438,7 +454,7 @@ test("SDK carries sort options and opaque cursors unchanged", async () => {
     urls = [];
   globalThis.fetch = async (url) => {
     urls.push(new URL(url));
-    return Response.json({ documents: [], nextCursor: "v1.opaque-cursor" });
+    return Response.json({ documents: [], nextPageToken: "v1.opaque-cursor" });
   };
   try {
     const posts = createDatabase({
@@ -447,11 +463,51 @@ test("SDK carries sort options and opaque cursors unchanged", async () => {
     }).collection("posts");
     const sort = { orderBy: "createdAt", direction: "desc" };
     const first = await posts.list({ ...sort, limit: 20 });
-    await posts.list({ ...sort, after: first.nextCursor, limit: 10 });
+    await posts.list({ ...sort, pageToken: first.nextPageToken, limit: 10 });
     assert.equal(urls[1].searchParams.get("orderBy"), "createdAt");
     assert.equal(urls[1].searchParams.get("direction"), "desc");
-    assert.equal(urls[1].searchParams.get("after"), "v1.opaque-cursor");
+    assert.equal(urls[1].searchParams.get("pageToken"), "v1.opaque-cursor");
     assert.equal(urls[1].searchParams.get("limit"), "10");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("multi-field ordering and totals use one page request", async () => {
+  const original = globalThis.fetch,
+    urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(new URL(url));
+    return Response.json({
+      documents: [],
+      nextPageToken: "v2.page",
+      total: 12,
+    });
+  };
+  try {
+    const posts = createDatabase({ site: "alice" }).collection("posts");
+    const page = await posts.list({
+      orderBy: [
+        ["data.date", "desc"],
+        ["createdAt", "desc"],
+      ],
+      includeTotal: true,
+    });
+    assert.equal(page.total, 12);
+    assert.equal(page.nextPageToken, "v2.page");
+    assert.deepEqual(JSON.parse(urls[0].searchParams.get("orderBy")), [
+      ["data.date", "desc"],
+      ["createdAt", "desc"],
+    ]);
+    assert.equal(urls[0].searchParams.get("includeTotal"), "1");
+    assert.throws(
+      () =>
+        posts.list({
+          orderBy: [["data.date", "desc"]],
+          direction: "desc",
+        }),
+      TypeError,
+    );
   } finally {
     globalThis.fetch = original;
   }
@@ -462,7 +518,7 @@ test("SDK serializes equality filters and rejects values JSON would silently dro
   const calls = [];
   globalThis.fetch = async (url) => {
     calls.push(new URL(url));
-    return Response.json({ documents: [], nextCursor: null });
+    return Response.json({ documents: [], nextPageToken: null });
   };
   try {
     const posts = createDatabase({
@@ -500,7 +556,7 @@ test("SDK serializes range filters and rejects unsupported comparisons", async (
   const calls = [];
   globalThis.fetch = async (url) => {
     calls.push(new URL(url));
-    return Response.json({ documents: [], nextCursor: null });
+    return Response.json({ documents: [], nextPageToken: null });
   };
   try {
     const posts = createDatabase({
@@ -555,9 +611,9 @@ test("count queries the server without paging and all() follows cursors", async 
   const pages = [
     {
       documents: [documentFixture("a"), documentFixture("b")],
-      nextCursor: "v1.one",
+      nextPageToken: "v1.one",
     },
-    { documents: [documentFixture("c")], nextCursor: null },
+    { documents: [documentFixture("c")], nextPageToken: null },
   ];
   globalThis.fetch = async (url) => {
     const parsed = new URL(url);
@@ -579,14 +635,14 @@ test("count queries the server without paging and all() follows cursors", async 
     assert.deepEqual(JSON.parse(urls[0].searchParams.get("where")), where);
     // Counting never sends paging inputs the server would have to ignore.
     assert.equal(urls[0].searchParams.has("limit"), false);
-    assert.equal(urls[0].searchParams.has("after"), false);
+    assert.equal(urls[0].searchParams.has("pageToken"), false);
     const ids = [];
     for await (const document of posts.all({ where, orderBy: "data.date" }))
       ids.push(document.id);
     assert.deepEqual(ids, ["a", "b", "c"]);
     assert.equal(urls[1].searchParams.get("limit"), "100");
-    assert.equal(urls[1].searchParams.has("after"), false);
-    assert.equal(urls[2].searchParams.get("after"), "v1.one");
+    assert.equal(urls[1].searchParams.has("pageToken"), false);
+    assert.equal(urls[2].searchParams.get("pageToken"), "v1.one");
     assert.equal(urls[2].searchParams.get("orderBy"), "data.date");
   } finally {
     globalThis.fetch = original;
@@ -600,7 +656,7 @@ test("all() rejects a repeated cursor before yielding the repeated page", async 
     requests += 1;
     return Response.json({
       documents: [documentFixture("a")],
-      nextCursor: "v1.stuck",
+      nextPageToken: "v1.stuck",
     });
   };
   try {
@@ -678,7 +734,7 @@ test("SDK pins the control plane even when copied or given an old baseUrl option
   const urls = [];
   globalThis.fetch = async (url) => {
     urls.push(url);
-    return Response.json({ documents: [], nextCursor: null });
+    return Response.json({ documents: [], nextPageToken: null });
   };
   try {
     await createDatabase({ site: "alice", baseUrl: "https://evil.example" })
@@ -710,7 +766,7 @@ test("one token restores after reload without network calls and retains its orig
   const calls = [];
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options });
-    return Response.json({ documents: [], nextCursor: null });
+    return Response.json({ documents: [], nextPageToken: null });
   };
   try {
     const owner = await createDatabase({ site: "alice" }).completeOwnerSignIn();
@@ -764,12 +820,20 @@ test("revocation clears persisted credentials; logout clears them even offline",
   try {
     browser.storage.set(key, JSON.stringify(saved));
     const owner = await createDatabase({ site: "alice" }).completeOwnerSignIn();
+    const states = [];
+    const unsubscribe = owner.onSessionChange((session) =>
+      states.push(session.status),
+    );
+    assert.deepEqual(states, ["active"]);
     globalThis.fetch = async () =>
       Response.json({ error: "Revoked" }, { status: 401 });
     await assert.rejects(
       owner.collection("posts").list(),
       (e) => e.status === 401,
     );
+    assert.equal(owner.session.status, "expired");
+    assert.deepEqual(states, ["active", "expired"]);
+    unsubscribe();
     assert.equal(browser.storage.size, 0);
     browser.storage.set(key, JSON.stringify(saved));
     const restored = await createDatabase({
@@ -785,11 +849,48 @@ test("revocation clears persisted credentials; logout clears them even offline",
         e.status === 0 &&
         e.cause.message === "Offline",
     );
+    assert.equal(restored.session.status, "signed-out");
     assert.equal(browser.storage.size, 0);
     await assert.rejects(
       restored.collection("posts").list(),
       (e) => e.status === 401,
     );
+  } finally {
+    globalThis.window = oldWindow;
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("owner writes automatically make same-instance public reads fresh", async () => {
+  const oldWindow = globalThis.window,
+    oldFetch = globalThis.fetch;
+  try {
+    const browser = fakeBrowser();
+    globalThis.window = browser;
+    browser.storage.set(
+      "naru:owner:https://naru.pub:alice:session:https://alice.example/admin.html",
+      JSON.stringify({
+        accessToken: "t".repeat(43),
+        expiresAt: Date.now() + 3600000,
+        redirectUri: browser.location.href,
+      }),
+    );
+    const calls = [];
+    globalThis.fetch = async (url, options) => {
+      calls.push({ url: new URL(url), options });
+      return options.method === "GET"
+        ? Response.json({ documents: [], nextPageToken: null })
+        : Response.json(writtenFixture());
+    };
+    const db = createDatabase({ site: "alice" });
+    const owner = await db.completeOwnerSignIn();
+    await db.collection("posts").list();
+    await owner.collection("posts").set("one", {});
+    await db.collection("posts").list();
+    await db.collection("categories").list();
+    assert.equal(calls[0].options.cache, "default");
+    assert.equal(calls[2].options.cache, "no-store");
+    assert.equal(calls[3].options.cache, "default");
   } finally {
     globalThis.window = oldWindow;
     globalThis.fetch = oldFetch;
@@ -834,7 +935,7 @@ test("query options fail locally instead of making malformed requests", async ()
   let requests = 0;
   globalThis.fetch = async () => {
     requests += 1;
-    return Response.json({ documents: [], nextCursor: null });
+    return Response.json({ documents: [], nextPageToken: null });
   };
   try {
     const posts = createDatabase({ site: "alice" }).collection("posts");
@@ -842,7 +943,7 @@ test("query options fail locally instead of making malformed requests", async ()
       { limit: 0 },
       { limit: 1.5 },
       { limit: -1 },
-      { after: "" },
+      { pageToken: "" },
       { direction: "sideways" },
       { orderBy: "data.author.name" },
     ])
@@ -1161,8 +1262,8 @@ test("malformed successful envelopes reject instead of returning values outside 
         { document: { ...documentFixture("one"), version: "1" } },
       ],
       [() => posts.list(), { documents: [] }],
-      [() => posts.list(), { documents: [{}], nextCursor: null }],
-      [() => posts.list(), { documents: [], nextCursor: 7 }],
+      [() => posts.list(), { documents: [{}], nextPageToken: null }],
+      [() => posts.list(), { documents: [], nextPageToken: 7 }],
       [() => posts.count(), { count: -1 }],
       [() => posts.add({}), { id: "one" }],
       [() => posts.set("one", {}), { id: "one", version: 0 }],
@@ -1182,8 +1283,8 @@ test("malformed successful envelopes reject instead of returning values outside 
       ],
       // The pre-cursor listing shape is not a page and is not accepted.
       [() => owner.files.list(), { files: [], usage: {} }],
-      [() => owner.files.list(), { files: [{}], nextCursor: null }],
-      [() => owner.files.list(), { files: [], nextCursor: 7 }],
+      [() => owner.files.list(), { files: [{}], nextPageToken: null }],
+      [() => owner.files.list(), { files: [], nextPageToken: 7 }],
       [() => owner.files.usage(), { usage: { bytes: -1 } }],
       [() => owner.files.update("one", {}), { file: null }],
       [() => owner.files.delete("one"), {}],
@@ -1209,7 +1310,7 @@ test("all rejects longer cursor cycles and honours cancellation within a page", 
     globalThis.fetch = async () =>
       Response.json({
         documents: [documentFixture("one")],
-        nextCursor: ["a", "b", "a"][calls++],
+        nextPageToken: ["a", "b", "a"][calls++],
       });
     const posts = createDatabase({ site: "alice" }).collection("posts");
     await assert.rejects(
@@ -1225,7 +1326,7 @@ test("all rejects longer cursor cycles and honours cancellation within a page", 
     globalThis.fetch = async () =>
       Response.json({
         documents: [documentFixture("one"), documentFixture("two")],
-        nextCursor: null,
+        nextPageToken: null,
       });
     const iterator = posts.all({ signal: controller.signal });
     assert.equal((await iterator.next()).value.id, "one");
@@ -1570,7 +1671,7 @@ test("optional read parsers infer usable data without changing server metadata o
       Response.json({
         document: stored,
         documents: [stored],
-        nextCursor: null,
+        nextPageToken: null,
       });
     for (const db of [createDatabase({ site: "alice" }), owner]) {
       let calls = 0;
@@ -1608,6 +1709,73 @@ test("optional read parsers infer usable data without changing server metadata o
   }
 });
 
+test("collection definitions parse, map and serialize every handle and batch", async () => {
+  const oldFetch = globalThis.fetch,
+    oldWindow = globalThis.window;
+  try {
+    await restoreTestOwner();
+    const calls = [];
+    const stored = documentFixture("one", { title: "hello" });
+    globalThis.fetch = async (url, init = {}) => {
+      calls.push({ url: new URL(url), init });
+      if (new URL(url).pathname.endsWith("/_batch"))
+        return Response.json({ results: [writtenFixture()] });
+      if (init.method === "POST" || init.method === "PUT")
+        return Response.json(writtenFixture());
+      return Response.json({
+        document: stored,
+        documents: [stored],
+        nextPageToken: null,
+      });
+    };
+    const db = createDatabase({
+      site: "alice",
+      collections: {
+        posts: {
+          parse(data) {
+            if (typeof data?.title !== "string") throw new Error("bad post");
+            return { title: data.title.toUpperCase() };
+          },
+          serialize(post) {
+            return { title: post.heading };
+          },
+          map(document) {
+            return {
+              id: document.id,
+              heading: document.data.title,
+              version: document.version,
+            };
+          },
+        },
+      },
+    });
+    assert.deepEqual(await db.collection("posts").get("one"), {
+      id: "one",
+      heading: "HELLO",
+      version: 1,
+    });
+    await db.collection("posts").set("one", { heading: "saved" });
+    assert.deepEqual(JSON.parse(calls.at(-1).init.body), {
+      data: { title: "saved" },
+    });
+    const owner = await db.completeOwnerSignIn();
+    await owner.batch([
+      {
+        type: "set",
+        collection: "posts",
+        id: "two",
+        data: { heading: "batched" },
+      },
+    ]);
+    assert.deepEqual(JSON.parse(calls.at(-1).init.body).operations[0].data, {
+      title: "batched",
+    });
+  } finally {
+    globalThis.fetch = oldFetch;
+    globalThis.window = oldWindow;
+  }
+});
+
 test("read parser failures identify the document and reject the entire failing page", async () => {
   const oldFetch = globalThis.fetch;
   try {
@@ -1632,7 +1800,7 @@ test("read parser failures identify the document and reject the entire failing p
       Response.json({
         document: bad,
         documents: [good, bad],
-        nextCursor: null,
+        nextPageToken: null,
       });
     await assert.rejects(posts.get("bad"), check);
     await assert.rejects(posts.list(), check);
@@ -1641,8 +1809,8 @@ test("read parser failures identify the document and reject the entire failing p
     globalThis.fetch = async () =>
       Response.json(
         ++calls === 1
-          ? { documents: [good], nextCursor: "next" }
-          : { documents: [good, bad], nextCursor: "more" },
+          ? { documents: [good], nextPageToken: "next" }
+          : { documents: [good, bad], nextPageToken: "more" },
       );
     const iterator = posts.all();
     assert.equal((await iterator.next()).value.id, "good");
@@ -2107,8 +2275,11 @@ test("the media library pages and filters like a collection instead of loading w
   try {
     const owner = await restoreTestOwner();
     const pages = [
-      { files: [storedFileFixture()], nextCursor: "v1.second" },
-      { files: [{ ...storedFileFixture(), id: "file_two" }], nextCursor: null },
+      { files: [storedFileFixture()], nextPageToken: "v1.second" },
+      {
+        files: [{ ...storedFileFixture(), id: "file_two" }],
+        nextPageToken: null,
+      },
     ];
     globalThis.fetch = async (url) => {
       urls.push(new URL(url));
@@ -2124,7 +2295,7 @@ test("the media library pages and filters like a collection instead of loading w
       page.files.map((file) => file.id),
       ["file_one"],
     );
-    assert.equal(page.nextCursor, "v1.second");
+    assert.equal(page.nextPageToken, "v1.second");
     assert.equal(urls[0].pathname, "/api/data/alice/_files");
     assert.deepEqual(JSON.parse(urls[0].searchParams.get("where")), {
       postId: "hello",
@@ -2132,18 +2303,21 @@ test("the media library pages and filters like a collection instead of loading w
     assert.equal(urls[0].searchParams.get("limit"), "2");
     assert.equal(urls[0].searchParams.get("orderBy"), "updatedAt");
     assert.equal(urls[0].searchParams.get("direction"), "asc");
-    assert.equal(urls[0].searchParams.has("after"), false);
+    assert.equal(urls[0].searchParams.has("pageToken"), false);
     urls.length = 0;
     pages.length = 0;
     pages.push(
-      { files: [storedFileFixture()], nextCursor: "v1.second" },
-      { files: [{ ...storedFileFixture(), id: "file_two" }], nextCursor: null },
+      { files: [storedFileFixture()], nextPageToken: "v1.second" },
+      {
+        files: [{ ...storedFileFixture(), id: "file_two" }],
+        nextPageToken: null,
+      },
     );
     const walked = [];
     for await (const file of owner.files.all({ where: { postId: "hello" } }))
       walked.push(file.id);
     assert.deepEqual(walked, ["file_one", "file_two"]);
-    assert.equal(urls[1].searchParams.get("after"), "v1.second");
+    assert.equal(urls[1].searchParams.get("pageToken"), "v1.second");
     assert.equal(urls[1].searchParams.get("limit"), "100");
     // A document field is not something a file has to sort by.
     assert.throws(() => owner.files.list({ orderBy: "data.title" }), TypeError);

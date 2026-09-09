@@ -258,7 +258,7 @@ export default function DatabaseDocs() {
                 <code>site</code>에는 전체 도메인이 아니라 나루 로그인 이름을
                 넣으세요. 공개 작업에는 API 키가 필요 없습니다.
               </p>
-              <Code language="html">{`<script type="module">\n  import { createDatabase } from "https://naru.pub/sdk/1.0.0/naru-data.js";\n  const db = createDatabase({ site: "내-로그인-이름" });\n  const posts = db.collection("posts");\n  const sort = { orderBy: "createdAt", direction: "desc" };\n  const page = await posts.list({ ...sort, limit: 20 });\n  for (const document of page.documents) {\n    console.log(document.id, document.data, document.createdAt);\n  }\n  if (page.nextCursor) {\n    const next = await posts.list({ ...sort, limit: 20, after: page.nextCursor });\n  }\n  const post = await posts.get("hello");\n  await db.collection("guestbook").add({\n    name: "방문자", message: "잘 읽었습니다!"\n  });\n</script>`}</Code>
+              <Code language="html">{`<script type="module">\n  import { createDatabase } from "https://naru.pub/sdk/1.0.0/naru-data.js";\n  const db = createDatabase({ site: "내-로그인-이름" });\n  const posts = db.collection("posts");\n  const sort = { orderBy: "createdAt", direction: "desc" };\n  const page = await posts.list({ ...sort, limit: 20 });\n  for (const document of page.documents) {\n    console.log(document.id, document.data, document.createdAt);\n  }\n  if (page.nextPageToken) {\n    const next = await posts.list({ ...sort, limit: 20, pageToken: page.nextPageToken });\n  }\n  const post = await posts.get("hello");\n  await db.collection("guestbook").add({\n    name: "방문자", message: "잘 읽었습니다!"\n  });\n</script>`}</Code>
               <p>
                 현재 제공 버전은 <strong>1.0.0</strong>이며 이 버전 안에서 계속
                 개선합니다. 버전 없는 URL은 제공하지 않습니다. 제어판 주소는
@@ -286,8 +286,8 @@ export default function DatabaseDocs() {
                         "문서 한 개 → { id, data, version, createdAt, updatedAt }. 없으면 404",
                       ],
                       [
-                        "list({ limit, after, orderBy, direction, where })",
-                        "{ documents, nextCursor }. 기본 50개, 최대 100개",
+                        "list({ limit, pageToken, orderBy, direction, where, includeTotal })",
+                        "{ documents, nextPageToken, total? }. 기본 50개, 최대 100개",
                       ],
                       [
                         "all({ limit, orderBy, direction, where })",
@@ -336,9 +336,9 @@ export default function DatabaseDocs() {
   limit: 20,
 };
 const page = await db.collection("posts").list(query);
-if (page.nextCursor !== null) {
+if (page.nextPageToken !== null) {
   const next = await db.collection("posts").list({
-    ...query, after: page.nextCursor,
+    ...query, pageToken: page.nextPageToken,
   });
 }
 
@@ -409,26 +409,34 @@ const mine = await db.collection("posts").list({
                 내림차순으로 최신 글부터 표시합니다. 글쓴이가 날짜를 직접 정하는
                 블로그라면 <code>orderBy: &quot;data.date&quot;</code>로
                 정렬해야 나중에 쓴 지난 날짜 글이 맨 위로 올라오지 않습니다.
+                같은 날짜 안에서도 의미 있는 순서가 필요하면{" "}
+                <code>
+                  [[&quot;data.date&quot;, &quot;desc&quot;],
+                  [&quot;createdAt&quot;, &quot;desc&quot;]]
+                </code>
+                처럼 두 정렬 키를 함께 넘기세요. ID는 마지막 기준으로 자동
+                추가됩니다.
               </p>
               <p>
                 <code>data.필드이름</code>으로 정렬하면 값이 없는 문서는 JSON
                 null과 같은 자리에 놓이고, null·문자열·숫자 순으로 정렬합니다.
                 값이 같은 문서는 같은 방향의 ID 순서로 정렬합니다. 다음
-                페이지에는 응답의 <code>nextCursor</code>를 그대로{" "}
-                <code>after</code>로 보내고, 같은 컬렉션·정렬 필드·방향·필터를
-                유지하세요. 커서를 직접 해석하거나 만들지 마세요. 다른 정렬이나
-                필터에 사용하면 400 오류가 발생합니다. 정렬이나 필터를 바꾸려면
-                커서와 기존 목록을 비우고 첫 페이지부터 다시 불러오세요.
+                페이지에는 응답의 <code>nextPageToken</code>를 그대로{" "}
+                <code>pageToken</code>으로 보내고, 같은 컬렉션·정렬·필터를
+                유지하세요. 토큰을 직접 해석하거나 만들지 마세요. 다른 질의에
+                사용하면 400 오류가 발생합니다. 정렬이나 필터를 바꾸려면 토큰과
+                기존 목록을 비우고 첫 페이지부터 다시 불러오세요.
               </p>
               <p>
-                <code>nextCursor</code>가 <code>null</code>이면 마지막
+                <code>nextPageToken</code>가 <code>null</code>이면 마지막
                 페이지입니다. 이전 페이지는 페이지 내용이나 시작 커서를 저장해
-                구현할 수 있습니다. 페이지 번호와 offset은 제공하지 않지만, 전체
-                개수는 <code>count()</code>로 서버에서 셀 수 있습니다. 모든
-                문서를 훑어야 한다면 <code>all()</code>이 커서를 대신
-                관리합니다. 페이지 이동은 하나의 스냅샷이 아니므로, 새 문서는
-                새로고침해야 보일 수 있고 정렬 기준 값이 바뀐 문서는 이동 중
-                빠지거나 다시 나타날 수 있습니다.
+                구현할 수 있습니다. 페이지 번호와 offset은 제공하지 않습니다.
+                목록과 개수가 함께 필요하면 <code>includeTotal: true</code>,
+                개수만 필요하면 <code>count()</code>를 쓰세요. 모든 문서를
+                훑어야 한다면 <code>all()</code>이 커서를 대신 관리합니다.
+                페이지 이동은 하나의 스냅샷이 아니므로, 새 문서는 새로고침해야
+                보일 수 있고 정렬 기준 값이 바뀐 문서는 이동 중 빠지거나 다시
+                나타날 수 있습니다.
               </p>
               <p>
                 <code>createdAt</code>은 처음 저장할 때 서버가 정하고
@@ -442,8 +450,8 @@ const mine = await db.collection("posts").list({
               <Code>{`// 커서를 직접 다루지 않고 전부 순회합니다.
 for await (const document of db.collection("posts").all({
   where: { categoryId: "diary" },
-  orderBy: "data.date",
-  direction: "desc",
+  orderBy: [["data.date", "desc"], ["createdAt", "desc"]],
+  includeTotal: true,
 })) {
   console.log(document.id, document.data);
 }

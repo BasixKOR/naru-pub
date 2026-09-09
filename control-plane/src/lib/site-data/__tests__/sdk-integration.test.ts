@@ -254,14 +254,14 @@ integration("SDK and data API contract", () => {
     expect(await feed.count({ where: query.where })).toBe(3);
     const first = await feed.list({ ...query, limit: 2 });
     expect(first.documents.map((d) => d.id)).toEqual(["post_5", "post_4"]);
-    expect(first.nextCursor).toEqual(expect.any(String));
+    expect(first.nextPageToken).toEqual(expect.any(String));
     const second = await feed.list({
       ...query,
       limit: 2,
-      after: first.nextCursor!,
+      pageToken: first.nextPageToken!,
     });
     expect(second.documents.map((d) => d.id)).toEqual(["post_2"]);
-    expect(second.nextCursor).toBeNull();
+    expect(second.nextPageToken).toBeNull();
     const ids: string[] = [];
     for await (const document of feed.all({ ...query, limit: 1 }))
       ids.push(document.id);
@@ -270,7 +270,7 @@ integration("SDK and data API contract", () => {
       feed.list({
         ...query,
         where: { visible: false },
-        after: first.nextCursor!,
+        pageToken: first.nextPageToken!,
       }),
     ).rejects.toMatchObject({ status: 400 });
   });
@@ -374,13 +374,13 @@ integration("SDK and data API contract", () => {
     // Newest first by default, and a page carries a cursor rather than the lot.
     const first = await owner.files.list({ limit: 2 });
     expect(first.files.map((file) => file.id)).toEqual(["file_3", "file_2"]);
-    expect(first.nextCursor).toEqual(expect.any(String));
+    expect(first.nextPageToken).toEqual(expect.any(String));
     const second = await owner.files.list({
       limit: 2,
-      after: first.nextCursor!,
+      pageToken: first.nextPageToken!,
     });
     expect(second.files.map((file) => file.id)).toEqual(["file_1"]);
-    expect(second.nextCursor).toBeNull();
+    expect(second.nextPageToken).toBeNull();
     // The server does the finding, so a caller never walks the library to
     // discover which images belong to one post.
     const matched: string[] = [];
@@ -390,7 +390,7 @@ integration("SDK and data API contract", () => {
     await expect(
       owner.files.list({
         where: { postId: "other" },
-        after: first.nextCursor!,
+        pageToken: first.nextPageToken!,
       }),
     ).rejects.toMatchObject({ status: 400 });
     const moved = await owner.files.update(

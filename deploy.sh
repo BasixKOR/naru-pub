@@ -53,24 +53,13 @@ map \$http_upgrade \$naru_connection_upgrade {
 # limit keyed on it would be one bucket for every visitor at once — which is not
 # a rate limit, it is an outage waiting for a busy afternoon.
 #
-# real_ip rewrites \$remote_addr to the visitor Cloudflare saw, but only when the
-# peer is one of these private ranges. The tunnel is the only thing that can be:
-# it connects outbound and the published ports are not routable from outside the
-# host's own network, so the header cannot be supplied by a caller off the
-# internet. Logs get the real address out of this too.
+# The real address is recovered per server block (see below), so these zones key
+# on the visitor rather than on the tunnel every request shares.
 #
 # The application's own CF-Connecting-IP trust (SITE_DATA_TRUST_CLOUDFLARE_IP)
-# stays a separate, still-unset decision. Getting this wrong costs an attacker
-# their own rate-limit bucket; getting that wrong costs the write limits their
-# meaning, so it is not a switch to flip on the gateway's behalf.
-set_real_ip_from 10.0.0.0/8;
-set_real_ip_from 172.16.0.0/12;
-set_real_ip_from 192.168.0.0/16;
-set_real_ip_from 127.0.0.0/8;
-set_real_ip_from ::1/128;
-set_real_ip_from fd00::/8;
-real_ip_header CF-Connecting-IP;
-
+# stays a separate, still-unset decision. Getting the gateway's key wrong costs
+# an attacker their own rate-limit bucket; getting the application's wrong costs
+# the public write limits their meaning, so it is not a switch to flip here.
 limit_req_zone \$binary_remote_addr zone=naru_data:16m rate=30r/s;
 limit_req_zone \$binary_remote_addr zone=naru_data_auth:8m rate=2r/s;
 limit_req_status 429;
@@ -90,6 +79,25 @@ upstream naru_site_proxy {
 server {
     listen 3000;
     client_max_body_size 0;
+
+    # Recover the visitor's address before the limits below are keyed on it.
+    # Trusted only when the peer is the private tunnel address: cloudflared
+    # connects outbound and these ports are not routable from off the host's
+    # network, so an internet caller cannot supply this header themselves.
+    # Scoped to this server block, leaving the hosted-site proxy on :5000
+    # exactly as it was. real_ip runs before limit_req, so \$binary_remote_addr
+    # is already the visitor by the time a bucket is chosen.
+    set_real_ip_from 10.0.0.0/8;
+    set_real_ip_from 172.16.0.0/12;
+    set_real_ip_from 192.168.0.0/16;
+    set_real_ip_from 127.0.0.0/8;
+    set_real_ip_from ::1/128;
+    set_real_ip_from fd00::/8;
+    # CF-Connecting-IP does not survive this tunnel; X-Forwarded-For does, and
+    # recursion walks it right to left past trusted hops so a value a client
+    # prepended itself cannot win.
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive on;
 
     # A document is capped at 64 KiB and the largest body the data API accepts
     # is one batch of them, so nothing on these routes needs megabytes.

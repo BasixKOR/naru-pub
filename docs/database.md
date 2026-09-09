@@ -166,11 +166,13 @@ Public/website-token root: `/api/data/:site`. Control-plane root: `/api/account/
 | POST   | `/`                                  | Admin only: `{ name, read?, write? }` creates collection  |
 | PATCH  | `/:collection`                       | Admin only: `{ read, write }` replaces permissions        |
 | DELETE | `/:collection`                       | Admin only: deletes collection and its documents          |
-| GET    | `/:collection?limit=50&after=cursor` | `{ documents, nextCursor }`                               |
+| GET    | `/:collection?limit=50&after=cursor` | `{ documents, nextCursor }`; accepts sorting and filters  |
+| GET    | `/:collection?count=1&where=...`     | `{ count }` without paging documents                      |
 | POST   | `/:collection`                       | `{ data }` creates document; returns the write result     |
 | GET    | `/:collection/:id`                   | `{ document }`                                            |
-| PUT    | `/:collection/:id`                   | `{ data }` replaces document; returns the write result    |
-| DELETE | `/:collection/:id`                   | `{ success: true }`                                       |
+| PUT    | `/:collection/:id?ifVersion=`        | `{ data }` replaces document; returns the write result    |
+| PATCH  | `/:collection/:id?ifVersion=`        | `{ data, unset? }` shallow-merges an object document      |
+| DELETE | `/:collection/:id?ifVersion=`        | `{ success: true }`                                       |
 | POST   | `/_batch`                            | Owner-only atomic `{ operations }`; returns `{ results }` |
 | GET    | `/_files?limit=50&after=&where=`     | Owner-only `{ files, nextCursor }`                        |
 | GET    | `/_files?usage=1`                    | Owner-only `{ usage }` without listing the library        |
@@ -186,7 +188,7 @@ the same `limit`, `after`, `orderBy`, `direction` and `where` parameters as a
 collection, except that `where` filters the file's `metadata` and `orderBy` has
 no `data.<field>` form. Media listings default to `createdAt` descending.
 
-All JSON request bodies require `Content-Type: application/json`. Errors return `{ error }` with an HTTP status (400 invalid input, 401 no admin session, 403 denied, 404 missing, 409 duplicate/quota, 413 oversized, 415 wrong content type, 429 rate limit). Public preflight needs no authentication. Responses are not cached.
+All JSON request bodies require `Content-Type: application/json`. Errors return `{ error }` with an HTTP status (400 invalid input, 401 no admin session, 403 denied, 404 missing, 409 duplicate/quota/conflict, 413 oversized, 415 wrong content type, 429 rate limit). Public preflight needs no authentication. Errors, writes, and authenticated reads are not cached; anonymous reads from `world`-readable collections may use the short shared cache described below.
 
 Owner authorization endpoints:
 
@@ -212,7 +214,7 @@ There are at most 20 registrations per site, 20 pending codes and 50 live tokens
 - Owner-row locks serialize permission checks, writes, and quota checks across server processes. Reads take no such lock. Deletes free quota; account deletion cascades through collections and documents.
 - `all()` walks at most 1000 records before raising `WALK_LIMIT_EXCEEDED`; pass `max` to change it. Each page is a request, so an unbounded walk is a hundred of them — narrow with `where` or page explicitly with `list()`.
 - A site holds at most 10,000 media files: the byte quota alone does not bound row count, since the smallest accepted file is one byte.
-- Replacements and `owner.batch()` writes are atomic and last-write-wins; creates are insert-only. No realtime subscriptions, offline persistence, custom indexes or arbitrary query expressions, compare-and-set, per-document rules or visitor accounts in v1.
+- Each individual replacement, update, or delete is atomic. `owner.batch()` makes all of its operations one atomic server transaction, and creates are insert-only. Writes are last-write-wins when `ifVersion` is omitted; `set`, `update`, `delete`, file metadata updates, and corresponding batch operations support optimistic compare-and-set with `ifVersion`. There are no realtime subscriptions, offline persistence, custom indexes, arbitrary query expressions, per-document rules, or visitor accounts in v1.
 
 ## File uploads (SDK 1.0.0)
 
@@ -294,9 +296,9 @@ iPhone photo lands in an accepted type instead of a 415. Re-encoding drops EXIF,
 so orientation is baked into the pixels and capture coordinates do not reach the
 public origin, and the stored name takes the new extension. Pass
 `original: true` to upload the bytes as given, or tune `image` with
-`maxDimension`, `quality`, `type` and `maxBytes`. `onProgress` covers the
-transfer only; it reports nothing while an image is being re-encoded. The media
-library at `/media` uploads originals and does not resize.
+`maxDimension`, `quality`, `type` and `maxBytes`. `onProgress` reports both the
+`resizing` and `uploading` phases. The media library at `/media` uploads
+originals and does not resize.
 
 Public access intentionally permits callers from any origin. Every write that arrives without an owner credential — creates into a `create` collection and replacements, merges or deletes in a `world`-writable one alike — uses database-backed fixed-minute limits of 60 successful writes per site and 20 per caller/IP per site, shared across collections and server processes. Owner writes do not consume these limits. Failed writes roll back their counters.
 
@@ -360,20 +362,23 @@ if (page.nextCursor !== null) {
 }
 ```
 
-`orderBy`: `id` (default), `createdAt`, or `updatedAt`. `direction`: `asc` (default) or `desc`. These are server metadata, not JSON fields. Arbitrary JSON-field sorting is not supported; scalar equality filters are supported as described below. Timestamp ties use document ID in the same direction. Both timestamp orders have composite collection/time/ID indexes.
+`orderBy`: `id` (default), `createdAt`, `updatedAt`, or `data.<field>` for one top-level document field. `direction`: `asc` (default) or `desc`. Metadata timestamp ties use document ID in the same direction. JSON-field values use PostgreSQL JSONB ordering; missing fields sort at the same position as JSON null, followed by strings and then numbers. Equal values are ordered by document ID in the same direction. The metadata orders have composite collection/time/ID indexes; JSON-field sorting scans the narrowed collection and has no per-field index.
 
 `get` and `list` return `createdAt` as well as `updatedAt`. Server metadata is camelCase throughout the API; the underlying columns stay snake_case. Creation time is assigned by the server, preserved on replacement, and cannot be changed by fields in `data`. The migration backfills existing documents from their recorded modification time; their original creation time is unknown.
 
 Pass `nextCursor` unchanged as `after` with the same collection, orderBy, direction, and filters. Cursors preserve PostgreSQL timestamp precision and the last ID, and remain usable after that document is deleted. They are bound to the collection's internal ID (including across deletion/recreation), field, direction, and canonical filter fingerprint; mismatches and malformed cursors return 400. They are not credentials: read permissions are checked on every request. Legacy raw ID cursors are accepted only for unfiltered ID ascending, but all new responses return opaque cursors. Changing page size is allowed.
 
-A null cursor marks the end. Cache prior pages or their starting cursors for a Previous button. There are no page numbers, offsets or total counts. Reset the cursor and displayed results when switching sort order or filters. Pagination is not a snapshot: newly inserted records before the cursor require a refresh; changing a sort value during traversal can skip or repeat a record. Prefer immutable `createdAt` for feeds. The example uses newest-first server creation time for both posts and guestbook entries.
+A null cursor marks the end. Cache prior pages or their starting cursors for a Previous button. There are no page numbers or offsets; use `count({ where })` when a total is needed. Reset the cursor and displayed results when switching sort order or filters. Pagination is not a snapshot: newly inserted records before the cursor require a refresh; changing a sort value during traversal can skip or repeat a record. Prefer immutable `createdAt` for feeds. The example uses newest-first server creation time for both posts and guestbook entries.
 
-## Equality filters and automatic indexes
+## Equality and range filters with automatic indexes
 
 ```js
 const query = {
-  where: { category: "일상", active: true },
-  orderBy: "createdAt",
+  where: {
+    category: "일상",
+    date: { gte: "2026-09-01", lt: "2026-10-01" },
+  },
+  orderBy: "data.date",
   direction: "desc",
   limit: 20,
 };
@@ -385,11 +390,11 @@ if (page.nextCursor) {
 }
 ```
 
-HTTP: `GET /api/data/:site/:collection?where=<URL-encoded JSON object>&orderBy=createdAt&direction=desc`. The account API accepts the same parameters. `where` applies only to collection list requests. At most 5 top-level field equalities are ANDed. Field names use the same 1–64 ASCII alphanumeric/underscore/hyphen rules as document IDs. Values are JSON strings, finite numbers, booleans or null. The decoded filter JSON is limited to 2,048 UTF-8 bytes. Absent `where` and `{}` mean no filtering.
+HTTP: `GET /api/data/:site/:collection?where=<URL-encoded JSON object>&orderBy=data.date&direction=desc`. The account API accepts the same parameters. `where` applies to collection lists and counts. Conditions address top-level fields and are ANDed. An equality value is a JSON string, finite number, boolean, or null. A range value is an object containing one or more of `gt`, `gte`, `lt`, and `lte`, whose bounds must be finite numbers or strings. Each equality or range bound counts as one predicate, with at most 5 predicates in total. Field names use the same 1–64 ASCII alphanumeric/underscore/hyphen rules as document IDs. The decoded filter JSON is limited to 2,048 UTF-8 bytes. Absent `where` and `{}` mean no filtering.
 
-Types match exactly: number 1 differs from string "1"; null matches an explicit null field, not an absent field. Strings match case-sensitively. Arrays/objects do not match scalars. No nested paths, array membership, ranges, OR, substring search, or arbitrary JSON-field sorting. Filters are carried in URLs; do not put secrets in them.
+Equality types match exactly: number 1 differs from string "1"; null matches an explicit null field, not an absent field. Strings match case-sensitively. Arrays and objects cannot be equality values. Range comparisons operate only within the bound's JSON type, so a string bound never selects numeric fields and vice versa; multiple bounds for one field must use the same type. Store sortable dates in a fixed-width representation such as ISO `YYYY-MM-DD`. Missing fields do not match ranges. Nested paths, array membership, OR, and substring search are not supported. Filters are carried in URLs; do not put secrets in them.
 
-A shared PostgreSQL GIN `jsonb_path_ops` index automatically supports containment candidate lookup; exact per-field JSONB comparisons enforce scalar equality semantics. Existing collection/ID and collection/time/ID indexes support tenant narrowing and ordering. PostgreSQL chooses its execution plan based on selectivity; an index does not guarantee every query avoids scanning. No user-managed index configuration is needed. The new index migration creates no new document data and its rollback only drops the index. Index creation can block writes while building; schedule production migration accordingly for large databases.
+A shared PostgreSQL GIN `jsonb_path_ops` index automatically supports equality containment candidate lookup; exact per-field JSONB comparisons enforce scalar equality semantics. Existing collection/ID and collection/time/ID indexes support tenant narrowing and metadata ordering. Range predicates and `data.<field>` sorting scan within the collection narrowed by the site, collection, and any equality candidates, so prefer an equality condition alongside a frequently used range where the data model permits it. PostgreSQL chooses its execution plan based on selectivity; an index does not guarantee every query avoids scanning. No user-managed index configuration is needed. The index migration creates no new document data and its rollback only drops the index. Index creation can block writes while building; schedule production migration accordingly for large databases.
 
 Opaque cursors include a SHA-256 fingerprint of normalized filters. Reordering equivalent keys works; changing, adding or dropping a filter invalidates the cursor. Read permissions and owner scopes are checked on each page. Filters are not authorization: publicly readable collections remain readable without filters.
 
@@ -399,7 +404,7 @@ Create `posts` (world/admin), `guestbook` (world/create), and **`drafts` (admin/
 
 The public list filters by exact `category`. The editor loads paginated posts/drafts, edits documents while preserving other JSON fields, saves private drafts, publishes, and deletes the selected document after confirmation. Local tab storage preserves the editor through the login redirect; explicit server draft saving persists across sessions. Signing out clears the editor and local draft.
 
-Draft and public copies share an ID. Saving a private draft does not unpublish or change an existing public post. Publication uses `owner.batch()` to write the post and remove its draft atomically; failure preserves the draft and leaves the public post unchanged. Deletion affects only the selected collection. There is no conflict detection: concurrent editors use last-write-wins. Guestbook moderation remains in the control panel.
+Draft and public copies share an ID. Saving a private draft does not unpublish or change an existing public post. Publication uses `owner.batch()` to write the post and remove its draft atomically; failure preserves the draft and leaves the public post unchanged. Deletion affects only the selected collection. Writes that omit `ifVersion` are last-write-wins; an editor can send the version it read to detect a concurrent change and receive `VERSION_CONFLICT` instead of overwriting it. Guestbook moderation remains in the control panel.
 
 ### Website identity and admin tokens
 
@@ -415,13 +420,20 @@ Consent displays the configured duration and submits that displayed value. Appro
 
 ### SDK 1.0.0 data and error contract
 
-`collection<Post>("posts")` types reads, lists, and complete replacement writes.
+`collection<Post>("posts")` types reads, lists, filters, JSON-field sorting,
+complete replacement writes, and shallow updates.
 Types describe the application's schema; they do not validate server responses at runtime.
 
 Writes accept JSON primitives, dense arrays, and plain objects. The SDK rejects
 undefined, non-finite numbers, BigInt, functions, symbols, cycles, sparse arrays,
 getters, non-enumerable properties, and class instances. Convert dates to strings
 explicitly. `set()` replaces the entire document rather than merging fields.
+`update()` shallow-merges top-level fields and removes only fields named in
+`unset`; it requires an existing object document. Each successful document
+write increments `version`. Pass a previously read version as `ifVersion` to
+`set()`, `update()`, or `delete()` to reject a stale write with `status: 409`
+and `code: "VERSION_CONFLICT"`; `ifVersion: 0` asserts that the document does
+not exist.
 
 HTTP failures throw `NaruDataError` with the original `status`, including non-JSON
 proxy responses. Network failures use `status: 0` and preserve `cause`. Invalid

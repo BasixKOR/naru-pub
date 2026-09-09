@@ -212,6 +212,7 @@ const checkUnset = (unset) => {
 };
 const FIELD = /^[a-zA-Z0-9_-]{1,64}$/;
 const COMPARISONS = ["gt", "gte", "lt", "lte"];
+const ORDER_FIELDS = /^(id|created_at|updated_at|data\.[a-zA-Z0-9_-]{1,64})$/;
 const isScalar = (value) =>
   value === null ||
   typeof value === "string" ||
@@ -254,6 +255,32 @@ function filterJson(where) {
   }
   if (predicates > 5) throw new TypeError("Use at most 5 filter predicates.");
   return JSON.stringify(where);
+}
+function queryOptions({ orderBy, direction } = {}) {
+  if (
+    orderBy !== undefined &&
+    (typeof orderBy !== "string" || !ORDER_FIELDS.test(orderBy))
+  )
+    throw new TypeError(
+      "orderBy must be id, created_at, updated_at or data.<field>.",
+    );
+  if (direction !== undefined && direction !== "asc" && direction !== "desc")
+    throw new TypeError("direction must be asc or desc.");
+}
+function listOptions(options = {}) {
+  queryOptions(options);
+  if (
+    options.limit !== undefined &&
+    (!Number.isInteger(options.limit) ||
+      options.limit < 1 ||
+      options.limit > 100)
+  )
+    throw new TypeError("limit must be an integer between 1 and 100.");
+  if (
+    options.after !== undefined &&
+    (typeof options.after !== "string" || options.after.length === 0)
+  )
+    throw new TypeError("after must be a non-empty cursor string.");
 }
 const base64url = (bytes) =>
   btoa(String.fromCharCode(...bytes))
@@ -484,6 +511,7 @@ export function createDatabase({
           }
         };
         const query = ({ where, orderBy, direction }) => {
+          queryOptions({ orderBy, direction });
           const parameters = new URLSearchParams();
           if (where !== undefined) parameters.set("where", filterJson(where));
           if (orderBy !== undefined) parameters.set("orderBy", orderBy);
@@ -491,6 +519,7 @@ export function createDatabase({
           return parameters;
         };
         const list = (options = {}) => {
+          listOptions(options);
           const parameters = query(options);
           parameters.set("limit", String(options.limit ?? 50));
           if (options.after !== undefined)
@@ -514,6 +543,7 @@ export function createDatabase({
           },
           list,
           async count(options = {}) {
+            queryOptions(options);
             const parameters = query(options);
             parameters.set("count", "1");
             return (

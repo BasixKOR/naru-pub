@@ -800,6 +800,31 @@ test("non-JSON HTTP errors preserve status; network failures are distinct", asyn
   }
 });
 
+test("query options fail locally instead of making malformed requests", async () => {
+  const original = globalThis.fetch;
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests += 1;
+    return Response.json({ documents: [], nextCursor: null });
+  };
+  try {
+    const posts = createDatabase({ site: "alice" }).collection("posts");
+    for (const options of [
+      { limit: 0 },
+      { limit: 101 },
+      { limit: 1.5 },
+      { after: "" },
+      { direction: "sideways" },
+      { orderBy: "data.author.name" },
+    ])
+      assert.throws(() => posts.list(options), TypeError);
+    await assert.rejects(posts.count({ direction: "sideways" }), TypeError);
+    assert.equal(requests, 0);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 test("writes reject lossy JSON without requests and snapshot valid shared references", async () => {
   const original = globalThis.fetch;
   const bodies = [];

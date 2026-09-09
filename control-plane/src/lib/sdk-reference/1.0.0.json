@@ -847,7 +847,7 @@
         {
           "name": "upload",
           "optional": false,
-          "signature": "upload(\n  file: Blob | File,\n  options?: RequestOptions & {\n    metadata?: Json;\n    onProgress?: (progress: { loaded: number; total: number }) => void;\n  },\n): Promise<StoredFile>",
+          "signature": "upload(\n  file: Blob | File,\n  options?: RequestOptions & {\n    image?: ImageOptions;\n    metadata?: Json;\n    onProgress?: (progress: { loaded: number; total: number }) => void;\n    original?: boolean;\n  },\n): Promise<StoredFile>",
           "summary": [
             {
               "type": "paragraph",
@@ -893,9 +893,42 @@
               ]
             },
             {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "큰 사진은 보내기 전에 브라우저에서 줄입니다. JPEG·PNG·WebP는 긴 변이 "
+                },
+                {
+                  "type": "code",
+                  "value": "maxDimension"
+                },
+                {
+                  "type": "text",
+                  "value": "을 넘거나 "
+                },
+                {
+                  "type": "code",
+                  "value": "minBytes"
+                },
+                {
+                  "type": "text",
+                  "value": "보다 무거울 때만 다시 인코딩하고, 그래서 더 커지면 원본을 그대로 올립니다. 아이폰이 저장하는 HEIC는 사파리가 읽을 수 있으면 받는 형식으로 바꿔 주므로, 원래대로면 거부될 사진도 올라갑니다. 다시 인코딩한 파일은 EXIF가 사라지므로 회전은 픽셀에 반영해 넣고 촬영 위치는 공개 주소에 남지 않습니다. 원본 그대로 두려면 "
+                },
+                {
+                  "type": "code",
+                  "value": "image: false"
+                },
+                {
+                  "type": "text",
+                  "value": "를 넘기세요. 한도 확인은 줄인 뒤의 크기로 합니다."
+                }
+              ]
+            },
+            {
               "type": "code",
               "language": "javascript",
-              "code": "const image = await owner.files.upload(input.files[0], {\n  onProgress: ({ loaded, total }) => bar.value = loaded / total,\n  metadata: { altText: \"비둘기\" },\n});\nawait owner.collection(\"posts\").update(\"hello\", { cover: image.url });"
+              "code": "const image = await owner.files.upload(input.files[0], {\n  onProgress: ({ loaded, total }) => bar.value = loaded / total,\n  image: { maxDimension: 1600 },\n  metadata: { altText: \"비둘기\" },\n});\nawait owner.collection(\"posts\").update(\"hello\", { cover: image.url });"
             }
           ],
           "throws": [
@@ -905,7 +938,7 @@
                 "spans": [
                   {
                     "type": "text",
-                    "value": "빈 파일이거나 파일 하나의 한도를 넘으면 TypeError."
+                    "value": "줄인 뒤에도 비어 있거나 파일 하나의 한도를 넘으면 TypeError."
                   }
                 ]
               }
@@ -923,6 +956,118 @@
                 {
                   "type": "text",
                   "value": "이 사이트의 미디어 한도에서 쓰고 있는 양입니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        }
+      ]
+    },
+    {
+      "name": "ImageOptions",
+      "kind": "interface",
+      "summary": [
+        {
+          "type": "paragraph",
+          "spans": [
+            {
+              "type": "text",
+              "value": "업로드 전에 브라우저에서 이미지를 줄이는 방법입니다. 값을 하나도 넘기지 않으면 기본값이 그대로 쓰입니다. 줄이지 않으려면 "
+            },
+            {
+              "type": "code",
+              "value": "original: true"
+            },
+            {
+              "type": "text",
+              "value": "를 쓰세요."
+            }
+          ]
+        }
+      ],
+      "throws": [],
+      "signature": "interface ImageOptions",
+      "extends": [],
+      "members": [
+        {
+          "name": "maxDimension",
+          "optional": true,
+          "signature": "maxDimension?: number",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "긴 변의 최대 픽셀입니다. 1에서 16384 사이의 정수이며 기본값은 2048입니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "minBytes",
+          "optional": true,
+          "signature": "minBytes?: number",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "이 크기 이하이면서 "
+                },
+                {
+                  "type": "code",
+                  "value": "maxDimension"
+                },
+                {
+                  "type": "text",
+                  "value": "도 넘지 않는 이미지는 손대지 않고 그대로 올립니다. 기본값은 1 MiB입니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "quality",
+          "optional": true,
+          "signature": "quality?: number",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "손실 압축 품질입니다. 0 초과 1 이하이며 기본값은 0.82입니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "type",
+          "optional": true,
+          "signature": "type?: \"image/webp\" | \"image/jpeg\" | \"image/png\"",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "다시 인코딩할 형식입니다. 기본값은 "
+                },
+                {
+                  "type": "code",
+                  "value": "\"image/webp\""
+                },
+                {
+                  "type": "text",
+                  "value": "입니다."
                 }
               ]
             }

@@ -68,7 +68,9 @@ db.completeOwnerSignIn(requestOptions).then((admin) => {
   admin.files.upload(new Blob(["hello"]), {
     ...requestOptions,
     onProgress: ({ loaded }) => void loaded,
+    image: { maxDimension: 1600, quality: 0.7, type: "image/jpeg" },
   });
+  admin.files.upload(new Blob(["hello"]), { original: true });
   admin.files.delete("one", requestOptions);
   admin.batch(
     [{ type: "delete", collection: "posts", id: "one" }],
@@ -261,3 +263,10 @@ db.collection("flags", { parse: () => false })
 db.collection("schemaless").update("one", {}, { unset: ["legacy"] });
 // @ts-expect-error Typed collections still reject unknown field names in unset.
 posts.update("one", {}, { unset: ["legacy"] });
+
+db.completeOwnerSignIn().then((admin) => {
+  // @ts-expect-error Only the three encodable types can be produced.
+  admin?.files.upload(new Blob(["hello"]), { image: { type: "image/gif" } });
+  // @ts-expect-error Opting out is a boolean, not a falsy image option.
+  admin?.files.upload(new Blob(["hello"]), { image: false });
+});

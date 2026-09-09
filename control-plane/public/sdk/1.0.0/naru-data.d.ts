@@ -412,6 +412,20 @@ export interface MediaUsage {
   maxBytes: number;
 }
 
+/** 업로드 전에 브라우저에서 이미지를 줄이는 방법입니다. 값을 하나도 넘기지
+ * 않으면 기본값이 그대로 쓰입니다. 줄이지 않으려면 `original: true`를 쓰세요. */
+export interface ImageOptions {
+  /** 긴 변의 최대 픽셀입니다. 1에서 16384 사이의 정수이며 기본값은 2048입니다. */
+  maxDimension?: number;
+  /** 손실 압축 품질입니다. 0 초과 1 이하이며 기본값은 0.82입니다. */
+  quality?: number;
+  /** 다시 인코딩할 형식입니다. 기본값은 `"image/webp"`입니다. */
+  type?: "image/webp" | "image/jpeg" | "image/png";
+  /** 이 크기 이하이면서 `maxDimension`도 넘지 않는 이미지는 손대지 않고 그대로
+   * 올립니다. 기본값은 1 MiB입니다. */
+  minBytes?: number;
+}
+
 /** 관리자 세션에서만 닿을 수 있는 미디어 라이브러리입니다. */
 export interface FileStore {
   /** @throws 파일이 없으면 `status: 404`인 NaruDataError. */
@@ -433,23 +447,37 @@ export interface FileStore {
    * 출처에서 실행될 수 있어 거부합니다. 문서에는 바이트가 아니라 돌아온 `id`나
    * `url`을 저장하세요.
    *
+   * 큰 사진은 보내기 전에 브라우저에서 줄입니다. JPEG·PNG·WebP는 긴 변이
+   * `maxDimension`을 넘거나 `minBytes`보다 무거울 때만 다시 인코딩하고,
+   * 그래서 더 커지면 원본을 그대로 올립니다. 아이폰이 저장하는 HEIC는 사파리가
+   * 읽을 수 있으면 받는 형식으로 바꿔 주므로, 원래대로면 거부될 사진도
+   * 올라갑니다. 다시 인코딩한 파일은 EXIF가 사라지므로 회전은 픽셀에 반영해
+   * 넣고 촬영 위치는 공개 주소에 남지 않습니다. 원본 그대로 두려면
+   * `image: false`를 넘기세요. 한도 확인은 줄인 뒤의 크기로 합니다.
+   *
    * ```js
    * const image = await owner.files.upload(input.files[0], {
    *   onProgress: ({ loaded, total }) => bar.value = loaded / total,
+   *   image: { maxDimension: 1600 },
    *   metadata: { altText: "비둘기" },
    * });
    * await owner.collection("posts").update("hello", { cover: image.url });
    * ```
    *
    * @param file 입력에서 받은 `File`이거나 아무 `Blob`입니다.
-   * @throws 빈 파일이거나 파일 하나의 한도를 넘으면 TypeError.
+   * @throws 줄인 뒤에도 비어 있거나 파일 하나의 한도를 넘으면 TypeError.
    */
   upload(
     file: File | Blob,
     options?: RequestOptions & {
       /** 바이트가 나가는 동안 불립니다. 전송 길이를 알 수 없으면 파일 크기를
-       * total로 알려 줍니다. */
+       * total로 알려 줍니다. 줄이는 동안에는 불리지 않습니다. */
       onProgress?: (progress: { loaded: number; total: number }) => void;
+      /** 이미지 축소 설정입니다. `original`이 참이면 쓰이지 않습니다. */
+      image?: ImageOptions;
+      /** 참이면 줄이지 않고 원본 바이트를 그대로 올립니다. 기본값은
+       * 거짓입니다. */
+      original?: boolean;
       /** 대체 텍스트나 이 파일을 쓰는 문서 목록처럼 애플리케이션이 정하는
        * 값입니다. */
       metadata?: Json;

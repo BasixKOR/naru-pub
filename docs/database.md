@@ -210,6 +210,7 @@ Database documents should store `file.id` or `file.url`, not base64 data.
 const image = await owner.files.upload(fileInput.files[0], {
   signal: abortController.signal,
   onProgress: ({ loaded, total }) => showProgress(loaded / total),
+  image: { maxDimension: 1600 },
   metadata: {
     altText: "A pigeon",
     references: [{ collection: "posts", id: "hello" }],
@@ -238,6 +239,21 @@ both the R2 object and its metadata; deleting an account removes its media
 prefix. Upload callers should keep the returned ID so unused objects can be
 deleted explicitly. Upload authorizations that are not finalized are removed by
 the background cleanup after one hour.
+
+The SDK downscales large photos in the browser before it asks for an
+authorization, so the declared size matches what R2 stores and the 25 MiB limit
+applies to the shrunk copy. A JPEG, PNG or WebP is re-encoded only when its long
+edge exceeds `maxDimension` (2048) or the file exceeds `minBytes` (1 MiB), and
+the original is kept whenever re-encoding would produce more bytes; small
+hand-tuned images therefore upload untouched. HEIC and HEIF are always
+transcoded where the browser can decode them — Safari can, which is how an
+iPhone photo lands in an accepted type instead of a 415. Re-encoding drops EXIF,
+so orientation is baked into the pixels and capture coordinates do not reach the
+public origin, and the stored name takes the new extension. Pass
+`original: true` to upload the bytes as given, or tune `image` with
+`maxDimension`, `quality`, `type` and `minBytes`. `onProgress` covers the
+transfer only; it reports nothing while an image is being re-encoded. The media
+library at `/media` uploads originals and does not resize.
 
 Public access intentionally permits callers from any origin. Public creates use database-backed fixed-minute limits of 60 successful creates per site and 20 per caller/IP per site, shared across collections and server processes. Owner writes do not consume these limits. Failed writes roll back their counters.
 

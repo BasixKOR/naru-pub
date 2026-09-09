@@ -1698,3 +1698,191 @@ test("read parsers are handle-local and do not run for counts or writes", async 
     globalThis.fetch = oldFetch;
   }
 });
+
+// Stands in for the browser's decode/encode pair so the resize path can be
+// exercised where neither createImageBitmap nor OffscreenCanvas exists.
+function fakeImagePipeline({ width, height, encoded }) {
+  const oldBitmap = globalThis.createImageBitmap,
+    oldCanvas = globalThis.OffscreenCanvas;
+  const drawn = [];
+  globalThis.createImageBitmap = async (_blob, options) => ({
+    width,
+    height,
+    options,
+    close() {
+      this.closed = true;
+    },
+  });
+  globalThis.OffscreenCanvas = class {
+    constructor(canvasWidth, canvasHeight) {
+      this.width = canvasWidth;
+      this.height = canvasHeight;
+    }
+    getContext() {
+      return {
+        drawImage: (_bitmap, _x, _y, targetWidth, targetHeight) =>
+          drawn.push([targetWidth, targetHeight]),
+      };
+    }
+    async convertToBlob({ type, quality }) {
+      drawn.push({ type, quality });
+      return encoded(type);
+    }
+  };
+  return {
+    drawn,
+    restore() {
+      globalThis.createImageBitmap = oldBitmap;
+      globalThis.OffscreenCanvas = oldCanvas;
+    },
+  };
+}
+
+function captureUpload() {
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), options });
+    if (String(url) === "https://upload.example/signed")
+      return new Response(null, { status: 200 });
+    if (options.method === "POST") return Response.json(uploadAuthorization());
+    return Response.json({ file: storedFileFixture() });
+  };
+  return calls;
+}
+
+test("oversized photos are downscaled before authorization so the declared size stays honest", async () => {
+  const oldWindow = globalThis.window,
+    oldFetch = globalThis.fetch;
+  const image = fakeImagePipeline({
+    width: 8000,
+    height: 6000,
+    encoded: (type) => new Blob(["x".repeat(1024)], { type }),
+  });
+  const calls = captureUpload();
+  try {
+    const owner = await restoreTestOwner();
+    const original = new File(
+      [new Uint8Array(30 * 1024 * 1024)],
+      "IMG_0001.HEIC",
+      { type: "image/heic" },
+    );
+    // Over the 25 MiB ceiling as taken; the shrunk copy is what gets measured.
+    await owner.files.upload(original);
+    assert.deepEqual(JSON.parse(calls[0].options.body), {
+      name: "IMG_0001.webp",
+      contentType: "image/webp",
+      size: 1024,
+      metadata: {},
+    });
+    assert.equal(calls[1].options.body.size, 1024);
+    assert.equal(calls[1].options.body.type, "image/webp");
+    // 8000x6000 fits the 2048 box on its long edge, and EXIF rotation is baked
+    // into the pixels because the canvas would otherwise drop it.
+    assert.deepEqual(image.drawn[0], [2048, 1536]);
+    assert.deepEqual(image.drawn[1], { type: "image/webp", quality: 0.82 });
+  } finally {
+    image.restore();
+    globalThis.window = oldWindow;
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("resizing keeps the original when it is already small, would grow, or is declined", async () => {
+  const oldWindow = globalThis.window,
+    oldFetch = globalThis.fetch;
+  const cases = [
+    // Within the pixel box and under minBytes: a hand-tuned PNG stays exact.
+    { width: 800, height: 600, size: 4096, options: {} },
+    // Re-encoding an efficient image can cost bytes; the smaller one wins.
+    { width: 8000, height: 6000, size: 4096, options: {} },
+    // An encoder that ignored the requested type is not trusted.
+    {
+      width: 8000,
+      height: 6000,
+      size: 512,
+      options: {},
+      encodedType: "image/png",
+    },
+    // The caller asked for the bytes it handed over.
+    { width: 8000, height: 6000, size: 4096, options: { original: true } },
+  ];
+  try {
+    for (const { width, height, size, options, encodedType } of cases) {
+      const image = fakeImagePipeline({
+        width,
+        height,
+        encoded: (type) =>
+          new Blob(["x".repeat(size)], { type: encodedType || type }),
+      });
+      const calls = captureUpload();
+      try {
+        const owner = await restoreTestOwner();
+        await owner.files.upload(
+          new File([new Uint8Array(2048)], "photo.png", { type: "image/png" }),
+          options,
+        );
+        assert.deepEqual(JSON.parse(calls[0].options.body), {
+          name: "photo.png",
+          contentType: "image/png",
+          size: 2048,
+          metadata: {},
+        });
+      } finally {
+        image.restore();
+      }
+    }
+  } finally {
+    globalThis.window = oldWindow;
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("image options are validated and a shrunk file still faces the upload limits", async () => {
+  const oldWindow = globalThis.window,
+    oldFetch = globalThis.fetch;
+  const image = fakeImagePipeline({
+    width: 8000,
+    height: 6000,
+    encoded: (type) => new Blob([new Uint8Array(26 * 1024 * 1024)], { type }),
+  });
+  captureUpload();
+  try {
+    const owner = await restoreTestOwner();
+    const photo = new File([new Uint8Array(30 * 1024 * 1024)], "photo.jpg", {
+      type: "image/jpeg",
+    });
+    for (const bad of [
+      { maxDimension: 0 },
+      { maxDimension: 2048.5 },
+      { maxDimension: 16385 },
+      { quality: 0 },
+      { quality: 1.1 },
+      { type: "image/gif" },
+      { type: "image/svg+xml" },
+      { minBytes: -1 },
+    ])
+      await assert.rejects(
+        owner.files.upload(photo, { image: bad }),
+        TypeError,
+      );
+    for (const bad of [null, false, "yes", []])
+      await assert.rejects(
+        owner.files.upload(photo, { image: bad }),
+        TypeError,
+      );
+    for (const bad of ["yes", 1, null])
+      await assert.rejects(
+        owner.files.upload(photo, { original: bad }),
+        TypeError,
+      );
+    // Still too heavy after shrinking, so the limit applies to the resized copy.
+    await assert.rejects(owner.files.upload(photo), {
+      name: "TypeError",
+      message: "File must be between 1 byte and 25 MiB.",
+    });
+  } finally {
+    image.restore();
+    globalThis.window = oldWindow;
+    globalThis.fetch = oldFetch;
+  }
+});

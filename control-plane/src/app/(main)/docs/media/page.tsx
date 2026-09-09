@@ -10,9 +10,10 @@ export const metadata: Metadata = {
 const sections = [
   ["start", "01 · 미디어 라이브러리에서 시작하기"],
   ["upload", "02 · 웹 SDK로 올리기"],
-  ["metadata", "03 · 어떤 글의 파일인지 적어 두기"],
-  ["limits", "04 · 한도와 허용 형식"],
-  ["cleanup", "05 · 정리와 삭제"],
+  ["resize", "03 · 큰 사진은 알아서 줄입니다"],
+  ["metadata", "04 · 어떤 글의 파일인지 적어 두기"],
+  ["limits", "05 · 한도와 허용 형식"],
+  ["cleanup", "06 · 정리와 삭제"],
 ];
 
 function Section({
@@ -119,7 +120,43 @@ await owner.collection("posts").set("hello", {
 });`}</Code>
             </Section>
 
-            <Section id="metadata" title="03 · 어떤 글의 파일인지 적어 두기">
+            <Section id="resize" title="03 · 큰 사진은 알아서 줄입니다">
+              <p>
+                요즘 휴대전화 사진은 한 장에 수십 MB, 가로 8000 픽셀을 넘기도
+                합니다. <code>upload()</code>는 승인을 받기 전에 브라우저에서
+                사진을 줄이므로, 그대로면 한도에 걸렸을 사진도 올라가고 방문자가
+                내려받는 양도 줄어듭니다.
+              </p>
+              <p>
+                JPEG, PNG, WebP는 긴 변이 2048 픽셀을 넘거나 파일이 1 MiB보다
+                무거울 때만 다시 인코딩합니다. 줄인 쪽이 오히려 커지면 원본을
+                그대로 올리니, 공들여 줄여 둔 작은 이미지는 손대지 않습니다.
+                아이폰이 저장하는 HEIC는 사파리에서 받는 형식으로 바꿔 주므로,
+                원래대로면 거절당했을 사진도 올릴 수 있습니다.
+              </p>
+              <p>
+                다시 인코딩하면 EXIF가 사라집니다. 회전은 픽셀에 반영해 넣으니
+                사진이 눕지 않고, 촬영 위치는 공개 주소에 남지 않습니다.
+                <code>onProgress</code>는 전송만 알려 주므로 줄이는 동안에는
+                진행률이 움직이지 않습니다.
+              </p>
+              <Code>{`// 기본값 그대로: 긴 변 2048, WebP.
+await owner.files.upload(file);
+
+// 원하는 크기로.
+await owner.files.upload(file, {
+  image: { maxDimension: 1600, quality: 0.8, type: "image/jpeg" },
+});
+
+// 원본 그대로 올리기.
+await owner.files.upload(file, { original: true });`}</Code>
+              <p>
+                <a href="/media">미디어 라이브러리</a>에서 끌어 놓은 파일은
+                줄이지 않고 올린 그대로 저장합니다.
+              </p>
+            </Section>
+
+            <Section id="metadata" title="04 · 어떤 글의 파일인지 적어 두기">
               <p>
                 <code>metadata</code>에 넣은 값은 <code>files.list()</code>와{" "}
                 <code>files.get()</code>에 그대로 돌아옵니다. 어떤 문서가 그
@@ -144,11 +181,11 @@ const mine = files.filter((file) =>
               </p>
             </Section>
 
-            <Section id="limits" title="04 · 한도와 허용 형식">
+            <Section id="limits" title="05 · 한도와 허용 형식">
               <p>
                 파일 하나는 <strong>25 MiB</strong>까지, 사이트 하나는{" "}
-                <strong>250 MiB</strong>까지 저장할 수 있습니다.
-                데이터베이스 문서 한도와는 별개로 셉니다.
+                <strong>250 MiB</strong>까지 저장할 수 있습니다. 데이터베이스
+                문서 한도와는 별개로 셉니다.
               </p>
               <p>
                 JPEG, PNG, WebP, AVIF, GIF와 지원하는 오디오, PDF, ZIP, 일반
@@ -160,7 +197,7 @@ const mine = files.filter((file) =>
 showQuota(bytes / maxBytes, count);`}</Code>
             </Section>
 
-            <Section id="cleanup" title="05 · 정리와 삭제">
+            <Section id="cleanup" title="06 · 정리와 삭제">
               <p>
                 <code>files.delete(id)</code>는 저장된 파일과 그 정보를 함께
                 지웁니다. <strong>되돌릴 수 없습니다.</strong> 미디어

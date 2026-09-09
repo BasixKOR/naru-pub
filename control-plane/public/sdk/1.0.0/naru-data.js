@@ -186,6 +186,136 @@ function validateJson(value, ancestors = new Set()) {
   }
   ancestors.delete(value);
 }
+// A phone camera hands over 40 MB and 8000 px for a cover image a site will
+// display at 1200. Re-encoding before the authorization request keeps the
+// declared size honest, so the server's finalize check still matches, and the
+// original never crosses the wire.
+const DECODABLE = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  // Safari decodes what iPhones actually store. The media library rejects
+  // these types, so transcoding here is the only way such a photo lands.
+  "image/heic",
+  "image/heif",
+]);
+const ENCODABLE = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+function imageSettings(image = {}, original = false) {
+  if (typeof original !== "boolean")
+    throw new TypeError("original must be a boolean.");
+  if (original) return null;
+  if (!object(image)) throw new TypeError("image must be an options object.");
+  const {
+    maxDimension = 2048,
+    quality = 0.82,
+    type = "image/webp",
+    minBytes = 1024 * 1024,
+  } = image;
+  if (
+    !Number.isInteger(maxDimension) ||
+    maxDimension < 1 ||
+    maxDimension > 16384
+  )
+    throw new TypeError("maxDimension must be an integer between 1 and 16384.");
+  if (typeof quality !== "number" || !(quality > 0) || quality > 1)
+    throw new TypeError(
+      "quality must be a number greater than 0 and at most 1.",
+    );
+  if (!Object.hasOwn(ENCODABLE, type))
+    throw new TypeError(
+      "image type must be image/webp, image/jpeg or image/png.",
+    );
+  if (!Number.isInteger(minBytes) || minBytes < 0)
+    throw new TypeError("minBytes must be a non-negative integer.");
+  return { maxDimension, quality, type, minBytes };
+}
+// Browsers substitute image/png when they cannot encode the requested type, so
+// callers check blob.type before trusting it.
+function encodeCanvas(canvas, { type, quality }) {
+  if (typeof canvas.convertToBlob === "function")
+    return canvas.convertToBlob({ type, quality });
+  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+}
+function newCanvas(width, height) {
+  if (typeof OffscreenCanvas === "function")
+    return new OffscreenCanvas(width, height);
+  if (typeof document === "undefined") return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+// The object key takes its extension from the name while the content type is
+// declared separately; a .heic key served as WebP is a confusing public URL.
+function renameExtension(name, type) {
+  const dot = name.lastIndexOf(".");
+  const base = (dot > 0 ? name.slice(0, dot) : name).slice(
+    0,
+    254 - ENCODABLE[type].length,
+  );
+  return `${base}.${ENCODABLE[type]}`;
+}
+async function downscaleImage(file, settings) {
+  if (
+    !settings ||
+    !DECODABLE.has(file.type) ||
+    typeof createImageBitmap !== "function"
+  )
+    return file;
+  let bitmap;
+  try {
+    // Canvas discards EXIF, so orientation is baked in here or every portrait
+    // phone photo is published on its side.
+    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch {
+    // Undecodable here is not undecodable everywhere; leave the verdict to the
+    // server's own type check.
+    return file;
+  }
+  try {
+    const longest = Math.max(bitmap.width, bitmap.height);
+    if (!longest) return file;
+    const scale = Math.min(1, settings.maxDimension / longest);
+    // A small hand-tuned PNG should survive byte-identical; only pixel count or
+    // sheer weight justifies a lossy pass. Undecodable types have no such
+    // choice, since uploading them unchanged is a rejection.
+    if (
+      scale === 1 &&
+      file.size <= settings.minBytes &&
+      Object.hasOwn(ENCODABLE, file.type)
+    )
+      return file;
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = newCanvas(width, height);
+    const context = canvas?.getContext("2d", {
+      alpha: settings.type !== "image/jpeg",
+    });
+    if (!context) return file;
+    context.drawImage(bitmap, 0, 0, width, height);
+    const blob = await encodeCanvas(canvas, settings);
+    // Re-encoding an already efficient file can cost bytes. Keep the smaller of
+    // the two, and never trust an encoder that ignored the requested type.
+    if (!blob?.size || blob.type !== settings.type || blob.size >= file.size)
+      return file;
+    return new File(
+      [blob],
+      renameExtension(
+        typeof file.name === "string" && file.name ? file.name : "upload",
+        settings.type,
+      ),
+      { type: settings.type },
+    );
+  } catch {
+    return file;
+  } finally {
+    bitmap.close?.();
+  }
+}
 const segment = (value) => {
   if (typeof value !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(value))
     throw new TypeError("Invalid collection or document ID.");
@@ -632,12 +762,21 @@ export function createDatabase({
           return (await send(`${root}/_files`, "GET", undefined, options))
             .usage;
         },
-        async upload(file, { onProgress, metadata = {}, ...options } = {}) {
-          if (!(file instanceof Blob))
+        async upload(
+          source,
+          { image, original, onProgress, metadata = {}, ...options } = {},
+        ) {
+          if (!(source instanceof Blob))
             throw new TypeError("upload requires a File or Blob.");
           if (onProgress !== undefined && typeof onProgress !== "function")
             throw new TypeError("onProgress must be a function.");
           validateJson(metadata);
+          const settings = imageSettings(image, original);
+          // Shrinking precedes the limit check on purpose: a 40 MB photo the
+          // site would downscale for display anyway should upload, not fail.
+          // onProgress covers the transfer only, so callers see no movement
+          // while this runs.
+          const file = await downscaleImage(source, settings);
           if (!file.size || file.size > 25 * 1024 * 1024)
             throw new TypeError("File must be between 1 byte and 25 MiB.");
           const scope = requestScope({ timeoutMs: 120000, ...options });

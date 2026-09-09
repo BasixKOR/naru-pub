@@ -8,7 +8,6 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -22,7 +21,6 @@ type GitHubDeployTarget = {
   githubRepository: string;
   githubRef: string;
   targetPrefix: string;
-  deleteRemovedFiles: boolean;
   enabled: boolean;
   lastGithubSha: string | null;
   lastDeployedAt: string | null;
@@ -70,7 +68,6 @@ export default function GitHubDeployTargetsCard({
   const [githubRepository, setGithubRepository] = useState("");
   const [branch, setBranch] = useState("main");
   const [targetPrefix, setTargetPrefix] = useState("/");
-  const [deleteRemovedFiles, setDeleteRemovedFiles] = useState(true);
   const [pendingId, setPendingId] = useState<number | null>(null);
 
   const sortedTargets = useMemo(
@@ -90,7 +87,6 @@ export default function GitHubDeployTargetsCard({
           githubRepository,
           githubRef: refFromBranch(branch),
           targetPrefix,
-          deleteRemovedFiles,
         }),
       });
       const result = await response.json();
@@ -100,7 +96,6 @@ export default function GitHubDeployTargetsCard({
         setGithubRepository("");
         setBranch("main");
         setTargetPrefix("/");
-        setDeleteRemovedFiles(true);
         window.location.reload();
       } else {
         toast.error(result.message);
@@ -199,17 +194,6 @@ export default function GitHubDeployTargetsCard({
               추가
             </Button>
           </div>
-
-          <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Checkbox
-              checked={deleteRemovedFiles}
-              onCheckedChange={(checked) =>
-                setDeleteRemovedFiles(checked === true)
-              }
-              disabled={pendingId !== null}
-            />
-            배포에서 사라진 파일 삭제
-          </label>
         </form>
 
         <div className="space-y-3">

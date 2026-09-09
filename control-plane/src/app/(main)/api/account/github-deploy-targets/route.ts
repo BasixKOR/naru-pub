@@ -22,7 +22,6 @@ export async function GET() {
       "github_repository",
       "github_ref",
       "target_prefix",
-      "delete_removed_files",
       "enabled",
       "last_github_sha",
       "last_deployed_at",
@@ -71,10 +70,6 @@ export async function POST(request: NextRequest) {
       githubRepository: String(body.githubRepository ?? ""),
       githubRef: String(body.githubRef ?? ""),
       targetPrefix: body.targetPrefix,
-      deleteRemovedFiles:
-        typeof body.deleteRemovedFiles === "boolean"
-          ? body.deleteRemovedFiles
-          : undefined,
     });
     noteSupporterFeatureUse(user.id, "github_deploys");
 

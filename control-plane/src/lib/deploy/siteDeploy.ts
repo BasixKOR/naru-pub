@@ -355,7 +355,6 @@ export async function createGitHubDeploymentPlan(params: {
       "github_deploy_targets.github_repository_id",
       "github_deploy_targets.github_ref",
       "github_deploy_targets.target_prefix",
-      "github_deploy_targets.delete_removed_files",
       "github_deploy_targets.last_manifest",
       "users.login_name",
     ])
@@ -394,9 +393,9 @@ export async function createGitHubDeploymentPlan(params: {
   const nextPaths = new Set(manifest.files.map((file) => file.path));
   const uploadedPaths = changedManifestPaths(previousFiles, manifest.files);
   const uploadedPathSet = new Set(uploadedPaths);
-  const deletedPaths = target.delete_removed_files
-    ? [...previousPaths].filter((path) => !nextPaths.has(path))
-    : [];
+  const deletedPaths = [...previousPaths].filter(
+    (path) => !nextPaths.has(path),
+  );
 
   const id = deploymentId();
   const uploadPrefix = `__deploy_uploads/${target.user_id}/${id}`;
@@ -437,7 +436,7 @@ export async function createGitHubDeploymentPlan(params: {
       github_sha: params.claims.sha,
       target_prefix: targetPrefix,
       upload_prefix: uploadPrefix,
-      delete_removed_files: target.delete_removed_files,
+      delete_removed_files: true,
       manifest,
       deleted_paths: deletedPaths,
       uploaded_paths: uploadedPaths,
@@ -697,7 +696,6 @@ export async function upsertGitHubDeployTarget(params: {
   githubRepository: string;
   githubRef: string;
   targetPrefix?: string | null;
-  deleteRemovedFiles?: boolean;
 }) {
   const githubRepository = params.githubRepository.trim();
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(githubRepository)) {
@@ -713,7 +711,6 @@ export async function upsertGitHubDeployTarget(params: {
     );
   }
   const targetPrefix = normalizeTargetPrefix(params.targetPrefix);
-  const deleteRemovedFiles = params.deleteRemovedFiles ?? true;
 
   await db
     .insertInto("github_deploy_targets")
@@ -722,7 +719,7 @@ export async function upsertGitHubDeployTarget(params: {
       github_repository: githubRepository,
       github_ref: githubRef,
       target_prefix: targetPrefix,
-      delete_removed_files: deleteRemovedFiles,
+      delete_removed_files: true,
       enabled: true,
       updated_at: new Date(),
     })
@@ -735,7 +732,7 @@ export async function upsertGitHubDeployTarget(params: {
           "target_prefix",
         ])
         .doUpdateSet({
-          delete_removed_files: deleteRemovedFiles,
+          delete_removed_files: true,
           enabled: true,
           updated_at: new Date(),
         }),

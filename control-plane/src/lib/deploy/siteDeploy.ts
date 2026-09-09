@@ -9,6 +9,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createHash, randomBytes } from "crypto";
 import * as Sentry from "@sentry/nextjs";
+import { sql } from "kysely";
 import { db, recordSiteEdit } from "@/lib/database";
 import { userHasFeature } from "@/lib/entitlements";
 import { noteSupporterFeatureUse } from "@/lib/feature-usage";
@@ -187,6 +188,13 @@ function manifestFiles(value: unknown): DeployManifestFile[] {
         typeof file.contentType === "string" ? file.contentType : undefined,
     }));
 }
+
+// jsonb columns take JSON text. Handing the driver a JS value instead only
+// looks like it works: it stringifies an object, but renders an array as a
+// Postgres array literal -- {"a","b"} -- which jsonb rejects outright. An
+// empty array survives as {}, so a column that is usually empty can sit
+// wrong for a long time and fail the first time it carries anything.
+const asJsonb = (value: unknown) => sql`${JSON.stringify(value)}::jsonb`;
 
 function manifestTotalSize(files: DeployManifestFile[]) {
   return files.reduce((sum, file) => sum + file.size, 0);
@@ -437,9 +445,9 @@ export async function createGitHubDeploymentPlan(params: {
       target_prefix: targetPrefix,
       upload_prefix: uploadPrefix,
       delete_removed_files: true,
-      manifest,
-      deleted_paths: deletedPaths,
-      uploaded_paths: uploadedPaths,
+      manifest: asJsonb(manifest),
+      deleted_paths: asJsonb(deletedPaths),
+      uploaded_paths: asJsonb(uploadedPaths),
       deploy_generation: claimedTarget.deploy_generation,
       expires_at: expiresAt,
     })
@@ -648,7 +656,7 @@ export async function finalizeGitHubDeployment(params: {
     await db
       .updateTable("github_deploy_targets")
       .set({
-        last_manifest: manifest,
+        last_manifest: asJsonb(manifest),
         last_github_sha: deployment.github_sha,
         last_deployed_at: new Date(),
         updated_at: new Date(),

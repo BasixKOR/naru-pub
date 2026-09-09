@@ -111,7 +111,7 @@ test("owner file upload authorizes, uploads directly, finalizes and exposes meta
     const owner = await createDatabase({ site: "alice" }).completeOwnerSignIn();
     const file = await owner.files.upload(
       new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" }),
-      { attachedTo: { collection: "posts", id: "hello" } },
+      { metadata: { postId: "hello" } },
     );
     assert.equal(file.url, "https://media.naru.pub/1/file_one.png");
     assert.deepEqual(
@@ -124,8 +124,7 @@ test("owner file upload authorizes, uploads directly, finalizes and exposes meta
     );
     assert.equal(calls[1].options.body.size, 3);
     assert.deepEqual(JSON.parse(calls[0].options.body).metadata, {
-      _naruCollection: "posts",
-      _naruDocument: "hello",
+      postId: "hello",
     });
     assert.equal(
       calls[0].options.headers.Authorization,

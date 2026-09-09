@@ -1077,23 +1077,6 @@
           "throws": []
         },
         {
-          "name": "forDocument",
-          "optional": false,
-          "signature": "forDocument(\n  collection: string,\n  id: string,\n): {\n  all(\n    options?: Omit<FileListOptions, \"where\" | \"pageToken\"> & WalkOptions,\n  ): AsyncIterableIterator<StoredFile>;\n  deleteAll(\n    options?: Omit<FileListOptions, \"where\" | \"pageToken\"> & WalkOptions,\n  ): Promise<{ deleted: number }>;\n  list(\n    options?: Omit<FileListOptions, \"where\">,\n  ): Promise<{ files: StoredFile[]; nextPageToken: string | null }>;\n}",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "문서에 붙인 파일만 다루는 손잡이입니다."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
           "name": "get",
           "optional": false,
           "signature": "get(id: string, options?: RequestOptions): Promise<StoredFile>",
@@ -1237,7 +1220,7 @@
         {
           "name": "upload",
           "optional": false,
-          "signature": "upload(\n  file: Blob | File,\n  options?: RequestOptions & {\n    attachedTo?: { collection: string; id: string };\n    image?: ImageOptions;\n    metadata?: Json;\n    onProgress?: (progress: {\n      loaded: number;\n      phase: \"resizing\" | \"uploading\";\n      total: number;\n    }) => void;\n    original?: boolean;\n  },\n): Promise<StoredFile>",
+          "signature": "upload(\n  file: Blob | File,\n  options?: RequestOptions & {\n    image?: ImageOptions;\n    metadata?: Json;\n    onProgress?: (progress: {\n      loaded: number;\n      phase: \"resizing\" | \"uploading\";\n      total: number;\n    }) => void;\n    original?: boolean;\n  },\n): Promise<StoredFile>",
           "summary": [
             {
               "type": "paragraph",

@@ -235,8 +235,7 @@ const image = await owner.files.upload(fileInput.files[0], {
   onProgress: ({ loaded, total, phase }) =>
     phase === "resizing" ? showResizing() : showProgress(loaded / total),
   image: { maxDimension: 1600, maxBytes: 300 * 1024 },
-  metadata: { altText: "A pigeon" },
-  attachedTo: { collection: "posts", id: "hello" },
+  metadata: { altText: "A pigeon", postId: "hello" },
 });
 await owner.collection("posts").set("hello", {
   title: "Hello",
@@ -249,7 +248,8 @@ fields of each file's `metadata`. Storing what you will need to find a file by
 means the server does the finding; nothing has to walk the whole library.
 
 ```js
-await owner.files.forDocument("posts", "hello").deleteAll();
+for await (const file of owner.files.all({ where: { postId: "hello" } }))
+  await owner.files.delete(file.id);
 
 // The quota readout is its own request and never pages the library.
 const { bytes, maxBytes } = await owner.files.usage();

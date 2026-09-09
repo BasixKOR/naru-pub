@@ -1041,34 +1041,6 @@ export function createDatabase({
       all(options = {}) {
         return walk(fileList, "files", options);
       },
-      forDocument(collection, id) {
-        segment(collection);
-        segment(id);
-        const where = { _naruCollection: collection, _naruDocument: id };
-        return Object.freeze({
-          list(options = {}) {
-            if (options.where !== undefined)
-              throw new TypeError("forDocument already defines its filter.");
-            return fileList({ ...options, where });
-          },
-          all(options = {}) {
-            if (options.where !== undefined)
-              throw new TypeError("forDocument already defines its filter.");
-            return walk(fileList, "files", { ...options, where });
-          },
-          async deleteAll(options = {}) {
-            let deleted = 0;
-            for await (const file of walk(fileList, "files", {
-              ...options,
-              where,
-            })) {
-              await api.files.delete(file.id, options);
-              deleted += 1;
-            }
-            return { deleted };
-          },
-        });
-      },
       async usage(options) {
         // A quota readout is one aggregate row; asking for it never pages the
         // library the way sharing the listing response used to.
@@ -1077,40 +1049,13 @@ export function createDatabase({
       },
       async upload(
         source,
-        {
-          image,
-          original,
-          onProgress,
-          metadata = {},
-          attachedTo,
-          ...options
-        } = {},
+        { image, original, onProgress, metadata = {}, ...options } = {},
       ) {
         if (!(source instanceof Blob))
           throw new TypeError("upload requires a File or Blob.");
         if (onProgress !== undefined && typeof onProgress !== "function")
           throw new TypeError("onProgress must be a function.");
         validateJson(metadata);
-        if (
-          Object.hasOwn(metadata, "_naruCollection") ||
-          Object.hasOwn(metadata, "_naruDocument")
-        )
-          throw new TypeError(
-            "_naruCollection and _naruDocument are reserved metadata fields.",
-          );
-        if (attachedTo !== undefined) {
-          if (!object(attachedTo))
-            throw new TypeError(
-              "attachedTo must identify a collection and document.",
-            );
-          segment(attachedTo.collection);
-          segment(attachedTo.id);
-          metadata = {
-            ...metadata,
-            _naruCollection: attachedTo.collection,
-            _naruDocument: attachedTo.id,
-          };
-        }
         const settings = imageSettings(image, original);
         // Shrinking precedes the limit check on purpose: a 40 MB photo the
         // site would downscale for display anyway should upload, not fail.

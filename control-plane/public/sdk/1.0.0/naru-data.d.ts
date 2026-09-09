@@ -556,22 +556,6 @@ export interface FileStore {
   all(
     options?: Omit<FileListOptions, "pageToken"> & WalkOptions,
   ): AsyncIterableIterator<StoredFile>;
-  /** 문서에 붙인 파일만 다루는 손잡이입니다. */
-  forDocument(
-    collection: string,
-    id: string,
-  ): {
-    list(options?: Omit<FileListOptions, "where">): Promise<{
-      files: StoredFile[];
-      nextPageToken: string | null;
-    }>;
-    all(
-      options?: Omit<FileListOptions, "where" | "pageToken"> & WalkOptions,
-    ): AsyncIterableIterator<StoredFile>;
-    deleteAll(
-      options?: Omit<FileListOptions, "where" | "pageToken"> & WalkOptions,
-    ): Promise<{ deleted: number }>;
-  };
   /** 이 사이트의 미디어 한도에서 쓰고 있는 양입니다. 목록과는 별개의 요청이라,
    * 남은 용량만 보려고 라이브러리를 훑지 않습니다. */
   usage(options?: RequestOptions): Promise<MediaUsage>;
@@ -639,8 +623,6 @@ export interface FileStore {
       /** 대체 텍스트나 이 파일을 쓰는 문서 목록처럼 애플리케이션이 정하는
        * 값입니다. */
       metadata?: Json;
-      /** 이 파일을 소유하는 문서. SDK가 검색 가능한 예약 메타데이터로 저장합니다. */
-      attachedTo?: { collection: string; id: string };
     },
   ): Promise<StoredFile>;
   /**

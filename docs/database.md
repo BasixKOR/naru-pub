@@ -248,7 +248,9 @@ small hand-tuned images upload untouched. Re-encoding then chases that budget:
 quality steps down from `quality` (0.82) to a 0.4 floor, and if that is not
 enough the box shrinks — by the square root of the overshoot, capped at 0.95 per
 step so a near miss still makes progress. A lossless `type` skips the quality
-steps, having no such dial. Six attempts are allowed; if none fits, the smallest
+steps, having no such dial. A browser that cannot encode the requested type
+substitutes PNG rather than failing, so the SDK retries in JPEG — the one lossy
+format every canvas can produce — instead of shipping the original. Six attempts are allowed; if none fits, the smallest
 is uploaded, and the original is kept whenever re-encoding produced more bytes.
 The 2048 default matches the long edge X serves its "large" variant at; the byte
 budget is ours, as X publishes no such figure. HEIC and HEIF are always

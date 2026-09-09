@@ -339,21 +339,33 @@ async function downscaleImage(file, settings) {
       Object.hasOwn(ENCODABLE, file.type)
     )
       return file;
-    const blob = await encodeWithin(bitmap, settings, [
+    const box = [
       Math.max(1, Math.round(bitmap.width * scale)),
       Math.max(1, Math.round(bitmap.height * scale)),
-    ]);
+    ];
+    let blob = await encodeWithin(bitmap, settings, box);
+    // A browser that cannot encode the requested type quietly hands back PNG
+    // instead, and giving up there would ship the untouched original — the one
+    // outcome this whole path exists to avoid. JPEG is the lossy format every
+    // canvas implementation can produce, so it is the fallback.
+    if (!blob && settings.type !== "image/jpeg")
+      blob = await encodeWithin(
+        bitmap,
+        { ...settings, type: "image/jpeg" },
+        box,
+      );
     // Re-encoding an already efficient file can cost bytes; keep the smaller of
     // the two. A budget that could not be met still yields the best attempt,
     // which beats sending the original.
     if (!blob?.size || blob.size >= file.size) return file;
+    // The produced type is the authority now, not the requested one.
     return new File(
       [blob],
       renameExtension(
         typeof file.name === "string" && file.name ? file.name : "upload",
-        settings.type,
+        blob.type,
       ),
-      { type: settings.type },
+      { type: blob.type },
     );
   } catch {
     return file;

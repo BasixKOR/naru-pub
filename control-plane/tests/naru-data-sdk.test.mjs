@@ -1801,13 +1801,6 @@ test("resizing keeps the original when it is already small, would grow, or is de
     // Re-encoding an efficient image can cost bytes; the smaller one wins.
     { width: 8000, height: 6000, size: 4096, options: {} },
     // An encoder that ignored the requested type is not trusted.
-    {
-      width: 8000,
-      height: 6000,
-      size: 512,
-      options: {},
-      encodedType: "image/png",
-    },
     // The caller asked for the bytes it handed over.
     { width: 8000, height: 6000, size: 4096, options: { original: true } },
   ];
@@ -1995,6 +1988,72 @@ test("an unreachable budget still uploads the smallest attempt", async () => {
     assert.equal(declared.contentType, "image/webp");
     // Six attempts, and the giving up is bounded rather than a spin.
     assert.equal(image.drawn.filter(Array.isArray).length, 6);
+  } finally {
+    image.restore();
+    globalThis.window = oldWindow;
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("a browser that cannot encode WebP falls back to JPEG instead of the original", async () => {
+  const oldWindow = globalThis.window,
+    oldFetch = globalThis.fetch;
+  // Safari has historically substituted PNG for a canvas type it cannot
+  // encode. Bailing there shipped the untouched original.
+  const image = fakeImagePipeline({
+    width: 6000,
+    height: 4000,
+    encoded: ({ type }) =>
+      new Blob(["x".repeat(4096)], {
+        type: type === "image/webp" ? "image/png" : type,
+      }),
+  });
+  const calls = captureUpload();
+  try {
+    const owner = await restoreTestOwner();
+    await owner.files.upload(
+      new File([new Uint8Array(13 * 1024 * 1024)], "DSCF0411.JPG", {
+        type: "image/jpeg",
+      }),
+    );
+    assert.deepEqual(JSON.parse(calls[0].options.body), {
+      name: "DSCF0411.jpg",
+      contentType: "image/jpeg",
+      size: 4096,
+      metadata: {},
+    });
+    // WebP is tried first, then abandoned for JPEG rather than given up on.
+    assert.deepEqual(
+      image.drawn.filter((entry) => !Array.isArray(entry)).map((e) => e.type),
+      ["image/webp", "image/jpeg"],
+    );
+  } finally {
+    image.restore();
+    globalThis.window = oldWindow;
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("an encoder that substitutes an unusable type for every request keeps the original", async () => {
+  const oldWindow = globalThis.window,
+    oldFetch = globalThis.fetch;
+  const image = fakeImagePipeline({
+    width: 6000,
+    height: 4000,
+    encoded: () => new Blob(["x".repeat(4096)], { type: "image/gif" }),
+  });
+  const calls = captureUpload();
+  try {
+    const owner = await restoreTestOwner();
+    await owner.files.upload(
+      new File([new Uint8Array(2048)], "photo.jpg", { type: "image/jpeg" }),
+    );
+    assert.deepEqual(JSON.parse(calls[0].options.body), {
+      name: "photo.jpg",
+      contentType: "image/jpeg",
+      size: 2048,
+      metadata: {},
+    });
   } finally {
     image.restore();
     globalThis.window = oldWindow;

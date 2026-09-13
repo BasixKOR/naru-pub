@@ -20,7 +20,11 @@ import {
   decodeMultiCursor,
   encodeMultiCursor,
 } from "./pagination";
-import { tokenScope, limitPublicWrite } from "./owner-auth";
+import {
+  tokenScope,
+  limitPublicWrite,
+  refusePublicWriteOverLimit,
+} from "./owner-auth";
 import { previewFeatureAccess, userHasFeature } from "@/lib/entitlements";
 import { noteSupporterFeatureUse } from "@/lib/feature-usage";
 
@@ -110,6 +114,15 @@ export async function executeData(command: DataCommand) {
   if (path.length > 2) throw new DataError(404, "Not found.");
   path.forEach(name);
   const reading = method === "GET";
+  // Only a write with no credential at all is ever rate limited, so only that
+  // one is turned away early; everything else goes on to be authorized.
+  if (
+    !reading &&
+    path.length > 0 &&
+    command.bearer === undefined &&
+    adminUserId === undefined
+  )
+    await refusePublicWriteOverLimit(site, command.clientIp);
   return db.transaction().execute(async (tx) => {
     await requestDeadline(tx);
     // Writes lock the owner row, so rules, quota checks and document writes are

@@ -397,6 +397,51 @@ integration("site database integration", () => {
     ).resolves.toBeDefined();
     await sql`delete from site_data_rate_limits`.execute(db);
   });
+  test("a public write over its limit is refused without waiting for the site lock", async () => {
+    await sql`delete from site_data_rate_limits`.execute(db);
+    await call("POST", [], { name: "burst", write: "create" }, true);
+    await call("POST", ["burst"], { data: 1 }, false, {
+      clientIp: "192.0.2.9",
+    });
+    await sql`update site_data_rate_limits set count = 20 where key <> 'site'`.execute(
+      db,
+    );
+    // Hold the owner row the way a slow legitimate write would.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const holder = db.transaction().execute(async (tx) => {
+      await sql`select id from users where id = ${owner} for update`.execute(
+        tx,
+      );
+      await held;
+    });
+    try {
+      const refused = call("POST", ["burst"], { data: 2 }, false, {
+        clientIp: "192.0.2.9",
+      });
+      const outcome = await Promise.race([
+        refused.then(
+          () => "allowed",
+          (error) => error.status,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve("waited"), 1000)),
+      ]);
+      expect(outcome).toBe(429);
+      // The owner is never turned away early, and still waits its turn.
+      const ownerWrite = call("POST", ["burst"], { data: 3 }, true);
+      const ownerOutcome = await Promise.race([
+        ownerWrite.then(() => "written"),
+        new Promise((resolve) => setTimeout(() => resolve("waited"), 300)),
+      ]);
+      expect(ownerOutcome).toBe("waited");
+      release();
+      await expect(ownerWrite).resolves.toBeDefined();
+    } finally {
+      release();
+      await holder;
+      await sql`delete from site_data_rate_limits`.execute(db);
+    }
+  });
   test("concurrent writes cannot exceed document quota", async () => {
     await sql`delete from site_data_collections`.execute(db);
     await call("POST", [], { name: "quota", write: "world" }, true);

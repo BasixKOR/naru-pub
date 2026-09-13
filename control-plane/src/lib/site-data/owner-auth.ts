@@ -583,32 +583,63 @@ export async function revokeToken(token: string, origin: string | null) {
  * request that caused it. A `world`-writable collection is as reachable as a
  * `create` one, so both are counted here.
  */
+const currentWindow = () => new Date(Math.floor(Date.now() / 60000) * 60000);
+const publicWriteBuckets = (clientIp?: string) =>
+  [
+    ["site", 60],
+    [`ip:${digest(clientIp || "unknown")}`, 20],
+  ] as const;
+const rateLimited = () =>
+  new DataError(429, "Public write rate limit reached. Try again next minute.");
+
+/**
+ * Refuses a public write that is already over its limit, before it queues for
+ * the owner row lock. A burst past the limit would otherwise wait in line
+ * behind the site's legitimate writes only to be refused at the front of it.
+ * One unlocked read: it can let a request through that the locked count below
+ * then refuses, but never refuses one that would have been allowed.
+ */
+export async function refusePublicWriteOverLimit(
+  site: string,
+  clientIp?: string,
+) {
+  const buckets = publicWriteBuckets(clientIp);
+  const counts = await db
+    .selectFrom("site_data_rate_limits as r")
+    .innerJoin("users as u", "u.id", "r.user_id")
+    .select(["r.key", "r.count"])
+    .where("u.login_name", "=", site)
+    .where("r.window_start", ">=", currentWindow())
+    .where(
+      "r.key",
+      "in",
+      buckets.map(([key]) => key),
+    )
+    .execute();
+  for (const [key, maximum] of buckets)
+    if ((counts.find((row) => row.key === key)?.count ?? 0) >= maximum)
+      throw rateLimited();
+}
+
 export async function limitPublicWrite(
   tx: Kysely<DB>,
   userId: number,
   clientIp?: string,
 ) {
-  const window = new Date(Math.floor(Date.now() / 60000) * 60000);
+  const window = currentWindow();
   await tx
     .deleteFrom("site_data_rate_limits")
     .where("user_id", "=", userId)
     .where("window_start", "<", window)
     .execute();
-  for (const [key, maximum] of [
-    ["site", 60],
-    [`ip:${digest(clientIp || "unknown")}`, 20],
-  ] as const) {
+  for (const [key, maximum] of publicWriteBuckets(clientIp)) {
     const bucket = await tx
       .selectFrom("site_data_rate_limits")
       .select("count")
       .where("user_id", "=", userId)
       .where("key", "=", key)
       .executeTakeFirst();
-    if ((bucket?.count ?? 0) >= maximum)
-      throw new DataError(
-        429,
-        "Public write rate limit reached. Try again next minute.",
-      );
+    if ((bucket?.count ?? 0) >= maximum) throw rateLimited();
     await tx
       .insertInto("site_data_rate_limits")
       .values({ user_id: userId, key, window_start: window, count: 1 })

@@ -208,6 +208,14 @@ test("server errors carry status and code; transport failures stay native", asyn
       assert.equal(error.message, "Document version does not match.");
       return true;
     });
+    // A challenge or proxy page can answer 200; it is not an empty result.
+    respond(() => new Response("<html>checking your browser</html>"));
+    await assert.rejects(posts.get("one"), {
+      status: 200,
+      code: "INVALID_RESPONSE",
+    });
+    respond(() => Response.json(null));
+    await assert.rejects(posts.list(), { code: "INVALID_RESPONSE" });
     respond(() => new Response("<html>bad gateway</html>", { status: 502 }));
     await assert.rejects(posts.get("one"), {
       status: 502,
@@ -359,6 +367,32 @@ test("ownerSession exchanges the returned code once and strips it from the addre
       assert.equal(calls.length, 0);
       assert.equal(location.href, "https://alice.naru.pub/admin.html");
     });
+});
+
+test("a page's own ?code= is left alone when no sign-in was started here", async () => {
+  await browser(async ({ calls, storage, location }) => {
+    location.href =
+      "https://alice.naru.pub/admin.html?code=SUMMER&error=none&state=x";
+    assert.equal(await ownerSession(), null);
+    saveSession(storage);
+    assert.ok(await ownerSession());
+    assert.equal(
+      location.href,
+      "https://alice.naru.pub/admin.html?code=SUMMER&error=none&state=x",
+    );
+    // A sign-in in progress does not claim a ?code= that carries no state.
+    storage.set(
+      `${SESSION}:pending`,
+      JSON.stringify({ state: "s1", startedAt: Date.now() }),
+    );
+    location.href = "https://alice.naru.pub/admin.html?code=SUMMER";
+    assert.ok(await ownerSession());
+    assert.equal(
+      location.href,
+      "https://alice.naru.pub/admin.html?code=SUMMER",
+    );
+    assert.equal(calls.length, 0);
+  });
 });
 
 test("the owner client sends its token and forgets it when the session ends", async () => {

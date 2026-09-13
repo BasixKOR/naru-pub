@@ -67,7 +67,31 @@
           "spans": [
             {
               "type": "text",
-              "value": "나루에서 막 돌아왔으면 로그인을 마무리하고, 아니면 이 탭의 세션을 되살립니다. 주소에서 일회용 코드를 지우므로 화면을 그리기 전에 부르세요."
+              "value": "이 탭에서 "
+            },
+            {
+              "type": "code",
+              "value": "signIn()"
+            },
+            {
+              "type": "text",
+              "value": "으로 떠났다가 나루에서 막 돌아왔으면 로그인을 마무리하고, 아니면 이 탭의 세션을 되살립니다. 로그인을 마무리할 때는 주소에서 일회용 코드를 지우므로 화면을 그리기 전에 부르세요. 로그인을 시작하지 않은 페이지의 "
+            },
+            {
+              "type": "code",
+              "value": "?code="
+            },
+            {
+              "type": "text",
+              "value": "나 "
+            },
+            {
+              "type": "code",
+              "value": "?error="
+            },
+            {
+              "type": "text",
+              "value": "는 건드리지 않습니다."
             }
           ]
         },
@@ -1139,6 +1163,14 @@
                 {
                   "type": "code",
                   "value": "REQUEST_FAILED"
+                },
+                {
+                  "type": "text",
+                  "value": "입니다. 성공 상태인데 JSON이 아닌 응답(프록시 오류 페이지 등)은 "
+                },
+                {
+                  "type": "code",
+                  "value": "INVALID_RESPONSE"
                 },
                 {
                   "type": "text",

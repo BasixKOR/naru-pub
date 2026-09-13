@@ -66,7 +66,8 @@ export class NaruDataError extends Error {
   /** 프로그램이 판단할 수 있는 실패 코드입니다. `VERSION_CONFLICT`,
    * `OWNER_SESSION_EXPIRED`, `COLLECTION_NOT_AUTHORIZED`,
    * `UNREGISTERED_REDIRECT_URI` 등이 있고, 분류되지 않은 실패는
-   * `REQUEST_FAILED`입니다. */
+   * `REQUEST_FAILED`입니다. 성공 상태인데 JSON이 아닌 응답(프록시 오류 페이지
+   * 등)은 `INVALID_RESPONSE`입니다. */
   code: string;
   constructor(status: number, message: string, code?: string);
 }
@@ -270,8 +271,10 @@ export function signIn(
 /**
  * 이 페이지의 관리자 클라이언트이거나 null입니다.
  *
- * 나루에서 막 돌아왔으면 로그인을 마무리하고, 아니면 이 탭의 세션을 되살립니다.
- * 주소에서 일회용 코드를 지우므로 화면을 그리기 전에 부르세요.
+ * 이 탭에서 `signIn()`으로 떠났다가 나루에서 막 돌아왔으면 로그인을 마무리하고,
+ * 아니면 이 탭의 세션을 되살립니다. 로그인을 마무리할 때는 주소에서 일회용
+ * 코드를 지우므로 화면을 그리기 전에 부르세요. 로그인을 시작하지 않은 페이지의
+ * `?code=`나 `?error=`는 건드리지 않습니다.
  *
  * ```js
  * const owner = await ownerSession();

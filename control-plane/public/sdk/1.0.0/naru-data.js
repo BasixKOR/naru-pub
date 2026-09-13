@@ -82,12 +82,20 @@ async function request(url, { method = "GET", body, token, signal, touches }) {
       for (const path of touches)
         writtenUntil.set(path, Date.now() + PUBLIC_CACHE_MS);
   }
-  const result = await response.json().catch(() => ({}));
+  const result = await response.json().catch(() => null);
   if (!response.ok)
     throw new NaruDataError(
       response.status,
-      result.error ?? `Database request failed (HTTP ${response.status}).`,
-      result.code,
+      result?.error ?? `Database request failed (HTTP ${response.status}).`,
+      result?.code,
+    );
+  // A proxy or challenge page can answer 200 with HTML. Handing that back as
+  // an empty result would make a missing document look like a present one.
+  if (result === null || typeof result !== "object")
+    throw new NaruDataError(
+      response.status,
+      "The data API did not answer with JSON.",
+      "INVALID_RESPONSE",
     );
   return result;
 }
@@ -363,7 +371,16 @@ export async function ownerSession(options) {
   const url = new URL(location.href);
   const code = url.searchParams.get("code");
   const denied = url.searchParams.get("error");
-  if (code === null && denied === null) {
+  const state = url.searchParams.get("state");
+  let pending = null;
+  try {
+    pending = JSON.parse(sessionStorage.getItem(`${key}:pending`));
+  } catch {
+    /* unreadable, so no sign-in to finish */
+  }
+  // Only a page this tab sent to Naru is coming back from sign-in. A ?code= or
+  // ?error= anywhere else belongs to the page and is left alone.
+  if (!pending || state === null || (code === null && denied === null)) {
     try {
       const saved = JSON.parse(sessionStorage.getItem(key));
       if (saved?.expiresAt > Date.now())
@@ -374,18 +391,10 @@ export async function ownerSession(options) {
     sessionStorage.removeItem(key);
     return null;
   }
-  const state = url.searchParams.get("state");
   for (const name of ["code", "state", "error"]) url.searchParams.delete(name);
   history.replaceState(history.state, "", url.href);
-  let pending;
-  try {
-    pending = JSON.parse(sessionStorage.getItem(`${key}:pending`));
-  } catch {
-    /* treated as missing */
-  }
   sessionStorage.removeItem(`${key}:pending`);
   if (
-    !pending ||
     pending.state !== state ||
     !(Date.now() - pending.startedAt < 10 * 60 * 1000)
   )

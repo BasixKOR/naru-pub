@@ -113,7 +113,7 @@ export function ExtensionsMenu({
               <span className="flex items-center gap-2">
                 {item.icon}
                 {item.label}
-                <span className="text-xs">후원자 전용</span>
+                <span className="text-xs">유료 기능</span>
               </span>
             </DropdownMenuItem>
           ),
@@ -125,9 +125,9 @@ export function ExtensionsMenu({
 
 // /support renders for a signed-out visitor so 카드사 심사 can read the 상품 and
 // 판매 정책, but nothing advertises it — a reviewer is given the URL to type, and
-// a visitor who has never paid sees no 후원 anywhere. The one exception is the
-// 계정 menu below, which shows 후원 to accounts that already have a payment
-// relationship: 결제 내역, 정기 후원 취소 and 환불 신청 all live under /support,
+// a visitor who has never paid sees no 결제 anywhere. The one exception is the
+// 계정 menu below, which shows 결제 to accounts that already have a payment
+// relationship: 결제 내역, 정기 결제 취소 and 환불 신청 all live under /support,
 // and a refund route only the URL-savvy can reach is not a refund route.
 export function DocsMenu() {
   return (
@@ -215,7 +215,7 @@ export function AccountMenu({
           <DropdownMenuItem asChild>
             <Link href="/support" className="flex items-center gap-2">
               <Heart size={16} />
-              후원
+              결제
             </Link>
           </DropdownMenuItem>
         )}

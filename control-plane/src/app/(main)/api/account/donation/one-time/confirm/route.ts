@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
 
     if (!pendingPayment) {
       return NextResponse.json(
-        { success: false, message: "후원 주문을 찾을 수 없습니다." },
+        { success: false, message: "결제 주문을 찾을 수 없습니다." },
         { status: 404 },
       );
     }
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
     if (pendingPayment.status === "done") {
       return NextResponse.json({
         success: true,
-        message: "이미 처리된 후원입니다.",
+        message: "이미 처리된 결제입니다.",
       });
     }
 
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
       amount !== pendingPayment.amount
     ) {
       return NextResponse.json(
-        { success: false, message: "후원 주문 정보가 올바르지 않습니다." },
+        { success: false, message: "결제 주문 정보가 올바르지 않습니다." },
         { status: 400 },
       );
     }
@@ -151,12 +151,12 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `후원해 주셔서 감사합니다! ${years}년간 후원자 기능을 이용하실 수 있습니다.`,
+      message: `결제해 주셔서 감사합니다! ${years}년간 유료 기능을 이용하실 수 있습니다.`,
     });
   } catch (error) {
     console.error("One-time confirm error:", error);
     return NextResponse.json(
-      { success: false, message: "후원 처리 중 오류가 발생했습니다." },
+      { success: false, message: "결제 처리 중 오류가 발생했습니다." },
       { status: 500 },
     );
   }

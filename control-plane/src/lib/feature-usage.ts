@@ -2,7 +2,7 @@ import { db } from "@/lib/database";
 import type { Feature } from "@/lib/entitlements";
 
 // A refund of an unused period hinges on one question — did this account
-// actually get anything out of the 후원자 전용 기능 after paying? — so every
+// actually get anything out of the 유료 기능 after paying? — so every
 // place a supporter feature does real work records that it did. Reads of the
 // ledger only ever compare "last used" against a payment date, so a single row
 // per (user, feature) is enough; no event log is kept.

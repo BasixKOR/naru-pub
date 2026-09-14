@@ -144,13 +144,13 @@ export default function CustomDomainsCard({
         <CardTitle className="text-foreground text-xl font-bold flex items-center gap-2">
           <Globe2 size={20} />
           커스텀 도메인
-          {!enabled && <Badge variant="secondary">후원자 전용</Badge>}
+          {!enabled && <Badge variant="secondary">유료 전용</Badge>}
         </CardTitle>
       </CardHeader>
       <CardContent className="p-6 space-y-4">
         {!enabled ? (
           <div className="bg-muted border border-border rounded p-3 text-sm text-muted-foreground">
-            커스텀 도메인은 후원자 전용 기능입니다. 후원으로 나루를 도와주세요.
+            커스텀 도메인은 유료 기능입니다. 결제 후 이용하실 수 있습니다.
           </div>
         ) : (
           <>

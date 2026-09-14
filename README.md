@@ -12,8 +12,8 @@
 - **다양한 파일 형식 지원**: HTML, CSS, JavaScript, JSON, Markdown 등
 - **사용자 인증**: Lucia Auth를 통한 안전한 사용자 인증 시스템
 - **통계 대시보드**: 서비스 사용 현황 및 지표 모니터링
-- **커스텀 도메인**: 후원자 도메인을 Cloudflare for SaaS + Tunnel 프록시로 라우팅
-- **후원(결제)**: Toss Payments 자동결제로 운영을 지탱하는 후원 모델
+- **커스텀 도메인**: 유료 이용자 도메인을 Cloudflare for SaaS + Tunnel 프록시로 라우팅
+- **결제(결제)**: Toss Payments 자동결제로 운영을 지탱하는 결제 모델
 
 ## 🏗️ 아키텍처
 
@@ -44,7 +44,7 @@
 
 - [개발 환경 설정](docs/development.md) — 설치, 환경 변수, 실행, 프로젝트 구조, 테스트, 스크립트
 - [커스텀 도메인](docs/custom-domains.md) — Cloudflare for SaaS + Tunnel, catch-all 라우트, 인증 자동 폴링
-- [후원과 결제](docs/billing.md) — 시간 기반 엔티틀먼트와 Toss Payments 자동결제
+- [유료 서비스와 결제](docs/billing.md) — 시간 기반 엔티틀먼트와 Toss Payments 자동결제
 - [GitHub CI Deploys](docs/github-ci.md) — GitHub Actions OIDC 기반 배포 연동
 - [기여하기](docs/contributing.md)
 

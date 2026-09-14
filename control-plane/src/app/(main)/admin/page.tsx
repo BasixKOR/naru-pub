@@ -60,7 +60,7 @@ export default async function PaymentOperatorPage() {
     .limit(200)
     .execute();
 
-  // 환불 판단에는 "결제 뒤에 후원자 전용 기능을 썼는가"가 필요하다. 결제마다
+  // 환불 판단에는 "결제 뒤에 유료 기능을 썼는가"가 필요하다. 결제마다
   // 따로 조회하지 않고 이 목록에 등장하는 계정의 사용 기록을 한 번에 읽는다.
   const featureUses = await getSupporterFeatureUsesForUsers(
     payments.map((payment) => payment.user_id),
@@ -207,7 +207,7 @@ export default async function PaymentOperatorPage() {
                       {payment.status === "done" && !payment.refunded_amount ? (
                         <RefundPaymentButton
                           paymentId={payment.id}
-                          confirmMessage={`${payment.login_name}님의 ${formatKrw(payment.amount)} 결제를 전액 환불할까요? 후원자 전용 기능이 즉시 종료되고, 정기 후원 중이라면 자동 결제도 함께 취소됩니다.`}
+                          confirmMessage={`${payment.login_name}님의 ${formatKrw(payment.amount)} 결제를 전액 환불할까요? 유료 기능이 즉시 종료되고, 정기 결제 중이라면 자동 결제도 함께 취소됩니다.`}
                         />
                       ) : null}
                     </div>

@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
     const { interval } = await request.json();
     if (!isBillingInterval(interval)) {
       return NextResponse.json(
-        { success: false, message: "유효하지 않은 후원 주기입니다." },
+        { success: false, message: "유효하지 않은 결제 주기입니다." },
         { status: 400 },
       );
     }
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          message: "이미 활성화되었거나 예약된 정기 후원이 있습니다.",
+          message: "이미 활성화되었거나 예약된 정기 결제가 있습니다.",
         },
         { status: 409 },
       );
@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Subscription prepare error:", error);
     return NextResponse.json(
-      { success: false, message: "후원 준비 중 오류가 발생했습니다." },
+      { success: false, message: "결제 준비 중 오류가 발생했습니다." },
       { status: 500 },
     );
   }

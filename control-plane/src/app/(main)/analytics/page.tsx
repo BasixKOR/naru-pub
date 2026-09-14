@@ -229,7 +229,7 @@ export default async function AnalyticsPage() {
   // Reading the dashboard is the whole of this feature, so rendering it is the
   // only place its use can be recorded. Nothing gates on this — a refund inside
   // the window asks no questions — it is here so /admin can show an operator
-  // what an account actually got out of its 후원.
+  // what an account actually got out of its 결제.
   noteSupporterFeatureUse(user.id, "analytics");
 
   const [dailyPageviews, topPages, topReferrers, userAgents, stats] =

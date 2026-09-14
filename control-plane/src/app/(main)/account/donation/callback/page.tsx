@@ -7,7 +7,7 @@ function Callback() {
   const router = useRouter();
   const params = useSearchParams();
   const ran = useRef(false);
-  const [message, setMessage] = useState("후원을 처리하고 있습니다…");
+  const [message, setMessage] = useState("결제를 처리하고 있습니다…");
 
   useEffect(() => {
     if (ran.current) return;
@@ -72,7 +72,7 @@ export default function DonationCallbackPage() {
     <Suspense
       fallback={
         <div className="max-w-xl mx-auto p-8 text-center text-muted-foreground">
-          후원을 처리하고 있습니다…
+          결제를 처리하고 있습니다…
         </div>
       }
     >

@@ -23,17 +23,17 @@ function SignedOutSupportCard() {
       <CardHeader className="bg-secondary border-b-2 border-border">
         <CardTitle className="text-foreground text-xl font-bold flex items-center gap-2">
           <Heart size={20} />
-          나루 후원
+          나루 유료 서비스
         </CardTitle>
       </CardHeader>
       <CardContent className="p-6 space-y-4">
         <p className="text-sm text-muted-foreground">
-          나루는 후원으로 굴러가는 작은 인디웹 서비스입니다. 후원해 주시면 아래
-          후원자 전용 기능을 쓰실 수 있습니다 🌱
+          나루는 유료 서비스로 운영되는 작은 인디웹 서비스입니다. 결제하시면 아래
+          유료 기능을 쓰실 수 있습니다 🌱
         </p>
 
         <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">정기 후원</p>
+          <p className="text-xs text-muted-foreground">정기 결제</p>
           <div className="flex flex-col gap-2 sm:flex-row">
             <div className="flex-1 border-2 border-border bg-background p-3 text-sm">
               <strong className="text-foreground">
@@ -50,7 +50,7 @@ function SignedOutSupportCard() {
               </p>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground pt-1">한 번만 후원</p>
+          <p className="text-xs text-muted-foreground pt-1">한 번만 결제</p>
           <div className="border-2 border-border bg-background p-3 text-sm">
             <strong className="text-foreground">
               {krw(ONE_TIME_YEAR_AMOUNT)}
@@ -61,14 +61,14 @@ function SignedOutSupportCard() {
 
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button asChild className="flex-1">
-            <Link href="/login?next=/support">로그인하고 후원하기</Link>
+            <Link href="/login?next=/support">로그인하고 결제하기</Link>
           </Button>
           <Button asChild variant="outline" className="flex-1">
             <Link href="/signup">회원가입</Link>
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          후원은 나루 계정으로 결제합니다. 결제 수단은 신용·체크카드이며, 결제
+          유료 기능은 나루 계정에서 결제할 수 있습니다. 결제 수단은 신용·체크카드이며, 결제
           창은 토스페이먼츠를 통해 열립니다.
         </p>
       </CardContent>

@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
     const years = body?.years;
     if (!isPurchasableOneTimeYears(years)) {
       return NextResponse.json(
-        { success: false, message: "후원 기간이 올바르지 않습니다." },
+        { success: false, message: "결제 기간이 올바르지 않습니다." },
         { status: 400 },
       );
     }
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
         {
           success: false,
           message:
-            "일회성 후원 기간 중에는 정기 후원으로만 전환할 수 있습니다.",
+            "일회성 결제 기간 중에는 정기 결제로만 전환할 수 있습니다.",
         },
         { status: 409 },
       );
@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("One-time prepare error:", error);
     return NextResponse.json(
-      { success: false, message: "후원 준비 중 오류가 발생했습니다." },
+      { success: false, message: "결제 준비 중 오류가 발생했습니다." },
       { status: 500 },
     );
   }

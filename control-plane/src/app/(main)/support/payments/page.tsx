@@ -67,12 +67,12 @@ function paymentKind(row: {
   subscription_id: number | null;
   attempt_key: string | null;
 }) {
-  if (row.attempt_key?.startsWith("one_time:")) return "한 번만 후원";
+  if (row.attempt_key?.startsWith("one_time:")) return "한 번만 결제";
   if (row.attempt_key?.startsWith("subscription_initial:")) {
-    return "정기 후원 시작";
+    return "정기 결제 시작";
   }
-  if (row.subscription_id) return "정기 후원 갱신";
-  return "후원";
+  if (row.subscription_id) return "정기 결제 갱신";
+  return "결제";
 }
 
 // 환불 신청을 받지 못하는 사유는 버튼 자리에 그대로 적어 준다. 왜 안 되는지
@@ -137,7 +137,7 @@ export default async function PaymentsPage() {
           <Button asChild variant="ghost" size="sm">
             <Link href="/support">
               <ArrowLeft size={16} />
-              후원으로 돌아가기
+              결제 페이지로 돌아가기
             </Link>
           </Button>
         </div>
@@ -204,7 +204,7 @@ export default async function PaymentsPage() {
                             {state?.eligible ? (
                               <RefundPaymentButton
                                 paymentId={payment.id}
-                                confirmMessage={`${formatKrw(payment.amount)}을 전액 환불할까요? 환불하면 이 결제로 열린 후원자 전용 기능이 즉시 종료되고, 정기 후원 중이라면 자동 결제도 함께 취소됩니다.`}
+                                confirmMessage={`${formatKrw(payment.amount)}을 전액 환불할까요? 환불하면 이 결제로 열린 유료 기능이 즉시 종료되고, 정기 결제 중이라면 자동 결제도 함께 취소됩니다.`}
                                 label="환불 신청"
                               />
                             ) : (
@@ -257,8 +257,8 @@ export default async function PaymentsPage() {
 
         <p className="text-sm text-muted-foreground">
           결제일로부터 {REFUND_WINDOW_DAYS}일 이내에는 이유를 묻지 않고 위에서
-          바로 전액 환불하실 수 있습니다. 환불하면 그 결제로 제공된 후원자 전용
-          기능은 즉시 종료되고, 정기 후원 중이라면 자동 결제도 함께 취소됩니다.
+          바로 전액 환불하실 수 있습니다. 환불하면 그 결제로 제공된 유료 전용
+          기능은 즉시 종료되고, 정기 결제 중이라면 자동 결제도 함께 취소됩니다.
           나루의 장애처럼 그 밖의 사유로 환불이 필요하시면{" "}
           <a
             href="mailto:hello@naru.pub"

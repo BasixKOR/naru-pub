@@ -12,7 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
 // 카드사 심사는 서비스 제공기간이 1년을 넘는 상품을 허용하지 않으므로, 일회성
-// 후원은 1년치 한 건만 판매한다. 서버(MAX_PURCHASABLE_ONE_TIME_YEARS)가 같은
+// 일회성 결제는 1년치 한 건만 판매한다. 서버(MAX_PURCHASABLE_ONE_TIME_YEARS)가 같은
 // 한도를 강제한다. lib/toss는 crypto를 끌어오므로 여기서 import하지 않는다.
 const ONE_TIME_YEARS = 1;
 const ONE_TIME_AMOUNT = 12000;
@@ -71,14 +71,14 @@ export default function SupportCard({
     if (support === "success") {
       toast.success(
         untilLabel
-          ? `후원해 주셔서 감사합니다! ${untilLabel}까지 이용할 수 있습니다.`
-          : "후원해 주셔서 감사합니다!",
+          ? `결제해 주셔서 감사합니다! ${untilLabel}까지 이용할 수 있습니다.`
+          : "결제해 주셔서 감사합니다!",
       );
     } else if (support === "scheduled") {
       toast.success(
         untilLabel
-          ? `${untilLabel}부터 정기 후원이 시작됩니다.`
-          : "정기 후원이 예약되었습니다.",
+          ? `${untilLabel}부터 정기 결제가 시작됩니다.`
+          : "정기 결제가 예약되었습니다.",
       );
     } else if (support === "failed") {
       // Toss appends code and message to failUrl; the confirm callbacks pass
@@ -87,11 +87,11 @@ export default function SupportCard({
       const code = params.get("code");
       const message = params.get("message");
       if (code && USER_CANCELED_CODES.has(code)) {
-        toast("후원이 취소되었습니다.");
+        toast("결제가 취소되었습니다.");
       } else {
-        toast.error(message || "후원 처리에 실패했습니다.");
+        toast.error(message || "결제 처리에 실패했습니다.");
       }
-    } else if (support === "canceled") toast("후원이 취소되었습니다.");
+    } else if (support === "canceled") toast("결제가 취소되었습니다.");
     router.replace("/support");
   }, [params, router, untilLabel]);
 
@@ -105,7 +105,7 @@ export default function SupportCard({
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        toast.error(data.message ?? "후원을 시작할 수 없습니다.");
+        toast.error(data.message ?? "결제를 시작할 수 없습니다.");
         setPending(false);
         return;
       }
@@ -140,7 +140,7 @@ export default function SupportCard({
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        toast.error(data.message ?? "후원을 시작할 수 없습니다.");
+        toast.error(data.message ?? "결제를 시작할 수 없습니다.");
         setPending(false);
         return;
       }
@@ -191,7 +191,7 @@ export default function SupportCard({
   async function cancel() {
     if (
       !confirm(
-        "후원을 취소하시겠어요? 남은 기간 동안은 계속 이용하실 수 있습니다.",
+        "결제를 취소하시겠어요? 남은 기간 동안은 계속 이용하실 수 있습니다.",
       )
     ) {
       return;
@@ -203,13 +203,13 @@ export default function SupportCard({
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        toast.success(data.message ?? "후원이 취소되었습니다.");
+        toast.success(data.message ?? "결제가 취소되었습니다.");
         router.refresh();
       } else {
-        toast.error(data.message ?? "후원 취소에 실패했습니다.");
+        toast.error(data.message ?? "결제 취소에 실패했습니다.");
       }
     } catch {
-      toast.error("후원 취소 중 오류가 발생했습니다.");
+      toast.error("결제 취소 중 오류가 발생했습니다.");
     } finally {
       setPending(false);
     }
@@ -220,31 +220,31 @@ export default function SupportCard({
       <CardHeader className="bg-secondary border-b-2 border-border">
         <CardTitle className="text-foreground text-xl font-bold flex items-center gap-2">
           <Heart size={20} />
-          나루 후원
-          {comp && <Badge variant="secondary">평생 후원</Badge>}
+          나루 유료 서비스
+          {comp && <Badge variant="secondary">평생 이용</Badge>}
           {!comp && (isActive || isScheduled || supportActive) && (
-            <Badge variant="secondary">후원 중</Badge>
+            <Badge variant="secondary">결제 중</Badge>
           )}
         </CardTitle>
       </CardHeader>
       <CardContent className="p-6 space-y-4">
         <div className="text-sm text-muted-foreground space-y-2">
           <p>
-            나루는 후원으로 굴러가는 작은 인디웹 서비스입니다. 후원해 주시면
-            아래 후원자 전용 기능을 쓰실 수 있습니다 🌱
+            나루는 유료 서비스로 운영되는 작은 인디웹 서비스입니다. 결제하시면
+            아래 유료 기능을 쓰실 수 있습니다 🌱
           </p>
         </div>
 
         {comp ? (
           <div className="bg-green-500/5 border-2 border-green-500 p-3 text-sm text-green-700 dark:text-green-500">
-            평생 후원자로 등록되어 있습니다. 나루를 아껴 주셔서 감사합니다. 🙏
+            평생 이용 권한으로 등록되어 있습니다. 나루를 아껴 주셔서 감사합니다. 🙏
           </div>
         ) : (
           <div className="space-y-4">
             {isActive ? (
               <div className="space-y-3">
                 <div className="bg-muted border border-border p-3 text-sm">
-                  {intervalLabel} 후원 중입니다. 감사합니다!
+                  {intervalLabel} 정기 결제를 이용 중입니다. 감사합니다!
                   {subscription?.nextBillingAt && (
                     <>
                       {" "}
@@ -258,33 +258,33 @@ export default function SupportCard({
                   )}
                 </div>
                 <Button variant="outline" onClick={cancel} disabled={pending}>
-                  후원 취소
+                  결제 취소
                 </Button>
               </div>
             ) : isScheduled && untilLabel ? (
               <div className="space-y-3">
                 <div className="bg-muted border border-border p-3 text-sm text-muted-foreground">
-                  현재 후원 기간은{" "}
+                  현재 결제 기간은{" "}
                   <strong className="text-foreground">{untilLabel}</strong>까지
-                  입니다. 이후 {intervalLabel} 정기 후원이 시작됩니다.
+                  입니다. 이후 {intervalLabel} 정기 결제가 시작됩니다.
                 </div>
                 <Button variant="outline" onClick={cancel} disabled={pending}>
-                  정기 후원 예약 취소
+                  정기 결제 예약 취소
                 </Button>
               </div>
             ) : subscription?.status === "canceled" &&
               supportActive &&
               untilLabel ? (
               <div className="bg-muted border border-border p-3 text-sm text-muted-foreground">
-                정기 후원이 종료되었습니다.{" "}
+                정기 결제가 종료되었습니다.{" "}
                 <strong className="text-foreground">{untilLabel}</strong>까지
-                후원자 기능을 이용하실 수 있습니다.
+                유료 기능을 이용하실 수 있습니다.
               </div>
             ) : supportActive && untilLabel ? (
               <div className="bg-muted border border-border p-3 text-sm text-muted-foreground">
-                일회성 후원 이용 중입니다.{" "}
+                일회성 결제로 이용 중입니다.{" "}
                 <strong className="text-foreground">{untilLabel}</strong>까지
-                후원자 기능을 이용하실 수 있습니다.
+                유료 기능을 이용하실 수 있습니다.
               </div>
             ) : null}
 
@@ -292,8 +292,8 @@ export default function SupportCard({
               <div className="space-y-3 border-2 border-yellow-500 bg-yellow-500/5 p-3 text-sm">
                 <p className="text-yellow-800 dark:text-yellow-300">
                   {email
-                    ? `후원 영수증과 결제 안내를 보내드려야 하므로, 후원을 시작하려면 먼저 이메일 인증이 필요합니다. ${email} 주소로 보낸 인증 메일을 확인해 주세요.`
-                    : "후원 영수증과 결제 안내를 보내드려야 하므로, 후원을 시작하려면 인증된 이메일 주소가 필요합니다. 계정 관리에서 이메일을 등록해 주세요."}
+                    ? `결제 영수증과 결제 안내를 보내드려야 하므로, 결제를 시작하려면 먼저 이메일 인증이 필요합니다. ${email} 주소로 보낸 인증 메일을 확인해 주세요.`
+                    : "결제 영수증과 결제 안내를 보내드려야 하므로, 결제를 시작하려면 인증된 이메일 주소가 필요합니다. 계정 관리에서 이메일을 등록해 주세요."}
                 </p>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   {email && (
@@ -317,7 +317,7 @@ export default function SupportCard({
               <div className="space-y-2">
                 {showRecurringOptions && (
                   <>
-                    <p className="text-xs text-muted-foreground">정기 후원</p>
+                    <p className="text-xs text-muted-foreground">정기 결제</p>
                     <div className="flex flex-col sm:flex-row gap-2">
                       <Button
                         onClick={() => subscribe("month")}
@@ -326,7 +326,7 @@ export default function SupportCard({
                       >
                         {supportActive
                           ? "기간 종료 후 월 1,000원"
-                          : "월 1,000원 후원"}
+                          : "월 1,000원 결제"}
                       </Button>
                       <Button
                         onClick={() => subscribe("year")}
@@ -335,7 +335,7 @@ export default function SupportCard({
                       >
                         {supportActive
                           ? "기간 종료 후 연 10,000원"
-                          : "연 10,000원 후원 (2개월 무료)"}
+                          : "연 10,000원 결제 (2개월 무료)"}
                       </Button>
                     </div>
                   </>
@@ -343,7 +343,7 @@ export default function SupportCard({
                 {showOneTimeOptions && (
                   <>
                     <p className="text-xs text-muted-foreground pt-1">
-                      {supportActive ? "일회성 후원으로 전환" : "한 번만 후원"}
+                      {supportActive ? "일회성 결제로 전환" : "한 번만 결제"}
                     </p>
                     <div className="flex flex-col gap-2 sm:flex-row">
                       <Button

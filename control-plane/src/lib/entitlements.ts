@@ -27,7 +27,7 @@ export const ALL_FEATURES: Feature[] = [
 ];
 
 // Shown wherever a feature has to be named to a person — the refund screens and
-// the operator listing both spell out which 후원자 전용 기능 an account touched.
+// the operator listing both spell out which 유료 기능 an account touched.
 export const FEATURE_LABELS: Record<Feature, string> = {
   custom_domains: "커스텀 도메인",
   github_deploys: "GitHub 배포",

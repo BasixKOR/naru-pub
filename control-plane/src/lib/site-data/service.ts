@@ -145,7 +145,7 @@ export async function executeData(command: DataCommand) {
     if (!(preview ?? (await userHasFeature(owner.id, "database", tx))))
       throw new DataError(403, "Database access is not enabled for this site.");
     // Only once the request is authorized. A stranger's refused write is not
-    // the owner getting value out of a 후원자 전용 기능, and recording it here
+    // the owner getting value out of a 유료 기능, and recording it here
     // would let anyone drive ledger queries with requests that end in 403.
     let recorded = false;
     const noteUse = () => {

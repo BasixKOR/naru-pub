@@ -23,14 +23,14 @@ export async function POST(_request: NextRequest) {
 
     if (!sub) {
       return NextResponse.json(
-        { success: false, message: "후원 정보가 없습니다." },
+        { success: false, message: "결제 정보가 없습니다." },
         { status: 404 },
       );
     }
     if (["canceled", "switched_to_one_time"].includes(sub.status)) {
       return NextResponse.json({
         success: true,
-        message: "활성화된 정기 후원이 없습니다.",
+        message: "활성화된 정기 결제가 없습니다.",
       });
     }
 
@@ -50,13 +50,13 @@ export async function POST(_request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: cancelingSchedule
-        ? "정기 후원 예약이 취소되었습니다."
-        : "후원이 취소되었습니다. 남은 기간 동안은 계속 이용하실 수 있습니다.",
+        ? "정기 결제 예약이 취소되었습니다."
+        : "결제가 취소되었습니다. 남은 기간 동안은 계속 이용하실 수 있습니다.",
     });
   } catch (error) {
     console.error("Subscription cancel error:", error);
     return NextResponse.json(
-      { success: false, message: "후원 취소 중 오류가 발생했습니다." },
+      { success: false, message: "결제 취소 중 오류가 발생했습니다." },
       { status: 500 },
     );
   }

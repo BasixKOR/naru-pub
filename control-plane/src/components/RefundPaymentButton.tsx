@@ -6,8 +6,8 @@ import { Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
-// 환불은 되돌릴 수 없고 후원자 전용 기능이 즉시 닫히므로, 실행 전에 한 번
-// 확인한다. 결제 내역(후원자)과 /admin(운영자)이 같은 엔드포인트를 쓰되 확인
+// 환불은 되돌릴 수 없고 유료 기능이 즉시 닫히므로, 실행 전에 한 번
+// 확인한다. 결제 내역(유료 이용자)과 /admin(운영자)이 같은 엔드포인트를 쓰되 확인
 // 문구만 달리 넘긴다.
 export function RefundPaymentButton({
   paymentId,

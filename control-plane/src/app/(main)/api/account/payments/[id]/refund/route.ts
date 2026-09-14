@@ -6,8 +6,8 @@ import { PAYMENT_OPERATOR_USERS } from "@/lib/support";
 import { TossApiError } from "@/lib/toss";
 import { assertJsonContentType } from "@/lib/utils";
 
-// 환불은 결제 내역에서 직접 신청합니다. 후원자는 판매 정책의 조건(7일 이내,
-// 후원자 전용 기능 미사용)을 만족할 때 스스로 환불할 수 있고, 결제 운영자는
+// 환불은 결제 내역에서 직접 신청합니다. 유료 이용자는 판매 정책의 조건(7일 이내,
+// 유료 기능 미사용)을 만족할 때 스스로 환불할 수 있고, 결제 운영자는
 // 그 밖의 사유 — 장애 보상이나 최종 취소 — 까지 포함해 어떤 결제든 환불할 수
 // 있습니다.
 export async function POST(
@@ -59,14 +59,14 @@ export async function POST(
     const result = await refundPayment({
       paymentId,
       overridePolicy: isOperator,
-      reason: isOperator ? "나루 운영자 환불" : "후원자 환불 신청",
+      reason: isOperator ? "나루 운영자 환불" : "유료 이용자 환불 신청",
     });
 
     return NextResponse.json({
       success: true,
       result,
       message: result.subscriptionCanceled
-        ? "환불이 접수되었습니다. 정기 후원도 함께 취소되어 더 이상 결제되지 않습니다."
+        ? "환불이 접수되었습니다. 정기 결제도 함께 취소되어 더 이상 결제되지 않습니다."
         : "환불이 접수되었습니다.",
     });
   } catch (error) {

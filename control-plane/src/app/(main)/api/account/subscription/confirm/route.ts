@@ -134,14 +134,14 @@ export async function POST(request: NextRequest) {
       .executeTakeFirst();
     if (!sub) {
       return NextResponse.json(
-        { success: false, message: "후원 정보를 찾을 수 없습니다." },
+        { success: false, message: "결제 정보를 찾을 수 없습니다." },
         { status: 400 },
       );
     }
     if (sub.status === "active") {
       return NextResponse.json({
         success: true,
-        message: "이미 후원 중입니다.",
+        message: "이미 결제 중입니다.",
       });
     }
 
@@ -184,7 +184,7 @@ export async function POST(request: NextRequest) {
         success: true,
         scheduled: true,
         startsAt: scheduledStart.toISOString(),
-        message: "현재 후원 기간이 끝난 뒤 정기 후원이 시작됩니다.",
+        message: "현재 결제 기간이 끝난 뒤 정기 결제가 시작됩니다.",
       });
     }
 
@@ -283,12 +283,12 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: "후원이 시작되었습니다. 감사합니다!",
+      message: "결제가 시작되었습니다. 감사합니다!",
     });
   } catch (error) {
     console.error("Subscription confirm error:", error);
     return NextResponse.json(
-      { success: false, message: "후원 처리 중 오류가 발생했습니다." },
+      { success: false, message: "결제 처리 중 오류가 발생했습니다." },
       { status: 500 },
     );
   }

@@ -33,7 +33,7 @@ export function refundDeadline(paidAt: Date | string): Date {
   return deadline;
 }
 
-// 7일 안이면 끝이다. 후원자 전용 기능을 썼는지는 묻지 않는다 — 무엇을 물어야
+// 7일 안이면 끝이다. 유료 기능을 썼는지는 묻지 않는다 — 무엇을 물어야
 // 하는지가 곧 무엇을 증명하라는 요구가 되고, 환불을 받을 사람이 자기 사용
 // 기록을 해명하게 만드는 창구는 환불 창구가 아니기 때문이다. 사용 기록은
 // supporter_feature_uses에 그대로 남아 /admin에서 보이지만, 판정에는 쓰지

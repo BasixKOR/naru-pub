@@ -231,35 +231,35 @@ export async function sendSubscriptionRenewalNoticeEmail(opts: {
   const message = createMessage({
     from: process.env.FROM_EMAIL || "noreply@naru.pub",
     to: opts.email,
-    subject: "나루 후원이 곧 갱신됩니다",
+    subject: "나루 결제가 곧 갱신됩니다",
     content: {
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2>나루 후원 갱신 안내</h2>
-          <p>${opts.loginName}님, 나루 후원이 곧 자동 갱신됩니다.</p>
+          <h2>나루 결제 갱신 안내</h2>
+          <p>${opts.loginName}님, 나루 결제가 곧 자동 갱신됩니다.</p>
           <p><strong>결제 예정일:</strong> ${nextBillingLabel}</p>
           <p><strong>결제 예정 금액:</strong> ${amountLabel}</p>
-          <p>후원을 계속 유지하면 커스텀 도메인 같은 후원자 기능을 계속 이용하실 수 있습니다.</p>
+          <p>결제를 계속 유지하면 커스텀 도메인 같은 유료 기능을 계속 이용하실 수 있습니다.</p>
           <p>
             <a href="${accountUrl}" style="background-color: #007cba; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
-              계정에서 후원 관리
+              계정에서 결제 관리
             </a>
           </p>
-          <p>원치 않으시면 결제 예정일 전에 계정 페이지에서 후원을 취소할 수 있습니다.</p>
+          <p>원치 않으시면 결제 예정일 전에 계정 페이지에서 결제를 취소할 수 있습니다.</p>
         </div>
       `,
       text: `
-        나루 후원 갱신 안내
+        나루 결제 갱신 안내
 
-        ${opts.loginName}님, 나루 후원이 곧 자동 갱신됩니다.
+        ${opts.loginName}님, 나루 결제가 곧 자동 갱신됩니다.
 
         결제 예정일: ${nextBillingLabel}
         결제 예정 금액: ${amountLabel}
 
-        후원을 계속 유지하면 커스텀 도메인 같은 후원자 기능을 계속 이용하실 수 있습니다.
-        원치 않으시면 결제 예정일 전에 계정 페이지에서 후원을 취소할 수 있습니다.
+        결제를 계속 유지하면 커스텀 도메인 같은 유료 기능을 계속 이용하실 수 있습니다.
+        원치 않으시면 결제 예정일 전에 계정 페이지에서 결제를 취소할 수 있습니다.
 
-        후원 관리: ${accountUrl}
+        결제 관리: ${accountUrl}
       `,
     },
     tags: ["billing", "subscription-renewal"],
@@ -287,15 +287,15 @@ export async function sendSubscriptionPaymentGraceEmail(opts: {
   const message = createMessage({
     from: process.env.FROM_EMAIL || "noreply@naru.pub",
     to: opts.email,
-    subject: "나루 후원 결제에 실패했습니다",
+    subject: "나루 정기 결제에 실패했습니다",
     content: {
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2>나루 후원 결제 실패 안내</h2>
-          <p>${opts.loginName}님, 나루 후원 갱신 결제를 처리하지 못했습니다.</p>
+          <h2>나루 정기 결제 실패 안내</h2>
+          <p>${opts.loginName}님, 나루 결제 갱신 결제를 처리하지 못했습니다.</p>
           <p><strong>결제 금액:</strong> ${amountLabel}</p>
-          <p><strong>후원자 기능 유지 기한:</strong> ${graceEndsLabel}</p>
-          <p>유예 기간 동안 커스텀 도메인 같은 후원자 기능은 계속 유지됩니다. 기한 전까지 결제 수단을 다시 등록하거나 결제를 완료하지 못하면 후원자 기능이 중단되고 커스텀 도메인이 해제될 수 있습니다.</p>
+          <p><strong>유료 기능 유지 기한:</strong> ${graceEndsLabel}</p>
+          <p>유예 기간 동안 커스텀 도메인 같은 유료 기능은 계속 유지됩니다. 기한 전까지 결제 수단을 다시 등록하거나 결제를 완료하지 못하면 유료 기능이 중단되고 커스텀 도메인이 해제될 수 있습니다.</p>
           <p>
             <a href="${accountUrl}" style="background-color: #d97706; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
               결제 수단 다시 등록
@@ -304,15 +304,15 @@ export async function sendSubscriptionPaymentGraceEmail(opts: {
         </div>
       `,
       text: `
-        나루 후원 결제 실패 안내
+        나루 정기 결제 실패 안내
 
-        ${opts.loginName}님, 나루 후원 갱신 결제를 처리하지 못했습니다.
+        ${opts.loginName}님, 나루 결제 갱신 결제를 처리하지 못했습니다.
 
         결제 금액: ${amountLabel}
-        후원자 기능 유지 기한: ${graceEndsLabel}
+        유료 기능 유지 기한: ${graceEndsLabel}
 
-        유예 기간 동안 커스텀 도메인 같은 후원자 기능은 계속 유지됩니다.
-        기한 전까지 결제 수단을 다시 등록하거나 결제를 완료하지 못하면 후원자 기능이 중단되고 커스텀 도메인이 해제될 수 있습니다.
+        유예 기간 동안 커스텀 도메인 같은 유료 기능은 계속 유지됩니다.
+        기한 전까지 결제 수단을 다시 등록하거나 결제를 완료하지 못하면 유료 기능이 중단되고 커스텀 도메인이 해제될 수 있습니다.
 
         결제 수단 다시 등록: ${accountUrl}
       `,
@@ -339,21 +339,21 @@ export async function sendSupportThankYouEmail(opts: {
   const accountUrl = `${process.env.BASE_URL}/account`;
   const supporterUntilLabel = formatKoreanDateTime(opts.supporterUntil);
   const amountLabel = formatKrw(opts.amount);
-  const kindLabel = opts.kind === "recurring" ? "정기 후원" : "한 번만 후원";
+  const kindLabel = opts.kind === "recurring" ? "정기 결제" : "한 번만 결제";
 
   const message = createMessage({
     from: process.env.FROM_EMAIL || "noreply@naru.pub",
     to: opts.email,
-    subject: "나루를 후원해 주셔서 감사합니다",
+    subject: "나루를 결제해 주셔서 감사합니다",
     content: {
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2>나루를 후원해 주셔서 감사합니다</h2>
-          <p>${opts.loginName}님, ${kindLabel}으로 나루를 후원해 주셔서 진심으로 감사합니다.</p>
-          <p>여러분의 후원은 한국어 인디웹을 더 오래, 더 안정적으로 이어 가는 데 큰 힘이 됩니다.</p>
-          <p><strong>후원 금액:</strong> ${amountLabel}</p>
-          <p><strong>후원자 기능 이용 기한:</strong> ${supporterUntilLabel}</p>
-          <p>후원자 기능과 결제 정보는 계정 페이지에서 확인하실 수 있습니다.</p>
+          <h2>나루를 결제해 주셔서 감사합니다</h2>
+          <p>${opts.loginName}님, ${kindLabel}으로 나루를 결제해 주셔서 진심으로 감사합니다.</p>
+          <p>결제해 주신 금액은 한국어 인디웹을 더 오래, 더 안정적으로 이어 가는 데 사용됩니다.</p>
+          <p><strong>결제 금액:</strong> ${amountLabel}</p>
+          <p><strong>유료 기능 이용 기한:</strong> ${supporterUntilLabel}</p>
+          <p>유료 기능과 결제 정보는 계정 페이지에서 확인하실 수 있습니다.</p>
           <p>
             <a href="${accountUrl}" style="background-color: #007cba; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
               계정에서 확인하기
@@ -362,16 +362,16 @@ export async function sendSupportThankYouEmail(opts: {
         </div>
       `,
       text: `
-        나루를 후원해 주셔서 감사합니다
+        나루를 결제해 주셔서 감사합니다
 
-        ${opts.loginName}님, ${kindLabel}으로 나루를 후원해 주셔서 진심으로 감사합니다.
+        ${opts.loginName}님, ${kindLabel}으로 나루를 결제해 주셔서 진심으로 감사합니다.
 
-        여러분의 후원은 한국어 인디웹을 더 오래, 더 안정적으로 이어 가는 데 큰 힘이 됩니다.
+        결제해 주신 금액은 한국어 인디웹을 더 오래, 더 안정적으로 이어 가는 데 사용됩니다.
 
-        후원 금액: ${amountLabel}
-        후원자 기능 이용 기한: ${supporterUntilLabel}
+        결제 금액: ${amountLabel}
+        유료 기능 이용 기한: ${supporterUntilLabel}
 
-        후원자 기능과 결제 정보는 계정 페이지에서 확인하실 수 있습니다.
+        유료 기능과 결제 정보는 계정 페이지에서 확인하실 수 있습니다.
         ${accountUrl}
       `,
     },

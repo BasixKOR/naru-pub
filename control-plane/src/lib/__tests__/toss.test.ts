@@ -82,7 +82,7 @@ describe("Toss payment requests", () => {
     expect(oneTimeAmount(3)).toBe(36000);
     expect(oneTimeYearsForAmount(60000)).toBe(5);
     expect(oneTimeYearsForAmount(13000)).toBeNull();
-    expect(oneTimeOrderName(2)).toBe("나루 후원 (2년, 한 번만 결제)");
+    expect(oneTimeOrderName(2)).toBe("나루 결제 (2년, 한 번만 결제)");
     // Only one year may still be sold, but older multi-year amounts must keep
     // resolving so their confirmations and refunds reconcile.
     expect(isPurchasableOneTimeYears(1)).toBe(true);

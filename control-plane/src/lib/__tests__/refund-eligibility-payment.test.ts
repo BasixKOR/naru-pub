@@ -39,7 +39,7 @@ describe("self-serve refund eligibility", () => {
   });
 
   // 이유를 묻지 않는다는 것은 판정이 결제일 하나만 본다는 뜻이다. 사용 기록도,
-  // 후원 종류도, 금액도 묻지 않는다. 조건이 하나뿐이라는 것 자체가 약속이라,
+  // 결제 종류도, 금액도 묻지 않는다. 조건이 하나뿐이라는 것 자체가 약속이라,
   // 입력이 늘어나면 이 테스트가 먼저 깨진다.
   test("asks nothing but the date, the amount refunded and the status", () => {
     expect(Object.keys(paid({ now: day(3) })).sort()).toEqual([

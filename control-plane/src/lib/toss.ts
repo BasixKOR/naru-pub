@@ -11,14 +11,14 @@ export const PLAN_AMOUNTS: Record<BillingInterval, number> = {
 };
 
 export const PLAN_ORDER_NAMES: Record<BillingInterval, string> = {
-  month: "나루 후원 (월간)",
-  year: "나루 후원 (연간)",
+  month: "나루 결제 (월간)",
+  year: "나루 결제 (연간)",
 };
 
 // One-time donation: pay once for 1 year (no auto-renewal). Priced above the
 // recurring annual plan since there's no retention commitment.
 export const ONE_TIME_YEAR_AMOUNT = 12000;
-export const ONE_TIME_YEAR_ORDER_NAME = "나루 후원 (1년, 한 번만 결제)";
+export const ONE_TIME_YEAR_ORDER_NAME = "나루 결제 (1년, 한 번만 결제)";
 
 // Card-company review (PG 심사) rejects a merchant whose 서비스 제공기간 runs
 // longer than a year, so nothing over one year may be sold any more.
@@ -55,7 +55,7 @@ export function oneTimeYearsForAmount(amount: number): number | null {
 
 export function oneTimeOrderName(years: number): string {
   if (!isOneTimeYears(years)) throw new Error("Invalid one-time support years");
-  return `나루 후원 (${years}년, 한 번만 결제)`;
+  return `나루 결제 (${years}년, 한 번만 결제)`;
 }
 
 export function isBillingInterval(value: unknown): value is BillingInterval {

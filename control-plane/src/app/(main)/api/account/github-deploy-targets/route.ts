@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          message: "GitHub 배포는 후원자 전용 기능입니다.",
+          message: "GitHub 배포는 유료 기능입니다.",
         },
         { status: 403 },
       );

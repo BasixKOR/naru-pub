@@ -3,6 +3,7 @@ import {
   BillingInterval,
   getPaymentByOrderId,
   oneTimeYearsForAmount,
+  paymentFlowForAttempt,
   TossApiError,
   TossPaymentResult,
 } from "@/lib/toss";
@@ -77,7 +78,10 @@ async function reconcilePaymentCore(
 
   let tossPayment;
   try {
-    tossPayment = await getPaymentByOrderId(payment.order_id);
+    tossPayment = await getPaymentByOrderId(
+      payment.order_id,
+      paymentFlowForAttempt(payment.attempt_key),
+    );
   } catch (error) {
     if (error instanceof TossApiError && error.status === 404) {
       if (

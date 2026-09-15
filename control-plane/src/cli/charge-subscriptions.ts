@@ -227,7 +227,10 @@ async function main() {
     try {
       let payment = null;
       try {
-        const existingPayment = await getPaymentByOrderId(attempt.order_id);
+        const existingPayment = await getPaymentByOrderId(
+          attempt.order_id,
+          "billing",
+        );
         if (existingPayment.status === "DONE") {
           payment = existingPayment;
         }

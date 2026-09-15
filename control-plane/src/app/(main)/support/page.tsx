@@ -111,7 +111,8 @@ export default async function SupportPage() {
     <div className="bg-background min-h-screen">
       <div className="max-w-4xl mx-auto p-6 space-y-4">
         <SupportCard
-          clientKey={process.env.TOSS_CLIENT_KEY ?? ""}
+          billingClientKey={process.env.TOSS_BILLING_CLIENT_KEY ?? ""}
+          paymentClientKey={process.env.TOSS_PAYMENT_CLIENT_KEY ?? ""}
           comp={entitlement.comp}
           supportActive={entitlement.paid}
           supporterUntil={

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/database";
-import { getPaymentByOrderId, TossApiError } from "@/lib/toss";
+import {
+  getPaymentByOrderId,
+  paymentFlowForAttempt,
+  TossApiError,
+} from "@/lib/toss";
 import { reconcilePayment } from "@/lib/payment-reconciliation";
 import { parseTossWebhook } from "@/lib/toss-webhooks";
 
@@ -57,12 +61,15 @@ export async function POST(request: NextRequest) {
 
     const ledger = await db
       .selectFrom("payments")
-      .select(["id", "amount"])
+        .select(["id", "amount", "attempt_key"])
       .where("order_id", "=", orderId)
       .executeTakeFirst();
     if (!ledger) return NextResponse.json({ received: true });
 
-    const payment = await getPaymentByOrderId(orderId);
+    const payment = await getPaymentByOrderId(
+      orderId,
+      paymentFlowForAttempt(ledger.attempt_key),
+    );
     const status = payment.status.toLowerCase();
     if (
       payment.orderId === orderId &&

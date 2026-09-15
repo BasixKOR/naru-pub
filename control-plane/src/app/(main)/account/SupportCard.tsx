@@ -29,7 +29,8 @@ type SubscriptionInfo = {
 };
 
 export default function SupportCard({
-  clientKey,
+  billingClientKey,
+  paymentClientKey,
   comp,
   supportActive,
   supporterUntil,
@@ -37,7 +38,8 @@ export default function SupportCard({
   email,
   emailVerified,
 }: {
-  clientKey: string;
+  billingClientKey: string;
+  paymentClientKey: string;
   comp: boolean;
   supportActive: boolean;
   supporterUntil: string | null;
@@ -110,13 +112,13 @@ export default function SupportCard({
         return;
       }
 
-      if (!clientKey) {
+      if (!billingClientKey) {
         toast.error("결제 설정이 올바르지 않습니다.");
         setPending(false);
         return;
       }
 
-      const tossPayments = await loadTossPayments(clientKey);
+      const tossPayments = await loadTossPayments(billingClientKey);
       const payment = tossPayments.payment({ customerKey: data.customerKey });
       await payment.requestBillingAuth({
         method: "CARD",
@@ -145,13 +147,13 @@ export default function SupportCard({
         return;
       }
 
-      if (!clientKey) {
+      if (!paymentClientKey) {
         toast.error("결제 설정이 올바르지 않습니다.");
         setPending(false);
         return;
       }
 
-      const tossPayments = await loadTossPayments(clientKey);
+      const tossPayments = await loadTossPayments(paymentClientKey);
       const payment = tossPayments.payment({ customerKey: data.customerKey });
       await payment.requestPayment({
         method: "CARD",

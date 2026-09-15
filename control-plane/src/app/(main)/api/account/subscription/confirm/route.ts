@@ -197,7 +197,10 @@ export async function POST(request: NextRequest) {
     let payment;
     try {
       try {
-        const existingPayment = await getPaymentByOrderId(attempt.order_id);
+        const existingPayment = await getPaymentByOrderId(
+          attempt.order_id,
+          "billing",
+        );
         if (existingPayment.status === "DONE") {
           payment = existingPayment;
         }

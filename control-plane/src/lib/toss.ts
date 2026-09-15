@@ -3,6 +3,7 @@ import { randomInt } from "crypto";
 const TOSS_API = "https://api.tosspayments.com";
 
 export type BillingInterval = "month" | "year";
+export type TossPaymentFlow = "billing" | "one-time";
 
 // Authoritative server-side amounts (KRW). Never trust client-sent amounts.
 export const PLAN_AMOUNTS: Record<BillingInterval, number> = {
@@ -85,16 +86,24 @@ export function isDefinitiveTossFailure(error: unknown): error is TossApiError {
   );
 }
 
-function authHeader(): string {
-  const secret = process.env.TOSS_SECRET_KEY;
+function authHeader(flow: TossPaymentFlow): string {
+  const secret =
+    flow === "billing"
+      ? process.env.TOSS_BILLING_SECRET_KEY
+      : process.env.TOSS_PAYMENT_SECRET_KEY;
   if (!secret) {
-    throw new Error("TOSS_SECRET_KEY is not configured.");
+    throw new Error(
+      flow === "billing"
+        ? "TOSS_BILLING_SECRET_KEY is not configured."
+        : "TOSS_PAYMENT_SECRET_KEY is not configured.",
+    );
   }
   // Toss uses HTTP Basic auth with the secret key as username and empty password.
   return "Basic " + Buffer.from(`${secret}:`).toString("base64");
 }
 
 async function tossRequest<T>(
+  flow: TossPaymentFlow,
   path: string,
   init: {
     method?: "GET" | "POST";
@@ -105,7 +114,7 @@ async function tossRequest<T>(
   const res = await fetch(`${TOSS_API}${path}`, {
     method: init.method ?? "POST",
     headers: {
-      Authorization: authHeader(),
+      Authorization: authHeader(flow),
       "Content-Type": "application/json",
       ...(init.idempotencyKey
         ? { "Idempotency-Key": init.idempotencyKey }
@@ -132,7 +141,7 @@ export type TossBillingKeyResult = {
 
 // Exchanges the authKey from requestBillingAuth for a reusable billing key.
 export function issueBillingKey(authKey: string, customerKey: string) {
-  return tossRequest<TossBillingKeyResult>("/v1/billing/authorizations/issue", {
+  return tossRequest<TossBillingKeyResult>("billing", "/v1/billing/authorizations/issue", {
     body: { authKey, customerKey },
   });
 }
@@ -162,7 +171,7 @@ export function chargeBillingKey(params: {
   idempotencyKey: string;
 }) {
   const { billingKey, idempotencyKey, ...body } = params;
-  return tossRequest<TossPaymentResult>(`/v1/billing/${billingKey}`, {
+  return tossRequest<TossPaymentResult>("billing", `/v1/billing/${billingKey}`, {
     body,
     idempotencyKey,
   });
@@ -174,7 +183,7 @@ export function confirmPayment(
   params: { paymentKey: string; orderId: string; amount: number },
   idempotencyKey: string,
 ) {
-  return tossRequest<TossPaymentResult>("/v1/payments/confirm", {
+  return tossRequest<TossPaymentResult>("one-time", "/v1/payments/confirm", {
     body: params,
     idempotencyKey,
   });
@@ -184,22 +193,33 @@ export function confirmPayment(
 // back, so no cancelAmount is sent: Toss refunds the whole balance. Passing the
 // same idempotency key for a retry cancels once rather than twice.
 export function cancelPayment(params: {
+  flow: TossPaymentFlow;
   paymentKey: string;
   cancelReason: string;
   idempotencyKey: string;
 }) {
-  const { paymentKey, cancelReason, idempotencyKey } = params;
+  const { flow, paymentKey, cancelReason, idempotencyKey } = params;
   return tossRequest<TossPaymentResult>(
+    flow,
     `/v1/payments/${encodeURIComponent(paymentKey)}/cancel`,
     { body: { cancelReason }, idempotencyKey },
   );
 }
 
-export function getPaymentByOrderId(orderId: string) {
+export function getPaymentByOrderId(orderId: string, flow: TossPaymentFlow) {
   return tossRequest<TossPaymentResult>(
+    flow,
     `/v1/payments/orders/${encodeURIComponent(orderId)}`,
     { method: "GET" },
   );
+}
+
+// Payment rows predate separate MIDs. The attempt key is the durable flow
+// marker: one-time donations use one_time:*; all other rows are billing-key
+// charges. Keep this mapping in one place so lookup and cancellation use the
+// same MID as the original charge.
+export function paymentFlowForAttempt(attemptKey: string | null): TossPaymentFlow {
+  return attemptKey?.startsWith("one_time:") ? "one-time" : "billing";
 }
 
 export function addInterval(from: Date, interval: BillingInterval): Date {

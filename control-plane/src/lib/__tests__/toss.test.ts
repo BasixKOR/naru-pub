@@ -20,10 +20,12 @@ import {
 } from "@/lib/toss";
 
 describe("Toss payment requests", () => {
-  const originalSecret = process.env.TOSS_SECRET_KEY;
+  const originalBillingSecret = process.env.TOSS_BILLING_SECRET_KEY;
+  const originalPaymentSecret = process.env.TOSS_PAYMENT_SECRET_KEY;
 
   beforeEach(() => {
-    process.env.TOSS_SECRET_KEY = "test_secret";
+    process.env.TOSS_BILLING_SECRET_KEY = "test_billing_secret";
+    process.env.TOSS_PAYMENT_SECRET_KEY = "test_payment_secret";
     global.fetch = jest.fn<typeof fetch>().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -37,8 +39,16 @@ describe("Toss payment requests", () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
-    if (originalSecret === undefined) delete process.env.TOSS_SECRET_KEY;
-    else process.env.TOSS_SECRET_KEY = originalSecret;
+    if (originalBillingSecret === undefined) {
+      delete process.env.TOSS_BILLING_SECRET_KEY;
+    } else {
+      process.env.TOSS_BILLING_SECRET_KEY = originalBillingSecret;
+    }
+    if (originalPaymentSecret === undefined) {
+      delete process.env.TOSS_PAYMENT_SECRET_KEY;
+    } else {
+      process.env.TOSS_PAYMENT_SECRET_KEY = originalPaymentSecret;
+    }
   });
 
   test("billing retries carry the stable order id as an idempotency key", async () => {
@@ -57,6 +67,15 @@ describe("Toss payment requests", () => {
         headers: expect.objectContaining({ "Idempotency-Key": "order" }),
       }),
     );
+    expect(fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization:
+            "Basic " + Buffer.from("test_billing_secret:").toString("base64"),
+        }),
+      }),
+    );
   });
 
   test("one-time confirmation retries use the same idempotency key", async () => {
@@ -69,6 +88,15 @@ describe("Toss payment requests", () => {
       "https://api.tosspayments.com/v1/payments/confirm",
       expect.objectContaining({
         headers: expect.objectContaining({ "Idempotency-Key": "order" }),
+      }),
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization:
+            "Basic " + Buffer.from("test_payment_secret:").toString("base64"),
+        }),
       }),
     );
   });

@@ -1,6 +1,6 @@
 import { db } from "@/lib/database";
 import { reconcilePayment } from "@/lib/payment-reconciliation";
-import { cancelPayment, TossApiError } from "@/lib/toss";
+import { cancelPayment, paymentFlowForAttempt, TossApiError } from "@/lib/toss";
 
 // 판매 정책의 환불 조건: 결제일로부터 7일 안에는 이유를 묻지 않고 전액 환불.
 // 이 상수와 아래 판정 함수가 그 문장의 구현이므로, components/SupportPolicy의
@@ -131,6 +131,7 @@ export async function refundPayment(opts: {
       "paid_at",
       "refunded_amount",
       "toss_payment_key",
+      "attempt_key",
     ])
     .where("id", "=", opts.paymentId)
     .executeTakeFirstOrThrow();
@@ -161,6 +162,7 @@ export async function refundPayment(opts: {
 
   try {
     await cancelPayment({
+      flow: paymentFlowForAttempt(payment.attempt_key),
       paymentKey: payment.toss_payment_key,
       cancelReason: opts.reason.slice(0, 200),
       idempotencyKey: `refund:${payment.id}`,

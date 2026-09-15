@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/database";
 import {
   getPaymentByOrderId,
-  paymentFlowForAttempt,
+  paymentFlowForRecord,
+  paymentProviderMetadata,
   TossApiError,
 } from "@/lib/toss";
 import { reconcilePayment } from "@/lib/payment-reconciliation";
@@ -61,14 +62,14 @@ export async function POST(request: NextRequest) {
 
     const ledger = await db
       .selectFrom("payments")
-        .select(["id", "amount", "attempt_key"])
+      .select(["id", "amount", "attempt_key", "toss_flow"])
       .where("order_id", "=", orderId)
       .executeTakeFirst();
     if (!ledger) return NextResponse.json({ received: true });
 
     const payment = await getPaymentByOrderId(
       orderId,
-      paymentFlowForAttempt(ledger.attempt_key),
+      paymentFlowForRecord(ledger.toss_flow, ledger.attempt_key),
     );
     const status = payment.status.toLowerCase();
     if (
@@ -86,6 +87,10 @@ export async function POST(request: NextRequest) {
       await db
         .updateTable("payments")
         .set({
+          ...paymentProviderMetadata(
+            payment,
+            paymentFlowForRecord(ledger.toss_flow, ledger.attempt_key),
+          ),
           toss_payment_key: payment.paymentKey,
           ...(status === "done" ? {} : { status }),
           raw: JSON.stringify(payment),

@@ -3,7 +3,8 @@ import {
   BillingInterval,
   getPaymentByOrderId,
   oneTimeYearsForAmount,
-  paymentFlowForAttempt,
+  paymentFlowForRecord,
+  paymentProviderMetadata,
   TossApiError,
   TossPaymentResult,
 } from "@/lib/toss";
@@ -80,7 +81,7 @@ async function reconcilePaymentCore(
   try {
     tossPayment = await getPaymentByOrderId(
       payment.order_id,
-      paymentFlowForAttempt(payment.attempt_key),
+      paymentFlowForRecord(payment.toss_flow, payment.attempt_key),
     );
   } catch (error) {
     if (error instanceof TossApiError && error.status === 404) {
@@ -110,6 +111,22 @@ async function reconcilePaymentCore(
     throw new Error(`Toss payment mismatch for order ${payment.order_id}`);
   }
 
+  // Persist the provider's current transaction identity even when the ledger
+  // was already marked done; this backfills MID data for historic rows during
+  // normal reconciliation.
+  await db
+    .updateTable("payments")
+    .set({
+      ...paymentProviderMetadata(
+        tossPayment,
+        paymentFlowForRecord(payment.toss_flow, payment.attempt_key),
+      ),
+      toss_payment_key: tossPayment.paymentKey,
+      raw: JSON.stringify(tossPayment),
+    })
+    .where("id", "=", payment.id)
+    .execute();
+
   if (status !== "done") {
     const finalStatuses = new Set([
       "canceled",
@@ -128,6 +145,10 @@ async function reconcilePaymentCore(
         await trx
           .updateTable("payments")
           .set({
+            ...paymentProviderMetadata(
+              tossPayment,
+              paymentFlowForRecord(payment.toss_flow, payment.attempt_key),
+            ),
             toss_payment_key: tossPayment.paymentKey,
             status,
             refunded_amount: refundedAmount,

@@ -183,6 +183,14 @@ export interface Payments {
   user_id: number;
   subscription_id: number | null;
   toss_payment_key: string | null;
+  toss_flow: string | null;
+  toss_mid: string | null;
+  toss_payment_type: string | null;
+  toss_method: string | null;
+  toss_currency: string | null;
+  toss_approved_at: Timestamp | null;
+  toss_receipt_url: string | null;
+  toss_api_version: string | null;
   order_id: string;
   amount: number;
   status: string;

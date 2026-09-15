@@ -3,6 +3,7 @@ import {
   addInterval,
   BillingInterval,
   isOneTimeYears,
+  paymentProviderMetadata,
   TossPaymentResult,
 } from "@/lib/toss";
 
@@ -71,6 +72,7 @@ export async function applyOneTimePayment(opts: {
       await trx
         .updateTable("payments")
         .set({
+          ...paymentProviderMetadata(opts.payment, "one-time"),
           toss_payment_key: opts.payment.paymentKey,
           order_id: opts.payment.orderId,
           amount: opts.amount,
@@ -86,6 +88,7 @@ export async function applyOneTimePayment(opts: {
       await trx
         .insertInto("payments")
         .values({
+          ...paymentProviderMetadata(opts.payment, "one-time"),
           user_id: opts.userId,
           subscription_id: null,
           toss_payment_key: opts.payment.paymentKey,
@@ -184,6 +187,7 @@ export async function applySuccessfulCharge(opts: {
       await trx
         .updateTable("payments")
         .set({
+          ...paymentProviderMetadata(opts.payment, "billing"),
           toss_payment_key: opts.payment.paymentKey,
           order_id: opts.payment.orderId,
           amount: opts.amount,
@@ -199,6 +203,7 @@ export async function applySuccessfulCharge(opts: {
       await trx
         .insertInto("payments")
         .values({
+          ...paymentProviderMetadata(opts.payment, "billing"),
           user_id: opts.userId,
           subscription_id: opts.subscriptionId,
           toss_payment_key: opts.payment.paymentKey,

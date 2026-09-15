@@ -141,9 +141,13 @@ export type TossBillingKeyResult = {
 
 // Exchanges the authKey from requestBillingAuth for a reusable billing key.
 export function issueBillingKey(authKey: string, customerKey: string) {
-  return tossRequest<TossBillingKeyResult>("billing", "/v1/billing/authorizations/issue", {
-    body: { authKey, customerKey },
-  });
+  return tossRequest<TossBillingKeyResult>(
+    "billing",
+    "/v1/billing/authorizations/issue",
+    {
+      body: { authKey, customerKey },
+    },
+  );
 }
 
 export type TossPaymentResult = {
@@ -158,6 +162,12 @@ export type TossPaymentResult = {
     transactionKey?: string;
   }> | null;
   approvedAt?: string;
+  mId?: string;
+  type?: string;
+  method?: string | null;
+  currency?: string;
+  version?: string;
+  receipt?: { url?: string } | null;
   [key: string]: unknown;
 };
 
@@ -171,10 +181,14 @@ export function chargeBillingKey(params: {
   idempotencyKey: string;
 }) {
   const { billingKey, idempotencyKey, ...body } = params;
-  return tossRequest<TossPaymentResult>("billing", `/v1/billing/${billingKey}`, {
-    body,
-    idempotencyKey,
-  });
+  return tossRequest<TossPaymentResult>(
+    "billing",
+    `/v1/billing/${billingKey}`,
+    {
+      body,
+      idempotencyKey,
+    },
+  );
 }
 
 // Finalizes a one-time payment (non-billing). Toss validates that paymentKey,
@@ -218,8 +232,35 @@ export function getPaymentByOrderId(orderId: string, flow: TossPaymentFlow) {
 // marker: one-time donations use one_time:*; all other rows are billing-key
 // charges. Keep this mapping in one place so lookup and cancellation use the
 // same MID as the original charge.
-export function paymentFlowForAttempt(attemptKey: string | null): TossPaymentFlow {
+export function paymentFlowForAttempt(
+  attemptKey: string | null,
+): TossPaymentFlow {
   return attemptKey?.startsWith("one_time:") ? "one-time" : "billing";
+}
+
+export function paymentFlowForRecord(
+  flow: string | null,
+  attemptKey: string | null,
+): TossPaymentFlow {
+  return flow === "billing" || flow === "one-time"
+    ? flow
+    : paymentFlowForAttempt(attemptKey);
+}
+
+export function paymentProviderMetadata(
+  payment: TossPaymentResult,
+  flow: TossPaymentFlow,
+) {
+  return {
+    toss_flow: flow,
+    toss_mid: payment.mId ?? null,
+    toss_payment_type: payment.type ?? null,
+    toss_method: payment.method ?? null,
+    toss_currency: payment.currency ?? null,
+    toss_approved_at: payment.approvedAt ? new Date(payment.approvedAt) : null,
+    toss_receipt_url: payment.receipt?.url ?? null,
+    toss_api_version: payment.version ?? null,
+  };
 }
 
 export function addInterval(from: Date, interval: BillingInterval): Date {

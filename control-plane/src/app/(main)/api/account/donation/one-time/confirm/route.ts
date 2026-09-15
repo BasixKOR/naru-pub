@@ -7,6 +7,7 @@ import {
   confirmPayment,
   isDefinitiveTossFailure,
   oneTimeYearsForAmount,
+  paymentProviderMetadata,
   TossApiError,
 } from "@/lib/toss";
 import { applyOneTimePayment } from "@/lib/subscriptions";
@@ -113,6 +114,7 @@ export async function POST(request: NextRequest) {
       await db
         .updateTable("payments")
         .set({
+          ...paymentProviderMetadata(payment, "one-time"),
           toss_payment_key: payment.paymentKey,
           order_id: payment.orderId ?? orderId,
           amount: payment.totalAmount ?? amount,

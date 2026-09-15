@@ -10,6 +10,7 @@ import {
   issueBillingKey,
   isDefinitiveTossFailure,
   newOrderId,
+  paymentProviderMetadata,
   PLAN_ORDER_NAMES,
   TossApiError,
 } from "@/lib/toss";
@@ -245,6 +246,7 @@ export async function POST(request: NextRequest) {
       await db
         .updateTable("payments")
         .set({
+          ...paymentProviderMetadata(payment, "billing"),
           toss_payment_key: payment.paymentKey,
           order_id: payment.orderId ?? attempt.order_id,
           amount: sub.amount,

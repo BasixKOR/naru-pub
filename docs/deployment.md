@@ -65,10 +65,12 @@ rule, it is zone configuration: recreate it by hand if the zone is rebuilt.
 
 **Caching → Cache Rules → `Hosted site fallback`**
 
-Expression (list every hostname that is not a hosted site):
+Expression (list every hostname that is not a hosted site). The R2 hosts must
+stay out: their objects carry no `Cache-Control`, so this rule would stop them
+being cached at all:
 
 ```
-(not http.host in {"naru.pub" "www.naru.pub" "r2.naru.pub" "media.naru.pub"})
+(not http.host in {"naru.pub" "r2.naru.pub" "r2-screenshots.naru.pub" "media.naru.pub"})
 ```
 
 | Setting                                | Value                                                    |

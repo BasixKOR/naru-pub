@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createNaru, NaruError } from "../public/sdk/1.0.0/naru-data.js";
 
-const collection = (name, options) => createNaru(options).collection(name);
+const collection = (name, options) =>
+  createNaru(options).public.collection(name);
 const ownerSession = (options) => createNaru(options).auth.session();
 const signIn = ({ collections, ...options }) =>
   createNaru(options).auth.signIn({ collections });
@@ -79,7 +80,7 @@ async function browser(
 
 const written = (id = "one", version = 1) => ({
   id,
-  version,
+  revision: `r1.${version.toString(36)}`,
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 });
@@ -121,7 +122,8 @@ test("a page on <site>.naru.pub needs no site; anywhere else must name one", asy
 });
 
 test("documents are read and written with plain requests that carry no cookies", async () => {
-  await browser(async ({ calls, respond }) => {
+  await browser(async ({ calls, respond, storage }) => {
+    saveSession(storage);
     const document = { ...written(), data: { title: "hello" } };
     respond(({ method }) =>
       Response.json(
@@ -146,9 +148,14 @@ test("documents are read and written with plain requests that carry no cookies",
       createdAt: written().createdAt,
       updatedAt: written().updatedAt,
     });
-    await posts.set("one", { title: "x" }, { ifAbsent: true });
+    const owned = await ownerSession();
+    await owned
+      .collection("posts")
+      .set("one", { title: "x" }, { condition: { absent: true } });
     assert.equal(
-      await posts.delete("one", { ifRevision: revision(3) }),
+      await owned.collection("posts").delete("one", {
+        condition: { revision: revision(3) },
+      }),
       undefined,
     );
     assert.deepEqual(
@@ -156,21 +163,24 @@ test("documents are read and written with plain requests that carry no cookies",
       [
         ["GET", "/api/data/alice/posts/one"],
         ["POST", "/api/data/alice/posts"],
-        ["PUT", "/api/data/alice/posts/one?ifVersion=0"],
-        ["DELETE", "/api/data/alice/posts/one?ifVersion=3"],
+        ["PUT", "/api/data/alice/posts/one?ifAbsent=1"],
+        ["DELETE", "/api/data/alice/posts/one?ifRevision=r1.3"],
       ],
     );
     assert.deepEqual(JSON.parse(calls[1].body), { data: { title: "new" } });
     assert.equal((await posts.add({ title: "revision" })).revision, "r1.1");
     assert.equal(calls[3].body, undefined);
-    for (const call of calls) {
+    for (const [index, call] of calls.entries()) {
       assert.equal(call.credentials, "omit");
       assert.equal(call.redirect, "error");
-      assert.equal(call.headers.Authorization, undefined);
+      assert.equal(
+        call.headers.Authorization,
+        index === 2 || index === 3 ? `Bearer ${"t".repeat(43)}` : undefined,
+      );
       assert.equal(call.headers.Accept, "application/vnd.naru.data.v1+json");
     }
     // ".." would resolve to another path once inside a URL.
-    assert.throws(() => posts.set("..", {}), TypeError);
+    assert.throws(() => owned.collection("posts").set("..", {}), TypeError);
     assert.throws(() => collection("a/b"), TypeError);
   });
 });
@@ -181,17 +191,15 @@ test("list sends only the query options that constrain something", async () => {
       Response.json({ documents: [], nextPageToken: "next", total: 3 }),
     );
     const posts = collection("posts");
-    await posts.list({ where: {}, cursor: null });
+    await posts.list({ filter: {}, page: { after: null } });
     assert.equal(calls[0].url.search, "");
     const page = await posts.list({
-      where: { category: "일상", date: { gte: "2026-09-01" } },
-      orderBy: [
+      filter: { category: "일상", date: { gte: "2026-09-01" } },
+      sort: [
         ["date", "desc"],
-        ["$createdAt", "desc"],
+        [{ metadata: "createdAt" }, "desc"],
       ],
-      limit: 8,
-      cursor: "next",
-      count: true,
+      page: { size: 8, after: "next", includeTotal: true },
     });
     assert.equal(page.totalCount, 3);
     const search = calls[1].url.searchParams;
@@ -209,9 +217,21 @@ test("list sends only the query options that constrain something", async () => {
   });
 });
 
+test("revisions are passed through without client-side parsing", async () => {
+  await browser(async ({ calls, respond, storage }) => {
+    saveSession(storage);
+    respond(() => Response.json({ ...written(), revision: "future.token" }));
+    const posts = (await ownerSession()).collection("posts");
+    assert.equal((await posts.set("one", {})).revision, "future.token");
+    await posts.delete("one", { condition: { revision: "future.token" } });
+    assert.equal(calls[1].url.searchParams.get("ifRevision"), "future.token");
+  });
+});
+
 test("errors have semantic codes and transport details stay diagnostic", async () => {
-  await browser(async ({ respond }) => {
-    const posts = collection("posts");
+  await browser(async ({ respond, storage }) => {
+    saveSession(storage);
+    const posts = (await ownerSession()).collection("posts");
     respond(() =>
       Response.json(
         { error: "Document version does not match.", code: "VERSION_CONFLICT" },
@@ -219,7 +239,7 @@ test("errors have semantic codes and transport details stay diagnostic", async (
       ),
     );
     await assert.rejects(
-      posts.set("one", {}, { ifRevision: revision(1) }),
+      posts.set("one", {}, { condition: { revision: revision(1) } }),
       (error) => {
         assert.ok(error instanceof NaruError);
         assert.equal(error.status, 409);
@@ -482,32 +502,21 @@ test("signing out forgets the session before revoking, and never erases a newer 
   });
 });
 
-test("atomic translates opaque revisions and returns results in order", async () => {
+test("transaction sends semantic writes and returns no transport results", async () => {
   await browser(async ({ calls, respond, storage }) => {
     saveSession(storage);
     const owner = await ownerSession();
     respond(() =>
       Response.json({ results: [written("hello"), { success: true }] }),
     );
-    const operations = [
+    const writes = [
       {
-        type: "set",
         collection: "posts",
-        id: "hello",
-        data: {},
-        ifAbsent: true,
+        set: { id: "hello", data: {}, condition: { absent: true } },
       },
-      { type: "delete", collection: "drafts", id: "hello" },
+      { collection: "drafts", delete: { id: "hello" } },
     ];
-    assert.deepEqual(await owner.atomic(operations), [
-      {
-        id: "hello",
-        revision: "r1.1",
-        createdAt: written().createdAt,
-        updatedAt: written().updatedAt,
-      },
-      { success: true },
-    ]);
+    assert.equal(await owner.transaction(writes), undefined);
     assert.equal(calls[0].url.pathname, "/api/data/alice/_batch");
     assert.deepEqual(JSON.parse(calls[0].body), {
       operations: [
@@ -516,9 +525,9 @@ test("atomic translates opaque revisions and returns results in order", async ()
           collection: "posts",
           id: "hello",
           data: {},
-          ifVersion: 0,
+          condition: { absent: true },
         },
-        operations[1],
+        { type: "delete", collection: "drafts", id: "hello" },
       ],
     });
     // The public client reads both collections past the cache afterwards.
@@ -586,7 +595,7 @@ async function upload(file, images) {
           });
         return Response.json({ file: { id: "f1", url: "https://media" } });
       });
-      stored = await owner.files.upload(file);
+      stored = await owner.media.upload(file);
     });
   } finally {
     images?.restore();
@@ -692,7 +701,7 @@ test("a failed transfer is reported and not finalized", async () => {
           }),
     );
     await assert.rejects(
-      owner.files.upload(new Blob(["x"], { type: "text/plain" })),
+      owner.media.upload(new Blob(["x"], { type: "text/plain" })),
       { status: 403 },
     );
     assert.equal(calls.length, 2);

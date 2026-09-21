@@ -31,6 +31,69 @@ const publicHeaders = {
   "Access-Control-Max-Age": "600",
 };
 
+// Revisions are transport tokens. Database versions never cross the public
+// boundary, and browser SDKs only store and return these strings unchanged.
+function encodeRevision(version: unknown) {
+  if (!Number.isSafeInteger(version) || Number(version) < 1)
+    throw new Error("Invalid stored document version.");
+  return `r1.${Number(version).toString(36)}`;
+}
+
+function decodeRevision(value: string | null) {
+  if (value === null) return undefined;
+  const match = /^r1\.([0-9a-z]+)$/.exec(value);
+  const version = match ? Number.parseInt(match[1], 36) : NaN;
+  if (!Number.isSafeInteger(version) || version < 1)
+    throw new DataError(400, "Invalid revision.");
+  return version;
+}
+
+function publicResult(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(publicResult);
+  if (value instanceof Date) return value;
+  if (!value || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.entries(record).flatMap(([key, item]) =>
+      key === "version"
+        ? [["revision", encodeRevision(item)]]
+        : [[key, key === "data" ? item : publicResult(item)]],
+    ),
+  );
+}
+
+function batchBody(body: Record<string, unknown>) {
+  if (!Array.isArray(body.operations)) return body;
+  return {
+    ...body,
+    operations: body.operations.map((raw) => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+      const operation = raw as Record<string, unknown>;
+      const condition = operation.condition;
+      if (condition === undefined) return operation;
+      if (
+        !condition ||
+        typeof condition !== "object" ||
+        Array.isArray(condition)
+      )
+        throw new DataError(400, "Invalid write condition.");
+      const expected = condition as Record<string, unknown>;
+      const keys = Object.keys(expected);
+      if (keys.length !== 1)
+        throw new DataError(400, "Invalid write condition.");
+      if (expected.absent === true)
+        return { ...operation, condition: undefined, ifVersion: 0 };
+      if (typeof expected.revision === "string")
+        return {
+          ...operation,
+          condition: undefined,
+          ifVersion: decodeRevision(expected.revision),
+        };
+      throw new DataError(400, "Invalid write condition.");
+    }),
+  };
+}
+
 export async function dataRequest(
   request: Request,
   path: string[],
@@ -77,12 +140,14 @@ export async function dataRequest(
         : null;
     // PATCH only reaches here from the control panel, to change a collection's
     // permissions; the public route does not export it.
-    const body = ["POST", "PUT", "PATCH"].includes(request.method)
+    let body = ["POST", "PUT", "PATCH"].includes(request.method)
       ? await jsonBody(request)
       : undefined;
-    // A conditional write carries its expected version in the URL: DELETE has
-    // no body, and intermediaries are free to drop one.
-    const ifVersion = url.searchParams.get("ifVersion");
+    if (!admin && path[0] === "_batch" && body) body = batchBody(body);
+    const revision = url.searchParams.get("ifRevision");
+    const absent = url.searchParams.get("ifAbsent");
+    if (revision !== null && absent !== null)
+      throw new DataError(400, "Use one write condition.");
     const command = {
       site: site!,
       path: path[0] === "_files" ? path.slice(1) : path,
@@ -97,12 +162,13 @@ export async function dataRequest(
       // The control panel's quota readout; the media service ignores it for
       // anyone but a signed-in owner.
       usage: url.searchParams.get("usage") === "1",
-      ifVersion:
-        ifVersion === null
-          ? undefined
-          : /^\d+$/.test(ifVersion)
-            ? Number(ifVersion)
-            : NaN,
+      ifVersion: !admin
+        ? absent === "1"
+          ? 0
+          : decodeRevision(revision)
+        : url.searchParams.has("ifVersion")
+          ? Number(url.searchParams.get("ifVersion"))
+          : undefined,
       orderBy: url.searchParams.get("orderBy") ?? undefined,
       pageToken: url.searchParams.get("pageToken") ?? undefined,
       limit: url.searchParams.has("limit")
@@ -115,7 +181,7 @@ export async function dataRequest(
         : path[0] === "_batch"
           ? await executeBatch({ ...command, path: [] })
           : await executeData(command);
-    return Response.json(result, {
+    return Response.json(admin ? result : publicResult(result), {
       headers: {
         ...headers,
         // Only a read the service itself vouched for as public. Anything else

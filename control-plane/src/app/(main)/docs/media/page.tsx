@@ -98,7 +98,7 @@ export default function MediaDocs() {
                 파일 API는 <strong>관리자 세션에서만</strong> 열립니다. 컬렉션과
                 달리 <code>collection()</code>만으로는 쓸 수 없고,{" "}
                 <a href="/docs/database#owner">웹사이트에서 관리자 로그인</a>을
-                먼저 마쳐야 <code>owner.files</code>를 쓸 수 있습니다.
+                먼저 마쳐야 <code>owner.media</code>를 쓸 수 있습니다.
               </p>
               <p>
                 <code>upload()</code>는 10분짜리 서명된 업로드 주소를 받아
@@ -109,7 +109,7 @@ export default function MediaDocs() {
               <Code>{`const naru = createNaru();
 const owner = await naru.auth.session();
 
-const image = await owner.files.upload(fileInput.files[0], {
+const image = await owner.media.upload(fileInput.files[0], {
   signal: abortController.signal,
 });
 

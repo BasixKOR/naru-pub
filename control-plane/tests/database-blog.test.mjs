@@ -49,6 +49,7 @@ async function page(name, db, storage = new Map(), query = "") {
       function () {
         this.setExport("connect", async () => ({
           ...db,
+          public: { collection: (name) => db.collection(name) },
           auth: {
             session: () => db.auth?.session?.() ?? db.ownerSession?.(),
             signIn: ({ collections }) =>
@@ -119,10 +120,10 @@ test("post list paginates and renders hostile input as text", async () => {
   assert.match(app.$("entries").textContent, /<img/);
   assert.equal(app.$("more").hidden, false);
   await app.fire("more", "click");
-  assert.equal(requests[1].cursor, "a");
+  assert.equal(requests[1].page.after, "a");
   assert.ok(
     requests.every(
-      (r) => r.orderBy[0][0] === "$createdAt" && r.orderBy[0][1] === "desc",
+      (r) => r.sort[0][0].metadata === "createdAt" && r.sort[0][1] === "desc",
     ),
   );
   assert.equal(app.$("entries").children.length, 2);
@@ -183,8 +184,8 @@ test("admin preserves draft across login, retries same ID, fails closed on expir
   const writes = [];
   let failure = new Error("response lost");
   const owner = fakeOwner({
-    async atomic(operations) {
-      const operation = operations[0];
+    async transaction(operations) {
+      const operation = operations[0].set;
       writes.push({ id: operation.id, data: operation.data });
       if (failure) throw failure;
     },
@@ -285,16 +286,16 @@ test("category changes reset the cursor and preserve filters on subsequent pages
   await app.fire("more", "click");
   app.$("filter-category").value = "일상";
   await app.fire("filter-form", "submit");
-  assert.equal(calls[2].cursor, undefined);
-  assert.equal(calls[2].where.category, "일상");
+  assert.equal(calls[2].page.after, undefined);
+  assert.equal(calls[2].filter.category, "일상");
   assert.equal(app.$("entries").children.length, 1);
   await app.fire("more", "click");
-  assert.equal(calls[3].cursor, "v1.next");
-  assert.equal(calls[3].where.category, "일상");
+  assert.equal(calls[3].page.after, "v1.next");
+  assert.equal(calls[3].filter.category, "일상");
   app.$("filter-category").value = "";
   await app.fire("filter-form", "submit");
-  assert.equal(Object.keys(calls[4].where).length, 0);
-  assert.equal(calls[4].cursor, undefined);
+  assert.equal(Object.keys(calls[4].filter).length, 0);
+  assert.equal(calls[4].page.after, undefined);
 });
 // Stands in for the SDK's owner client.
 function fakeOwner(methods = {}) {
@@ -311,21 +312,23 @@ function editorBackend() {
       failure = fn;
     },
     owner: fakeOwner({
-      async atomic(operations) {
-        for (const operation of operations) {
-          const error = failure?.(operation.type, operation.collection);
+      async transaction(writes) {
+        for (const write of writes) {
+          const type = write.set ? "set" : "delete";
+          const error = failure?.(type, write.collection);
           if (error) throw error;
         }
-        for (const operation of operations) {
-          calls.push([operation.type, operation.collection, operation.id]);
-          if (operation.type === "set")
-            rows[operation.collection].set(
+        for (const write of writes) {
+          const type = write.set ? "set" : "delete";
+          const operation = write.set ?? write.delete;
+          calls.push([type, write.collection, operation.id]);
+          if (write.set)
+            rows[write.collection].set(
               operation.id,
-              structuredClone(operation.data),
+              structuredClone(write.set.data),
             );
-          else rows[operation.collection].delete(operation.id);
+          else rows[write.collection].delete(operation.id);
         }
-        return { results: [] };
       },
       collection(kind) {
         assert.ok(kind in rows);

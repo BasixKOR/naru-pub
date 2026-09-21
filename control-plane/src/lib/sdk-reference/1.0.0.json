@@ -10,7 +10,7 @@
           "spans": [
             {
               "type": "text",
-              "value": "사이트 하나에 묶인 나루 클라이언트를 만듭니다."
+              "value": "Creates a client bound to one site."
             }
           ]
         }
@@ -27,84 +27,9 @@
       ]
     },
     {
-      "name": "Collection",
-      "kind": "interface",
-      "summary": [],
-      "throws": [],
-      "signature": "interface Collection<T = Json>",
-      "extends": [],
-      "members": [
-        {
-          "name": "add",
-          "optional": false,
-          "signature": "add(data: T, options?: RequestOptions): Promise<WriteResult>",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "delete",
-          "optional": false,
-          "signature": "delete(id: string, options?: WriteOptions): Promise<void>",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "없는 문서를 지워도 성공합니다."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
-          "name": "get",
-          "optional": false,
-          "signature": "get(id: string, options?: RequestOptions): Promise<Document<T>>",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "list",
-          "optional": false,
-          "signature": "list(options?: ListOptions): Promise<Page<T>>",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "set",
-          "optional": false,
-          "signature": "set(id: string, data: T, options?: WriteOptions): Promise<WriteResult>",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "문서 전체를 교체하거나 새로 만듭니다."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        }
-      ]
-    },
-    {
       "name": "Document",
       "kind": "interface",
-      "summary": [
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "저장된 값과 나루가 관리하는 메타데이터입니다."
-            }
-          ]
-        }
-      ],
+      "summary": [],
       "throws": [],
       "signature": "interface Document<T = Json>",
       "extends": [],
@@ -133,18 +58,8 @@
         {
           "name": "revision",
           "optional": false,
-          "signature": "revision: string",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "동시 수정을 막을 때 그대로 돌려주는 불투명한 값입니다."
-                }
-              ]
-            }
-          ],
+          "signature": "revision: Revision",
+          "summary": [],
           "throws": []
         },
         {
@@ -167,83 +82,82 @@
       ],
       "members": [
         {
-          "name": "count",
+          "name": "filter",
           "optional": true,
-          "signature": "count?: boolean",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "참이면 조건에 맞는 전체 개수를 "
-                },
-                {
-                  "type": "code",
-                  "value": "totalCount"
-                },
-                {
-                  "type": "text",
-                  "value": "에 함께 받습니다."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
-          "name": "cursor",
-          "optional": true,
-          "signature": "cursor?: string | null",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "앞 쪽의 "
-                },
-                {
-                  "type": "code",
-                  "value": "nextCursor"
-                },
-                {
-                  "type": "text",
-                  "value": "를 수정하지 않고 넘기세요."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
-          "name": "limit",
-          "optional": true,
-          "signature": "limit?: number",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "기본 50, 최대 100입니다."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
-          "name": "orderBy",
-          "optional": true,
-          "signature": "orderBy?: OrderBy",
+          "signature": "filter?: Filter",
           "summary": [],
           "throws": []
         },
         {
-          "name": "where",
+          "name": "page",
           "optional": true,
-          "signature": "where?: Filter",
+          "signature": "page?: PageOptions",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "sort",
+          "optional": true,
+          "signature": "sort?: Sort",
+          "summary": [],
+          "throws": []
+        }
+      ]
+    },
+    {
+      "name": "Media",
+      "kind": "interface",
+      "summary": [],
+      "throws": [],
+      "signature": "interface Media",
+      "extends": [],
+      "members": [
+        {
+          "name": "contentType",
+          "optional": false,
+          "signature": "contentType: string",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "createdAt",
+          "optional": false,
+          "signature": "createdAt: string",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "id",
+          "optional": false,
+          "signature": "id: string",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "name",
+          "optional": false,
+          "signature": "name: string",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "size",
+          "optional": false,
+          "signature": "size: number",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "updatedAt",
+          "optional": false,
+          "signature": "updatedAt: string",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "url",
+          "optional": false,
+          "signature": "url: string",
           "summary": [],
           "throws": []
         }
@@ -260,15 +174,25 @@
         {
           "name": "auth",
           "optional": false,
-          "signature": "auth: {\n  session(): Promise<Owner | null>;\n  signIn(options: { collections: string[] }): Promise<void>;\n}",
+          "signature": "auth: {\n  session(): Promise<Owner | null>;\n  signIn(options: { collections: readonly string[] }): Promise<void>;\n}",
           "summary": [],
           "throws": []
         },
         {
-          "name": "collection",
+          "name": "public",
           "optional": false,
-          "signature": "collection<T = Json>(name: string): Collection<T>",
-          "summary": [],
+          "signature": "public: { collection<T = Json>(name: string): PublicCollection<T> }",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Operations that do not use owner credentials."
+                }
+              ]
+            }
+          ],
           "throws": []
         }
       ]
@@ -276,49 +200,22 @@
     {
       "name": "Owner",
       "kind": "interface",
-      "summary": [
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "승인한 컬렉션만 다룰 수 있는 관리자 클라이언트입니다."
-            }
-          ]
-        }
-      ],
+      "summary": [],
       "throws": [],
       "signature": "interface Owner",
       "extends": [],
       "members": [
         {
-          "name": "files",
+          "name": "media",
           "optional": false,
-          "signature": "files: {\n  upload(\n    file: Blob | File,\n    options?: RequestOptions,\n  ): Promise<StoredFile>;\n}",
+          "signature": "media: {\n  upload(file: Blob | File, options?: RequestOptions): Promise<Media>;\n}",
           "summary": [],
-          "throws": []
-        },
-        {
-          "name": "atomic",
-          "optional": false,
-          "signature": "atomic(\n  operations: AtomicOperation[],\n  options?: RequestOptions,\n): Promise<(WriteResult | { success: true })[]>",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "모든 작업을 반영하거나 하나도 반영하지 않습니다."
-                }
-              ]
-            }
-          ],
           "throws": []
         },
         {
           "name": "collection",
           "optional": false,
-          "signature": "collection<T = Json>(name: string): Collection<T>",
+          "signature": "collection<T = Json>(name: string): OwnerCollection<T>",
           "summary": [],
           "throws": []
         },
@@ -327,6 +224,69 @@
           "optional": false,
           "signature": "signOut(): Promise<void>",
           "summary": [],
+          "throws": []
+        },
+        {
+          "name": "transaction",
+          "optional": false,
+          "signature": "transaction(\n  writes: readonly TransactionWrite[],\n  options?: RequestOptions,\n): Promise<void>",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Commits every write or none."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        }
+      ]
+    },
+    {
+      "name": "OwnerCollection",
+      "kind": "interface",
+      "summary": [],
+      "throws": [],
+      "signature": "interface OwnerCollection<T = Json> extends PublicCollection<T>",
+      "extends": [
+        "PublicCollection<T>"
+      ],
+      "members": [
+        {
+          "name": "delete",
+          "optional": false,
+          "signature": "delete(id: string, options?: WriteOptions): Promise<void>",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Deleting a missing document succeeds unless a condition was supplied."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "set",
+          "optional": false,
+          "signature": "set(id: string, data: T, options?: WriteOptions): Promise<WriteResult>",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Replaces the whole document or creates it."
+                }
+              ]
+            }
+          ],
           "throws": []
         }
       ]
@@ -357,6 +317,88 @@
           "name": "totalCount",
           "optional": true,
           "signature": "totalCount?: number",
+          "summary": [],
+          "throws": []
+        }
+      ]
+    },
+    {
+      "name": "PageOptions",
+      "kind": "interface",
+      "summary": [],
+      "throws": [],
+      "signature": "interface PageOptions",
+      "extends": [],
+      "members": [
+        {
+          "name": "after",
+          "optional": true,
+          "signature": "after?: string | null",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Opaque cursor returned by the preceding page."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "includeTotal",
+          "optional": true,
+          "signature": "includeTotal?: boolean",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "size",
+          "optional": true,
+          "signature": "size?: number",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Default 50; maximum 100."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        }
+      ]
+    },
+    {
+      "name": "PublicCollection",
+      "kind": "interface",
+      "summary": [],
+      "throws": [],
+      "signature": "interface PublicCollection<T = Json>",
+      "extends": [],
+      "members": [
+        {
+          "name": "add",
+          "optional": false,
+          "signature": "add(data: T, options?: RequestOptions): Promise<WriteResult>",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "get",
+          "optional": false,
+          "signature": "get(id: string, options?: RequestOptions): Promise<Document<T>>",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "list",
+          "optional": false,
+          "signature": "list(options?: ListOptions): Promise<Page<T>>",
           "summary": [],
           "throws": []
         }
@@ -418,65 +460,6 @@
       ]
     },
     {
-      "name": "StoredFile",
-      "kind": "interface",
-      "summary": [],
-      "throws": [],
-      "signature": "interface StoredFile",
-      "extends": [],
-      "members": [
-        {
-          "name": "contentType",
-          "optional": false,
-          "signature": "contentType: string",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "createdAt",
-          "optional": false,
-          "signature": "createdAt: string",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "id",
-          "optional": false,
-          "signature": "id: string",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "name",
-          "optional": false,
-          "signature": "name: string",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "size",
-          "optional": false,
-          "signature": "size: number",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "updatedAt",
-          "optional": false,
-          "signature": "updatedAt: string",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "url",
-          "optional": false,
-          "signature": "url: string",
-          "summary": [],
-          "throws": []
-        }
-      ]
-    },
-    {
       "name": "WriteOptions",
       "kind": "interface",
       "summary": [],
@@ -487,45 +470,10 @@
       ],
       "members": [
         {
-          "name": "ifAbsent",
+          "name": "condition",
           "optional": true,
-          "signature": "ifAbsent?: boolean",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "문서가 아직 없을 때만 씁니다."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
-          "name": "ifRevision",
-          "optional": true,
-          "signature": "ifRevision?: string",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "읽어 둔 문서의 "
-                },
-                {
-                  "type": "code",
-                  "value": "revision"
-                },
-                {
-                  "type": "text",
-                  "value": "과 같을 때만 씁니다."
-                }
-              ]
-            }
-          ],
+          "signature": "condition?: WriteCondition",
+          "summary": [],
           "throws": []
         }
       ]
@@ -533,17 +481,7 @@
     {
       "name": "WriteResult",
       "kind": "interface",
-      "summary": [
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "쓰기가 반영된 뒤의 서버 메타데이터입니다."
-            }
-          ]
-        }
-      ],
+      "summary": [],
       "throws": [],
       "signature": "interface WriteResult",
       "extends": [],
@@ -565,7 +503,7 @@
         {
           "name": "revision",
           "optional": false,
-          "signature": "revision: string",
+          "signature": "revision: Revision",
           "summary": [],
           "throws": []
         },
@@ -581,25 +519,7 @@
     {
       "name": "NaruError",
       "kind": "class",
-      "summary": [
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "프로그램은 HTTP 상태가 아니라 "
-            },
-            {
-              "type": "code",
-              "value": "code"
-            },
-            {
-              "type": "text",
-              "value": "로 실패를 구분하세요."
-            }
-          ]
-        }
-      ],
+      "summary": [],
       "throws": [],
       "signature": "class NaruError extends Error",
       "extends": [
@@ -637,7 +557,15 @@
               "spans": [
                 {
                   "type": "text",
-                  "value": "진단용 값입니다. 프로그램의 흐름을 이 값에 의존하지 마세요."
+                  "value": "Diagnostic only; application behavior should depend on "
+                },
+                {
+                  "type": "code",
+                  "value": "code"
+                },
+                {
+                  "type": "text",
+                  "value": "."
                 }
               ]
             }
@@ -645,13 +573,6 @@
           "throws": []
         }
       ]
-    },
-    {
-      "name": "AtomicOperation",
-      "kind": "type",
-      "summary": [],
-      "throws": [],
-      "signature": "type AtomicOperation =\n  | { collection: string; data: Json; type: \"add\" }\n  | ({ collection: string; data: Json; id: string; type: \"set\" } & Omit<\n      WriteOptions,\n      \"signal\"\n    >)\n  | ({ collection: string; id: string; type: \"delete\" } & Omit<\n      WriteOptions,\n      \"signal\"\n    >)"
     },
     {
       "name": "Direction",
@@ -669,7 +590,7 @@
           "spans": [
             {
               "type": "text",
-              "value": "최상위 사용자 필드 조건을 최대 5개까지 AND로 묶습니다."
+              "value": "Top-level user fields, combined with AND."
             }
           ]
         }
@@ -685,6 +606,13 @@
       "signature": "type Json =\n  | null\n  | boolean\n  | number\n  | string\n  | Json[]\n  | { [key: string]: Json }"
     },
     {
+      "name": "MetadataField",
+      "kind": "type",
+      "summary": [],
+      "throws": [],
+      "signature": "type MetadataField = \"id\" | \"createdAt\" | \"updatedAt\""
+    },
+    {
       "name": "NaruErrorCode",
       "kind": "type",
       "summary": [],
@@ -692,7 +620,7 @@
       "signature": "type NaruErrorCode =\n  | \"CONFLICT\"\n  | \"AUTH_REQUIRED\"\n  | \"ACCESS_DENIED\"\n  | \"NOT_FOUND\"\n  | \"RATE_LIMITED\"\n  | \"INVALID_REQUEST\"\n  | \"REDIRECT_NOT_REGISTERED\"\n  | \"UNAVAILABLE\""
     },
     {
-      "name": "OrderBy",
+      "name": "Revision",
       "kind": "type",
       "summary": [
         {
@@ -700,37 +628,48 @@
           "spans": [
             {
               "type": "text",
-              "value": "사용자 필드는 이름 그대로, 메타데이터는 "
-            },
-            {
-              "type": "code",
-              "value": "$id"
-            },
-            {
-              "type": "text",
-              "value": ", "
-            },
-            {
-              "type": "code",
-              "value": "$createdAt"
-            },
-            {
-              "type": "text",
-              "value": ", "
-            },
-            {
-              "type": "code",
-              "value": "$updatedAt"
-            },
-            {
-              "type": "text",
-              "value": "입니다."
+              "value": "An opaque concurrency token. Store and return it unchanged."
             }
           ]
         }
       ],
       "throws": [],
-      "signature": "type OrderBy =\n  | [[string, Direction]]\n  | [[string, Direction], [string, Direction]]"
+      "signature": "type Revision = string & { [revisionBrand]: true }"
+    },
+    {
+      "name": "Sort",
+      "kind": "type",
+      "summary": [],
+      "throws": [],
+      "signature": "type Sort =\n  | readonly [readonly [SortField, Direction]]\n  | readonly [\n      readonly [SortField, Direction],\n      readonly [SortField, Direction],\n    ]"
+    },
+    {
+      "name": "SortField",
+      "kind": "type",
+      "summary": [],
+      "throws": [],
+      "signature": "type SortField = string | { metadata: MetadataField }"
+    },
+    {
+      "name": "TransactionWrite",
+      "kind": "type",
+      "summary": [],
+      "throws": [],
+      "signature": "type TransactionWrite =\n  | {\n      collection: string;\n      set: { condition?: WriteCondition; data: Json; id: string };\n    }\n  | {\n      collection: string;\n      delete: { condition?: WriteCondition; id: string };\n    }"
+    },
+    {
+      "name": "WriteCondition",
+      "kind": "type",
+      "summary": [],
+      "throws": [],
+      "signature": "type WriteCondition = { revision: Revision } | { absent: true }"
+    },
+    {
+      "name": "revisionBrand",
+      "kind": "variable",
+      "summary": [],
+      "throws": [],
+      "signature": "const revisionBrand: unique symbol"
     }
   ]
 }

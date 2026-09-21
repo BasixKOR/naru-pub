@@ -124,55 +124,47 @@ async function request(url, { method = "GET", body, token, signal, touches }) {
   return result;
 }
 
-function query({ where, orderBy, limit, cursor, count } = {}) {
+function query({ filter, sort, page = {} } = {}) {
   const parameters = new URLSearchParams();
-  if (where && Object.keys(where).length)
-    parameters.set("where", JSON.stringify(where));
-  if (orderBy) {
-    const fields = orderBy.map(([field, direction]) => {
-      if (typeof field !== "string" || field.startsWith("data."))
-        throw new TypeError("Sort user fields without a data. prefix.");
-      const wire = {
-        $id: "id",
-        $createdAt: "createdAt",
-        $updatedAt: "updatedAt",
-      }[field];
-      if (!wire && field.startsWith("$"))
-        throw new TypeError(`Unknown metadata field: ${field}`);
-      return [wire ?? `data.${field}`, direction];
+  if (filter && Object.keys(filter).length)
+    parameters.set("where", JSON.stringify(filter));
+  if (sort) {
+    const fields = sort.map(([field, direction]) => {
+      if (typeof field === "string") {
+        if (field.startsWith("data."))
+          throw new TypeError("Sort user fields without a data. prefix.");
+        return [`data.${field}`, direction];
+      }
+      const metadata = field?.metadata;
+      if (!["id", "createdAt", "updatedAt"].includes(metadata))
+        throw new TypeError("Unknown metadata sort field.");
+      return [metadata, direction];
     });
     parameters.set("orderBy", JSON.stringify(fields));
   }
-  if (limit !== undefined) parameters.set("limit", String(limit));
-  if (cursor) parameters.set("pageToken", cursor);
-  if (count) parameters.set("includeTotal", "1");
+  if (page.size !== undefined) parameters.set("limit", String(page.size));
+  if (page.after) parameters.set("pageToken", page.after);
+  if (page.includeTotal) parameters.set("includeTotal", "1");
   const text = String(parameters);
   return text ? `?${text}` : "";
 }
 
-const revision = (version) => {
-  if (!Number.isSafeInteger(version) || version < 1)
-    throw new NaruError("Naru returned an invalid revision.", "UNAVAILABLE", {
-      retryable: true,
-    });
-  return `r1.${version.toString(36)}`;
-};
-function version({ ifRevision, ifAbsent } = {}) {
-  if (ifRevision !== undefined && ifAbsent)
-    throw new TypeError("Use either ifRevision or ifAbsent, not both.");
-  if (ifAbsent) return "?ifVersion=0";
-  if (ifRevision === undefined) return "";
-  const match = /^r1\.([0-9a-z]+)$/.exec(ifRevision);
-  const value = match ? Number.parseInt(match[1], 36) : NaN;
-  if (!Number.isSafeInteger(value) || value < 1)
-    throw new TypeError("ifRevision must be a revision returned by Naru.");
-  return `?ifVersion=${value}`;
+function condition(value) {
+  if (value === undefined) return "";
+  if (!value || typeof value !== "object")
+    throw new TypeError("condition must contain revision or absent.");
+  if (Object.keys(value).length !== 1)
+    throw new TypeError("condition must contain only revision or absent.");
+  if (Object.hasOwn(value, "revision")) {
+    if (typeof value.revision !== "string" || !value.revision)
+      throw new TypeError("condition.revision must be returned by Naru.");
+    return `?ifRevision=${encodeURIComponent(value.revision)}`;
+  }
+  if (value.absent === true) return "?ifAbsent=1";
+  throw new TypeError("condition must contain revision or absent.");
 }
 
-const document = ({ version: value, ...result }) => ({
-  ...result,
-  revision: revision(value),
-});
+const document = (result) => result;
 const written = document;
 const page = ({ documents: rows, nextPageToken, total, ...rest }) => ({
   ...rest,
@@ -205,21 +197,30 @@ function documents(root, name, send) {
         touches,
       }).then(written);
     },
-    set(id, data, { signal, ...condition } = {}) {
-      return send(`${path}/${segment(id)}${version(condition)}`, {
+    set(id, data, { signal, condition: expected } = {}) {
+      return send(`${path}/${segment(id)}${condition(expected)}`, {
         method: "PUT",
         body: { data },
         signal,
         touches,
       }).then(written);
     },
-    async delete(id, { signal, ...condition } = {}) {
-      await send(`${path}/${segment(id)}${version(condition)}`, {
+    async delete(id, { signal, condition: expected } = {}) {
+      await send(`${path}/${segment(id)}${condition(expected)}`, {
         method: "DELETE",
         signal,
         touches,
       });
     },
+  });
+}
+
+function publicDocuments(root, name) {
+  const collection = documents(root, name, request);
+  return Object.freeze({
+    get: collection.get,
+    list: collection.list,
+    add: collection.add,
   });
 }
 
@@ -311,34 +312,32 @@ function owner(context, token, expiresAt) {
   };
   return Object.freeze({
     collection: (name) => documents(root, name, send),
-    async atomic(operations, { signal } = {}) {
+    async transaction(writes, { signal } = {}) {
       const touches = [
-        ...new Set(operations.map((item) => `${root}/${item.collection}`)),
+        ...new Set(writes.map((item) => `${root}/${item.collection}`)),
       ];
-      const wire = operations.map(({ ifRevision, ifAbsent, ...operation }) => {
-        const search = version({ ifRevision, ifAbsent });
+      const operations = writes.map(({ collection, set, delete: remove }) => {
+        const write = set ?? remove;
+        if (!write || Boolean(set) === Boolean(remove))
+          throw new TypeError("Each transaction write must set or delete.");
+        segment(collection);
+        segment(write.id);
         return {
-          ...operation,
-          ...(search
-            ? {
-                ifVersion: Number(
-                  new URLSearchParams(search.slice(1)).get("ifVersion"),
-                ),
-              }
-            : {}),
+          type: set ? "set" : "delete",
+          collection,
+          id: write.id,
+          ...(set ? { data: set.data } : {}),
+          ...(write.condition ? { condition: write.condition } : {}),
         };
       });
-      const result = await send(`${root}/_batch`, {
+      await send(`${root}/_batch`, {
         method: "POST",
-        body: { operations: wire },
+        body: { operations },
         signal,
         touches,
       });
-      return result.results.map((item) =>
-        "version" in item ? written(item) : item,
-      );
     },
-    files: Object.freeze({
+    media: Object.freeze({
       async upload(source, { signal } = {}) {
         const file = await shrink(source);
         const authorization = await send(`${root}/_files`, {
@@ -505,7 +504,9 @@ async function ownerSession(context) {
 export function createNaru(options) {
   const context = target(options);
   return Object.freeze({
-    collection: (name) => documents(context.root, name, request),
+    public: Object.freeze({
+      collection: (name) => publicDocuments(context.root, name),
+    }),
     auth: Object.freeze({
       session: () => ownerSession(context),
       signIn: ({ collections }) => signIn(context, collections),

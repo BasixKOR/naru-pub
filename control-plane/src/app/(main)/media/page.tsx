@@ -65,7 +65,7 @@ export default async function MediaPage() {
         <pre className="overflow-x-auto bg-muted p-3 text-sm">
           {`const naru = createNaru();
 const owner = await naru.auth.session();
-const image = await owner.files.upload(input.files[0]);
+const image = await owner.media.upload(input.files[0]);
 // image.url 을 문서에 저장해 두고 그대로 사용합니다.
 // 목록과 삭제는 이 미디어 라이브러리에서 관리합니다.`}
         </pre>

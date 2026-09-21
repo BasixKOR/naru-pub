@@ -40,7 +40,7 @@ Create a collection in the control plane, choose its permissions, then use this 
     NaruError,
   } from "https://naru.pub/sdk/1.0.0/naru-data.js";
   const naru = createNaru();
-  const entries = naru.collection("guestbook");
+  const entries = naru.public.collection("guestbook");
 
   try {
     const { id } = await entries.add({ name: "Visitor", message: "Hello!" });
@@ -48,7 +48,7 @@ Create a collection in the control plane, choose its permissions, then use this 
     // set() and delete() require owner access or full public write permission.
     let cursor = null;
     do {
-      const page = await entries.list({ limit: 20, cursor });
+      const page = await entries.list({ page: { size: 20, after: cursor } });
       render(page.documents);
       cursor = page.nextCursor;
     } while (cursor);
@@ -117,7 +117,7 @@ Minimal editor-page wiring:
 </script>
 ```
 
-The SDK discovers the site's public Client ID from the exact registered callback URL. The requested collections must be a subset of the registration. Handles from `naru.collection()` stay public after signing in; only `owner.collection()` uses owner authority. Tokens permit reading, creating, replacing and deleting documents in those collections, including private documents. They are tied to collection IDs so deleting and recreating a collection does not transfer old grants.
+The SDK discovers the site's public Client ID from the exact registered callback URL. The requested collections must be a subset of the registration. Handles from `naru.public.collection()` never use owner credentials; only `owner.collection()` uses owner authority. Tokens permit reading, creating, replacing and deleting documents in those collections, including private documents. They are tied to collection IDs so deleting and recreating a collection does not transfer old grants.
 
 Authentication uses random state and mandatory S256 PKCE. The verifier and state live in tab-scoped sessionStorage for at most ten minutes; authorization codes expire after 60 seconds and are single-use, including concurrent exchanges. The server stores only code/token hashes. Each registered admin page has a control-plane token lifetime of 1-1440 whole minutes (default 1440). Each sign-in issues one opaque admin token capped by this setting, the duration displayed at consent, and the approving Naru session. The platform maximum remains 24 hours. Session storage, restoration, and expiry are SDK implementation details so the public interface can later adopt safer renewal without exposing token deadlines.
 
@@ -133,7 +133,7 @@ Unversioned SDK URLs are not served. Existing `/sdk/naru-data.js` imports must b
 
 SDK versioning does not itself version the backend protocol. Version 1.0.0 uses `/api/data/:site`; preserve existing public CRUD behavior when extending it. Breaking server changes should introduce a separate API version.
 
-The 1.0.0 SDK is deliberately small. Its runtime exports are only `createNaru` and `NaruError`. A client has `collection()` and `auth`; an owner has `collection()`, `atomic()`, `files.upload()` and `signOut()`. Media listing and deletion remain in the control panel. Features are added when a site needs them, not in advance.
+The 1.0.0 SDK is deliberately small. Its runtime exports are only `createNaru` and `NaruError`. A client has `public.collection()` and `auth`; an owner has `collection()`, `transaction()`, `media.upload()` and `signOut()`. Media listing and deletion remain in the control panel. Features are added when a site needs them, not in advance.
 
 During 1.0.0 development the SDK dropped `createDatabase`, per-collection `parse`/`map`, `schemas`, `update` merge patches and `unset`, `count()`, `all()`, string `orderBy` with `direction`, `fresh`, `timeoutMs`, `createRequestChannel`, session events, client-side request and response validation, upload progress, image tuning options, and the file `get`, `update` and `usage` methods. The server removed the matching endpoints and parameters.
 
@@ -141,8 +141,8 @@ During 1.0.0 development the SDK dropped `createDatabase`, per-collection `parse
 
 This is the current SDK/control-plane wire format, not the browser application's
 public interface. The SDK sends `Accept: application/vnd.naru.data.v1+json` and
-translates these transport names and numeric versions into public cursors,
-revisions, and semantic errors. Server revisions may change this table while the
+translates transport query names while the server turns private numeric versions
+into opaque public revisions and semantic errors. Server revisions may change this table while the
 SDK surface remains stable.
 
 Public/website-token root: `/api/data/:site`. Control-plane root: `/api/account/database` (site derived from the session). Collection management is restricted to the control-plane root.
@@ -156,8 +156,8 @@ Public/website-token root: `/api/data/:site`. Control-plane root: `/api/account/
 | GET    | `/:collection?limit=50&pageToken=token` | `{ documents, nextPageToken, total? }`; accepts sorting and filters |
 | POST   | `/:collection`                          | `{ data }` creates document; returns the write result               |
 | GET    | `/:collection/:id`                      | `{ document }`                                                      |
-| PUT    | `/:collection/:id?ifVersion=`           | `{ data }` replaces document; returns the write result              |
-| DELETE | `/:collection/:id?ifVersion=`           | `{ success: true }`                                                 |
+| PUT    | `/:collection/:id?ifRevision=&ifAbsent=` | `{ data }` replaces document; returns the write result             |
+| DELETE | `/:collection/:id?ifRevision=`          | `{ success: true }`                                                 |
 | POST   | `/_batch`                               | Owner-only atomic `{ operations }`; returns `{ results }`           |
 | GET    | `/_files?limit=50&pageToken=&where=`    | Owner-only `{ files, nextPageToken }`, newest first                 |
 | GET    | `/_files?usage=1`                       | Control panel only: `{ usage }`                                     |
@@ -165,7 +165,7 @@ Public/website-token root: `/api/data/:site`. Control-plane root: `/api/account/
 | PUT    | `/_files/:id`                           | Owner-only finalize; verifies the stored bytes                      |
 | DELETE | `/_files/:id`                           | `{ success: true }`                                                 |
 
-A write result is `{ id, version, createdAt, updatedAt }`; `_batch` accepts `add`, `set` and `delete` operations and returns one result per operation in order, with `{ success: true }` for deletes. A list accepts `where` (URL-encoded JSON), `orderBy` (URL-encoded JSON array of one or two `[field, direction]` pairs), `limit`, `pageToken` and `includeTotal=1`. `/_files` accepts `limit` and `pageToken` and always lists newest first. An upload authorization takes `{ name, contentType, size }` and returns `{ id, uploadUrl, headers }`: PUT the bytes to `uploadUrl` with those headers, then finalize with `PUT /_files/:id`. A file is `{ id, name, contentType, size, url, createdAt, updatedAt }`. The public route does not accept `PATCH`.
+A public write result is `{ id, revision, createdAt, updatedAt }`; `_batch` accepts the SDK's semantic set/delete writes and returns an ignored internal result payload. A list accepts private transport parameters `where`, `orderBy`, `limit`, `pageToken` and `includeTotal=1`. An upload authorization takes `{ name, contentType, size }` and returns `{ id, uploadUrl, headers }`: PUT the bytes to `uploadUrl` with those headers, then finalize with `PUT /_files/:id`. A file is `{ id, name, contentType, size, url, createdAt, updatedAt }`. The public route does not accept `PATCH`.
 
 All JSON request bodies require `Content-Type: application/json`. Errors return `{ error }` with an HTTP status (400 invalid input, 401 no admin session, 403 denied, 404 missing, 405 unsupported method, 409 duplicate/quota/conflict, 413 oversized, 415 wrong content type, 429 rate limit). Public preflight needs no authentication. Errors, writes, and authenticated reads are not cached; anonymous reads from `world`-readable collections may use the short shared cache described below.
 
@@ -192,7 +192,7 @@ There are at most 20 registrations per site, 20 pending codes and 50 live tokens
 - PostgreSQL JSONB semantics apply, including JavaScript number precision and no significant object key order.
 - Owner-row locks serialize permission checks, writes, and quota checks across server processes. Reads take no such lock. Deletes free quota; account deletion cascades through collections and documents.
 - A site holds at most 10,000 media files: the byte quota alone does not bound row count, since the smallest accepted file is one byte.
-- Each individual replacement or delete is atomic. `owner.atomic()` makes all of its operations one atomic server transaction, and creates are insert-only. Writes are last-write-wins when no condition is supplied; `ifRevision` rejects stale writes and `ifAbsent` guards creation. There are no realtime subscriptions, offline persistence, custom indexes, arbitrary query expressions, per-document rules, or visitor accounts in v1.
+- Each individual replacement or delete is atomic. `owner.transaction()` makes its ID-addressed sets and deletes one atomic server transaction. Writes are last-write-wins when no condition is supplied; `condition.revision` rejects stale writes and `condition.absent` guards creation. There are no realtime subscriptions, offline persistence, custom indexes, arbitrary query expressions, per-document rules, or visitor accounts in v1.
 
 ## File uploads (SDK 1.0.0)
 
@@ -202,7 +202,7 @@ Naru to verify the stored size and content type before returning a ready file.
 Database documents should store `file.url`, not base64 data.
 
 ```js
-const image = await owner.files.upload(fileInput.files[0], {
+const image = await owner.media.upload(fileInput.files[0], {
   signal: abortController.signal,
 });
 await owner.collection("posts").set("hello", {
@@ -302,40 +302,40 @@ The Korean guides are served publicly at `/docs` (index), `/docs/database` and `
 
 ```js
 const naru = createNaru();
-const posts = naru.collection("posts");
+const posts = naru.public.collection("posts");
 const query = {
-  orderBy: [
+  sort: [
     ["publishedOn", "desc"],
-    ["$createdAt", "desc"],
+    [{ metadata: "createdAt" }, "desc"],
   ],
-  limit: 20,
+  page: { size: 20 },
 };
-const first = await posts.list({ ...query, count: true });
-const next = await posts.list({ ...query, cursor: first.nextCursor });
+const first = await posts.list({ ...query, page: { ...query.page, includeTotal: true } });
+const next = await posts.list({ ...query, page: { ...query.page, after: first.nextCursor } });
 ```
 
-`orderBy` is always a list of one or two `[field, direction]` pairs. User fields are named directly; metadata uses `$id`, `$createdAt`, or `$updatedAt`. `direction` is `asc` or `desc`. The document ID is appended automatically as the final tie-breaker. Without `orderBy`, a list reads in ID order.
+`sort` is always a list of one or two `[field, direction]` pairs. User fields are named directly; metadata uses `{ metadata: "id" | "createdAt" | "updatedAt" }`. `direction` is `asc` or `desc`. The document ID is appended automatically as the final tie-breaker. Without `sort`, a list reads in ID order.
 
 Metadata timestamp ties use document ID in the last direction. JSON-field values use PostgreSQL JSONB ordering; missing fields sort at the same position as JSON null, followed by strings and then numbers. The metadata orders have composite collection/time/ID indexes; JSON-field sorting scans the narrowed collection and has no per-field index.
 
 `get` and `list` return `createdAt` as well as `updatedAt`. Server metadata is camelCase throughout the API; the underlying columns stay snake_case. Creation time is assigned by the server, preserved on replacement, and cannot be changed by fields in `data`. The migration backfills existing documents from their recorded modification time; their original creation time is unknown.
 
-Pass `nextCursor` unchanged as `cursor` with the same collection, ordering, and filters. Cursors are opaque, query-bound continuation state: applications must not inspect or construct them. The SDK and server may change their representation. They are not credentials; read permissions are checked on every request. Changing page size is allowed.
+Pass `nextCursor` unchanged as `page.after` with the same collection, ordering, and filters. Cursors are opaque, query-bound continuation state: applications must not inspect or construct them. The SDK and server may change their representation. They are not credentials; read permissions are checked on every request. Changing page size is allowed.
 
-A null cursor marks the end, and passing `null` as `cursor` reads the first page. Cache prior pages or their starting cursors for a Previous button. There are no page numbers or offsets. `count: true` returns `totalCount` with the page; for only the number, ask for `limit: 1` with it. Reset the cursor and displayed results when switching sort order or filters. Pagination is not a snapshot: newly inserted records before the cursor require a refresh; changing a sort value during traversal can skip or repeat a record.
+A null cursor marks the end, and passing `null` as `page.after` reads the first page. Cache prior pages or their starting cursors for a Previous button. There are no page numbers or offsets. `page.includeTotal: true` returns `totalCount`; for only the number, use `page.size: 1`. Reset the cursor and displayed results when switching sort order or filters. Pagination is not a snapshot across requests: newly inserted records before the cursor require a refresh; changing a sort value during traversal can skip or repeat a record.
 
 Cancel a superseded read with a standard `AbortController`, passing its `signal`; the request then rejects with the browser's own `AbortError`.
 
 ## Equality and range filters with automatic indexes
 
 ```js
-const page = await naru.collection("posts").list({
-  where: {
+const page = await naru.public.collection("posts").list({
+  filter: {
     category: "일상",
     date: { gte: "2026-09-01", lt: "2026-10-01" },
   },
-  orderBy: [["date", "desc"]],
-  limit: 20,
+  sort: [["date", "desc"]],
+  page: { size: 20 },
 });
 ```
 
@@ -353,7 +353,7 @@ Create `posts` (world/admin), `guestbook` (world/create), and **`drafts` (admin/
 
 The public list filters by exact `category`. The editor loads paginated posts/drafts, edits documents while preserving other JSON fields, saves private drafts, publishes, and deletes the selected document after confirmation. Local tab storage preserves the editor through the login redirect; explicit server draft saving persists across sessions. Signing out clears the editor and local draft.
 
-Draft and public copies share an ID. Saving a private draft does not unpublish or change an existing public post. Publication uses `owner.atomic()` to write the post and remove its draft atomically; failure preserves the draft and leaves the public post unchanged. Deletion affects only the selected collection. An editor sends the opaque revision it read as `ifRevision` to detect a concurrent change and receive `CONFLICT` instead of overwriting it. Guestbook moderation remains in the control panel.
+Draft and public copies share an ID. Saving a private draft does not unpublish or change an existing public post. Publication uses `owner.transaction()` to write the post and remove its draft atomically; failure preserves the draft and leaves the public post unchanged. Deletion affects only the selected collection. An editor returns the opaque revision it read as `condition.revision` to detect a concurrent change and receive `CONFLICT` instead of overwriting it. Guestbook moderation remains in the control panel.
 
 ### Website identity and admin tokens
 
@@ -377,8 +377,8 @@ Data is sent with `JSON.stringify`, so values it drops or coerces (undefined,
 functions, `Date`) are stored the way it serializes them. Convert dates to
 strings explicitly. `set()` replaces the entire document; there is no merge.
 Each successful document write returns an opaque `revision`. Pass a previously
-read revision as `ifRevision` to `set()` or `delete()` to reject a stale write
-with `code: "CONFLICT"`; `ifAbsent: true` asserts that the document does not
+read revision as `condition.revision` to `set()` or `delete()` to reject a stale write
+with `code: "CONFLICT"`; `condition: { absent: true }` asserts that the document does not
 exist. Applications must not parse or construct revisions.
 
 A failed operation throws `NaruError` with a stable semantic `code` such as

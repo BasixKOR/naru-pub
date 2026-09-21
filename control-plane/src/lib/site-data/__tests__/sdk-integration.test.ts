@@ -195,11 +195,12 @@ integration("SDK and data API contract", () => {
   });
 
   test("CRUD preserves JSON, metadata, revisions, and semantic failures", async () => {
-    const posts = naru.collection("crud");
+    const posts = owner.collection("crud");
     const added = await posts.add({
       title: "한글",
       nested: { value: null },
       tags: [1, true],
+      version: 7,
     });
     expect(added).toEqual({
       id: expect.any(String),
@@ -212,13 +213,18 @@ integration("SDK and data API contract", () => {
     const first = await posts.get(added.id);
     expect(first).toEqual({
       ...added,
-      data: { title: "한글", nested: { value: null }, tags: [1, true] },
+      data: {
+        title: "한글",
+        nested: { value: null },
+        tags: [1, true],
+        version: 7,
+      },
     });
     expect(
       await posts.set(
         added.id,
         { replaced: true },
-        { ifRevision: first.revision },
+        { condition: { revision: first.revision } },
       ),
     ).toEqual({
       id: added.id,
@@ -230,13 +236,19 @@ integration("SDK and data API contract", () => {
     expect(replaced.createdAt).toBe(first.createdAt);
     expect(replaced.data).toEqual({ replaced: true });
     await expect(
-      posts.set(added.id, null, { ifRevision: "r1.1" }),
+      posts.set(added.id, null, {
+        condition: { revision: "r1.1" as typeof first.revision },
+      }),
     ).rejects.toMatchObject({ status: 409, code: "CONFLICT" });
     await expect(
-      posts.delete(added.id, { ifRevision: "r1.1" }),
+      posts.delete(added.id, {
+        condition: { revision: "r1.1" as typeof first.revision },
+      }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
     expect(
-      await posts.delete(added.id, { ifRevision: "r1.2" }),
+      await posts.delete(added.id, {
+        condition: { revision: "r1.2" as typeof first.revision },
+      }),
     ).toBeUndefined();
     await expect(posts.get(added.id)).rejects.toMatchObject({
       code: "NOT_FOUND",
@@ -250,86 +262,82 @@ integration("SDK and data API contract", () => {
     });
     await patch.arrayBuffer();
     expect(patch.status).toBe(405);
-    await posts.set("new", null, { ifAbsent: true });
+    await posts.set("new", null, { condition: { absent: true } });
     await expect(
-      posts.set("new", false, { ifAbsent: true }),
+      posts.set("new", false, { condition: { absent: true } }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
   test("filtered pages and totals use the same real query contract", async () => {
-    const feed = naru.collection<{ rank: number; visible: boolean }>("feed");
+    const feed = owner.collection<{ rank: number; visible: boolean }>("feed");
     for (let rank = 1; rank <= 5; rank++)
       await feed.set(`post_${rank}`, { rank, visible: rank !== 3 });
     const query = {
-      where: { rank: { gte: 2 }, visible: true },
-      orderBy: [["rank", "desc"]] as [[string, "desc"]],
+      filter: { rank: { gte: 2 }, visible: true },
+      sort: [["rank", "desc"]] as [[string, "desc"]],
     };
-    const first = await feed.list({ ...query, limit: 2, count: true });
+    const first = await feed.list({
+      ...query,
+      page: { size: 2, includeTotal: true },
+    });
     expect(first.totalCount).toBe(3);
     expect(first.documents.map((d) => d.id)).toEqual(["post_5", "post_4"]);
     expect(first.nextCursor).toEqual(expect.any(String));
     const second = await feed.list({
       ...query,
-      limit: 2,
-      cursor: first.nextCursor,
+      page: { size: 2, after: first.nextCursor },
     });
     expect(second.documents.map((d) => d.id)).toEqual(["post_2"]);
     expect(second.nextCursor).toBeNull();
     await expect(
       feed.list({
         ...query,
-        where: { visible: false },
-        cursor: first.nextCursor,
+        filter: { visible: false },
+        page: { after: first.nextCursor },
       }),
     ).rejects.toMatchObject({ status: 400 });
     // An empty filter and a null token are the first, unfiltered page.
     const everything = await feed.list({
-      where: {},
-      cursor: null,
-      count: true,
+      filter: {},
+      page: { after: null, includeTotal: true },
     });
     expect(everything.totalCount).toBe(5);
   });
 
-  test("owner batches return operation results and roll back conflicts across collections", async () => {
-    await expect(naru.collection("private").list()).rejects.toMatchObject({
+  test("owner transactions return void and roll back conflicts across collections", async () => {
+    await expect(
+      naru.public.collection("private").list(),
+    ).rejects.toMatchObject({
       code: "ACCESS_DENIED",
     });
-    const results = await owner.atomic([
+    const privateWrite = await owner
+      .collection("private")
+      .add({ secret: true });
+    const result = await owner.transaction([
       {
-        type: "set",
         collection: "atomic",
-        id: "one",
-        data: { original: true },
+        set: { id: "one", data: { original: true } },
       },
-      { type: "add", collection: "private", data: { secret: true } },
-      { type: "delete", collection: "atomic", id: "missing" },
+      { collection: "atomic", delete: { id: "missing" } },
     ]);
-    const stamps = {
-      revision: "r1.1",
-      createdAt: expect.any(String),
-      updatedAt: expect.any(String),
-    };
-    expect(results).toEqual([
-      { id: "one", ...stamps },
-      { id: expect.any(String), ...stamps },
-      { success: true },
-    ]);
-    const privateId = (results[1] as { id: string }).id;
+    expect(result).toBeUndefined();
+    const privateId = privateWrite.id;
     await expect(
-      owner.atomic([
+      owner.transaction([
         {
-          type: "set",
           collection: "atomic",
-          id: "one",
-          data: { changed: true },
-          ifRevision: "r1.1",
+          set: {
+            id: "one",
+            data: { changed: true },
+            condition: { revision: "r1.1" as typeof privateWrite.revision },
+          },
         },
         {
-          type: "delete",
           collection: "private",
-          id: privateId,
-          ifRevision: "r1.9",
+          delete: {
+            id: privateId,
+            condition: { revision: "r1.9" as typeof privateWrite.revision },
+          },
         },
       ]),
     ).rejects.toMatchObject({ status: 409, code: "CONFLICT" });
@@ -343,7 +351,7 @@ integration("SDK and data API contract", () => {
   });
 
   test("the website media surface contains only upload", () => {
-    expect(Object.keys(owner.files)).toEqual(["upload"]);
+    expect(Object.keys(owner.media)).toEqual(["upload"]);
   });
 
   // Public reads are the request a site makes most, and letting a shared cache

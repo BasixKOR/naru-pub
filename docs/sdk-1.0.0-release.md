@@ -42,11 +42,11 @@ The blog tests exercise public browsing/guestbook and admin draft/publishing flo
   non-snapshot pagination, and no automatic write retries.
 - Confirm the frozen shapes one last time, since a new versioned directory is
   the only way to change them afterwards. The surface is deliberately minimal:
-  the runtime exports `createNaru` and `NaruError`; a client has `collection()`
-  and `auth`; an owner has `collection()`, `atomic()`, `files.upload()` and
+  the runtime exports `createNaru` and `NaruError`; a client has `public.collection()`
+  and `auth`; an owner has `collection()`, `transaction()`, `media.upload()` and
   `signOut()`. Server
   metadata is camelCase (`createdAt`/`updatedAt`), `add` and `set` return
-  `{ id, revision, createdAt, updatedAt }`, `orderBy` is always a list of
+  `{ id, revision, createdAt, updatedAt }`, `sort` is always a list of
   `[field, direction]` pairs, and pagination uses opaque cursors. Anything added later is added to the server
   contract too, so add it only when a site needs it.
 - Obtain the owner's instruction to freeze 1.0.0. Then remove its development

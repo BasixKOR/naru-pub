@@ -98,9 +98,8 @@ async function loadList(reset = true) {
   }
   listKind = kind;
   const page = await owner.collection(kind).list({
-    limit: 20,
-    orderBy: [["$updatedAt", "desc"]],
-    cursor,
+    sort: [[{ metadata: "updatedAt" }, "desc"]],
+    page: { size: 20, after: cursor },
   });
   for (const doc of page.documents) {
     const row = element("div", "", "manage-row");

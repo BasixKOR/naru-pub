@@ -41,10 +41,10 @@ SDK 1.0.0을 사용합니다. 빌드나 패키지 설치가 필요 없습니다.
 
 ## 필터와 페이지 이동
 
-글과 방명록은 `orderBy: [["$createdAt", "desc"]]`, 관리자 목록은 `orderBy: [["$updatedAt", "desc"]]`로 정렬합니다.
-같은 시각이면 ID 내림차순입니다. 공개 목록의 분류 필터는 `where: { category: "일상" }`로 정확히 비교합니다.
-더 보기에는 같은 where/orderBy와 응답의 `nextCursor`를 `cursor`로 보냅니다. 마지막 쪽의 `null`을 그대로 넘기면 첫 쪽이 되므로 따로 가를 필요가 없습니다.
-분류를 바꾸면 목록과 커서를 초기화합니다. 빈 분류는 `where: {}`, 곧 전체 목록입니다.
+글과 방명록은 `sort: [[{ metadata: "createdAt" }, "desc"]]`, 관리자 목록은 `sort: [[{ metadata: "updatedAt" }, "desc"]]`로 정렬합니다.
+같은 시각이면 ID 내림차순입니다. 공개 목록의 분류 필터는 `filter: { category: "일상" }`로 정확히 비교합니다.
+더 보기에는 같은 filter/sort와 응답의 `nextCursor`를 `page.after`로 보냅니다. 마지막 쪽의 `null`을 그대로 넘기면 첫 쪽이 되므로 따로 가를 필요가 없습니다.
+분류를 바꾸면 목록과 커서를 초기화합니다. 빈 분류는 `filter: {}`, 곧 전체 목록입니다.
 JSON 필터와 시각 정렬 인덱스는 나루가 자동으로 관리합니다.
 createdAt은 서버가 정하며 수정해도 유지됩니다. 기존 문서는 마이그레이션 당시 updatedAt으로 채워집니다.
 

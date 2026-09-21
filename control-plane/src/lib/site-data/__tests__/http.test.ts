@@ -37,6 +37,18 @@ test("public requests ignore even valid owner cookies", async () => {
   expect(response.headers.get("access-control-allow-credentials")).toBeNull();
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect(response.headers.get("naru-data-protocol")).toBe("1");
+  expect(await response.json()).toMatchObject({ id: "one", revision: "r1.1" });
+});
+
+test("public conditional writes decode opaque revisions at the server boundary", async () => {
+  await dataRequest(
+    new Request("https://naru.pub/api/data/alice/posts/one?ifRevision=r1.a", {
+      method: "DELETE",
+    }),
+    ["posts", "one"],
+    "alice",
+  );
+  expect(execute.mock.calls[0][0].ifVersion).toBe(10);
 });
 test.each(["https://alice.naru.pub", "https://evil.test", "null", null])(
   "admin writes reject origin %s before auth",

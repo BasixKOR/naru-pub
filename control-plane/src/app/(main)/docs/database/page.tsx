@@ -85,35 +85,35 @@ export default function DatabaseDocs() {
                     title: "글과 작품을 공개하기",
                     collection: "posts · 공개 읽기 / 관리자 쓰기",
                     body: "방문자는 목록과 글을 읽고, 소유자만 새 글을 공개하거나 고칩니다.",
-                    code: 'naru.collection("posts").list({ orderBy: [["$createdAt", "desc"]] })',
+                    code: 'naru.public.collection("posts").list({ sort: [[{ metadata: "createdAt" }, "desc"]] })',
                   },
                   {
                     id: "recipe-guestbook",
                     title: "방명록과 댓글 받기",
                     collection: "guestbook · 공개 읽기 / 공개 생성만",
                     body: "방문자는 새 인사를 남길 수 있지만 기존 인사를 고치거나 지울 수 없습니다.",
-                    code: 'naru.collection("guestbook").add({ name, message })',
+                    code: 'naru.public.collection("guestbook").add({ name, message })',
                   },
                   {
                     id: "recipe-submissions",
                     title: "비공개 문의와 신청 받기",
                     collection: "submissions · 관리자 읽기 / 공개 생성만",
                     body: "방문자가 보낸 내용은 목록에 공개되지 않고 소유자만 제어판이나 관리자 페이지에서 읽습니다.",
-                    code: 'naru.collection("submissions").add({ email, message })',
+                    code: 'naru.public.collection("submissions").add({ email, message })',
                   },
                   {
                     id: "recipe-drafts",
                     title: "초안을 저장한 뒤 공개하기",
                     collection: "drafts · 관리자 읽기 / 관리자 쓰기",
                     body: "초안은 비공개로 두고, 공개할 때 posts 저장과 drafts 삭제를 한 batch로 묶습니다.",
-                    code: 'owner.atomic([{ type: "set", ...post }, { type: "delete", ...draft }])',
+                    code: 'owner.transaction([{ collection: "posts", set: post }, { collection: "drafts", delete: draft }])',
                   },
                   {
                     id: "recipe-media",
                     title: "글에 이미지와 파일 붙이기",
                     collection: "Naru Media · 관리자 업로드",
                     body: "파일을 미디어 저장소에 올리고 반환된 공개 URL이나 ID만 문서에 저장합니다.",
-                    code: "owner.files.upload(file)",
+                    code: "owner.media.upload(file)",
                   },
                 ].map((recipe) => (
                   <section
@@ -263,7 +263,7 @@ export default function DatabaseDocs() {
                 처럼 클라이언트를 만들 때 로그인 이름을 한 번만 넘기세요. 공개
                 작업에는 API 키가 필요 없습니다.
               </p>
-              <Code language="html">{`<script type="module">\n  import { createNaru } from "https://naru.pub/sdk/1.0.0/naru-data.js";\n  const naru = createNaru();\n  const posts = naru.collection("posts");\n  const query = { orderBy: [["$createdAt", "desc"]], limit: 20 };\n  const page = await posts.list(query);\n  for (const document of page.documents) {\n    console.log(document.id, document.data, document.createdAt);\n  }\n  const next = await posts.list({ ...query, cursor: page.nextCursor });\n  await naru.collection("guestbook").add({\n    name: "방문자", message: "잘 읽었습니다!"\n  });\n</script>`}</Code>
+              <Code language="html">{`<script type="module">\n  import { createNaru } from "https://naru.pub/sdk/1.0.0/naru-data.js";\n  const naru = createNaru();\n  const posts = naru.public.collection("posts");\n  const query = { sort: [[{ metadata: "createdAt" }, "desc"]], page: { size: 20 } };\n  const page = await posts.list(query);\n  for (const document of page.documents) {\n    console.log(document.id, document.data, document.createdAt);\n  }\n  const next = await posts.list({ ...query, page: { ...query.page, after: page.nextCursor } });\n  await naru.public.collection("guestbook").add({\n    name: "방문자", message: "잘 읽었습니다!"\n  });\n</script>`}</Code>
               <p>
                 현재 제공 버전은 <strong>1.0.0</strong>이며 이 버전 안에서 계속
                 개선합니다. 꼭 필요한 기능만 제공하고, 필요해지면 더합니다. 버전
@@ -291,7 +291,7 @@ export default function DatabaseDocs() {
                         "문서 한 개 → { id, data, revision, createdAt, updatedAt }. 없으면 NOT_FOUND",
                       ],
                       [
-                        "list({ where, orderBy, limit, cursor, count })",
+                        "list({ filter, sort, page })",
                         "{ documents, nextCursor, totalCount? }. 기본 50개, 최대 100개. count이면 조건에 맞는 전체 개수도 함께",
                       ],
                       [
@@ -299,11 +299,11 @@ export default function DatabaseDocs() {
                         "서버 ID로 새 문서 생성 → { id, revision, createdAt, updatedAt }",
                       ],
                       [
-                        "set(id, data, { ifRevision, ifAbsent })",
+                        "set(id, data, { condition })",
                         "지정 ID로 생성 또는 전체 교체 → { id, revision, createdAt, updatedAt }",
                       ],
                       [
-                        "delete(id, { ifRevision })",
+                        "delete(id, { condition })",
                         "문서 삭제. 없는 문서를 지워도 성공합니다",
                       ],
                     ].map(([call, result]) => (
@@ -321,23 +321,24 @@ export default function DatabaseDocs() {
                 필터와 자동 인덱스
               </h3>
               <p>
-                <code>where</code>로 JSON의 최상위 필드를 정확히 비교할 수
+                <code>filter</code>로 JSON의 최상위 필드를 정확히 비교할 수
                 있습니다. 여러 조건은 모두 만족해야 합니다(AND). 예를 들어
                 분류별 글이나 특정 글에 달린 댓글을 찾을 수 있습니다.
               </p>
               <Code>{`const query = {
-  where: { category: "일상" },
-  orderBy: [["$createdAt", "desc"]],
-  limit: 20,
+  filter: { category: "일상" },
+  sort: [[{ metadata: "createdAt" }, "desc"]],
+  page: { size: 20 },
 };
-const page = await naru.collection("posts").list(query);
-const next = await naru.collection("posts").list({
-  ...query, cursor: page.nextCursor,
+const posts = naru.public.collection("posts");
+const page = await posts.list(query);
+const next = await posts.list({
+  ...query, page: { ...query.page, after: page.nextCursor },
 });
 
 // comments 컬렉션을 따로 만든 경우:
-const comments = await naru.collection("comments").list({
-  where: { postId: "hello", approved: true },
+const comments = await naru.public.collection("comments").list({
+  filter: { postId: "hello", approved: true },
 });`}</Code>
               <p>
                 필드 이름은 영문·숫자·밑줄·하이픈 1~64자이며, 값은
@@ -353,14 +354,14 @@ const comments = await naru.collection("comments").list({
                 문서를 받아 걸러내는 대신 필요한 구간만 요청할 수 있습니다.
               </p>
               <Code>{`// 2026년 9월에 쓴 글만 가져옵니다.
-const page = await naru.collection("posts").list({
-  where: { date: { gte: "2026-09-01", lte: "2026-09-30" } },
-  orderBy: [["date", "asc"]],
+const page = await naru.public.collection("posts").list({
+  filter: { date: { gte: "2026-09-01", lte: "2026-09-30" } },
+  sort: [["date", "asc"]],
 });
 
 // 등호 조건과 범위 조건을 함께 쓸 수 있습니다.
-const mine = await naru.collection("posts").list({
-  where: { categoryId: "diary", score: { gte: 10, lt: 100 } },
+const mine = await naru.public.collection("posts").list({
+  filter: { categoryId: "diary", score: { gte: 10, lt: 100 } },
 });`}</Code>
               <p>
                 비교 대상은 문자열 또는 숫자이며, 한 필드의 두 경계는 같은
@@ -373,7 +374,7 @@ const mine = await naru.collection("posts").list({
               </p>
               <p>
                 중첩 경로·배열 검색·OR·부분 문자열 검색은 아직 지원하지
-                않습니다. 빈 <code>where: {"{}"}</code> 또는 where 생략은 전체
+                않습니다. 빈 <code>filter: {"{}"}</code> 또는 filter 생략은 전체
                 목록을 뜻합니다. 필터 값은 URL에 들어가므로 비밀번호 같은 비밀을
                 넣지 마세요.
               </p>
@@ -393,16 +394,17 @@ const mine = await naru.collection("posts").list({
               </p>
               <h3 className="font-bold">정렬과 페이지 이동</h3>
               <p>
-                기본 정렬은 ID 오름차순입니다. <code>orderBy</code>는 언제나{" "}
+                기본 정렬은 ID 오름차순입니다. <code>sort</code>는 언제나{" "}
                 <code>[필드, 방향]</code>을 한두 개 담은 배열입니다. 필드는{" "}
-                <code>$createdAt</code>(서버 생성 시각), <code>$updatedAt</code>
-                (서버 수정 시각), 그리고 문서의 최상위 필드 이름이고, 방향은{" "}
-                <code>asc</code> 또는 <code>desc</code>입니다. 방명록은{" "}
-                <code>[[&quot;$createdAt&quot;, &quot;desc&quot;]]</code>로 최신
-                글부터 표시합니다. 글쓴이가 날짜를 직접 정하는 블로그라면{" "}
+                메타데이터는 <code>{'{ metadata: "createdAt" }'}</code>처럼
+                표시하고, 사용자 데이터는 문서의 최상위 필드 이름을 씁니다.
+                방향은 <code>asc</code> 또는 <code>desc</code>입니다. 방명록은{" "}
+                <code>[[{'{ metadata: "createdAt" }'}, &quot;desc&quot;]]</code>
+                로 최신 글부터 표시합니다. 글쓴이가 날짜를 직접 정하는
+                블로그라면{" "}
                 <code>
-                  [[&quot;date&quot;, &quot;desc&quot;],
-                  [&quot;$createdAt&quot;, &quot;desc&quot;]]
+                  [[&quot;date&quot;, &quot;desc&quot;], [
+                  {'{ metadata: "createdAt" }'}, &quot;desc&quot;]]
                 </code>
                 처럼 두 키를 넘기면 나중에 쓴 지난 날짜 글이 맨 위로 올라오지
                 않고, 같은 날짜 안에서는 쓴 순서를 따릅니다. ID는 마지막
@@ -422,14 +424,14 @@ const mine = await naru.collection("posts").list({
                 <code>nextCursor</code>가 <code>null</code>이면 마지막
                 페이지입니다. <code>cursor</code>에 <code>null</code>을 넘기면
                 첫 페이지를 읽으므로, 받은 값을 가르지 않고 그대로 다시 넘기면
-                됩니다. <code>where: {"{}"}</code>도 필터가 없다는 뜻입니다.
+                됩니다. <code>filter: {"{}"}</code>도 필터가 없다는 뜻입니다.
                 이전 페이지는 페이지 내용이나 시작 커서를 저장해 구현할 수
                 있습니다. 페이지 번호와 offset은 제공하지 않습니다. 목록과
-                개수가 함께 필요하면 <code>count: true</code>를 넘기고, 개수만
-                필요하면 <code>limit: 1</code>과 함께 쓰세요. 페이지 이동은
-                하나의 스냅샷이 아니므로, 새 문서는 새로고침해야 보일 수 있고
-                정렬 기준 값이 바뀐 문서는 이동 중 빠지거나 다시 나타날 수
-                있습니다.
+                개수가 함께 필요하면 <code>page.includeTotal: true</code>를
+                넘기고, 개수만 필요하면 <code>page.size: 1</code>과 함께 쓰세요.
+                페이지 이동은 하나의 스냅샷이 아니므로, 새 문서는 새로고침해야
+                보일 수 있고 정렬 기준 값이 바뀐 문서는 이동 중 빠지거나 다시
+                나타날 수 있습니다.
               </p>
               <p>
                 <code>createdAt</code>은 처음 저장할 때 서버가 정하고
@@ -450,18 +452,19 @@ const mine = await naru.collection("posts").list({
               </p>
               <p>
                 모든 문서에는 불투명한 <code>revision</code>이 있습니다. 읽어 온
-                값을 해석하지 않고 <code>ifRevision</code>으로 함께 보내면, 그
-                사이 다른 곳에서 저장된 문서는 덮어쓰지 않고{" "}
-                <code>CONFLICT</code>로 거절합니다. <code>ifAbsent: true</code>
-                는 &ldquo;아직 없는 문서&rdquo;를 뜻하므로 새 글을 만들 때 같은
-                ID를 덮어쓰는 사고를 막습니다.
+                값을 해석하지 않고 <code>condition.revision</code>으로 함께
+                보내면, 그 사이 다른 곳에서 저장된 문서는 덮어쓰지 않고{" "}
+                <code>CONFLICT</code>로 거절합니다.{" "}
+                <code>condition: {"{ absent: true }"}</code>는 &ldquo;아직 없는
+                문서&rdquo;를 뜻하므로 새 글을 만들 때 같은 ID를 덮어쓰는 사고를
+                막습니다.
               </p>
               <Code>{`const post = await owner.collection("posts").get("hello");
 try {
   await owner.collection("posts").set(
     "hello",
     { ...post.data, title: "새 제목" },
-    { ifRevision: post.revision },
+    { condition: { revision: post.revision } },
   );
 } catch (error) {
   if (error.code === "CONFLICT")
@@ -515,11 +518,11 @@ try {
               </p>
               <p>
                 관리자 클라이언트의 <code>owner.collection()</code>만 관리자
-                권한을 쓰고, <code>naru.collection()</code>은 로그인 뒤에도 공개
-                요청으로 남습니다. 저장·복원·만료 방식은 SDK가 맡습니다. 더는
-                사용할 수 없는 세션의 요청은 <code>AUTH_REQUIRED</code>로
-                실패하고, 다음 <code>naru.auth.session()</code>은 null을
-                돌려줍니다.
+                권한을 쓰고, <code>naru.public.collection()</code>은 로그인
+                뒤에도 공개 요청으로 남습니다. 저장·복원·만료 방식은 SDK가
+                맡습니다. 더는 사용할 수 없는 세션의 요청은{" "}
+                <code>AUTH_REQUIRED</code>로 실패하고, 다음{" "}
+                <code>naru.auth.session()</code>은 null을 돌려줍니다.
               </p>
               <p>
                 제어판에서 관리자 페이지마다 ‘관리자 토큰 유효 시간’을
@@ -556,13 +559,13 @@ try {
                 <a href="/docs/media">미디어 사용 안내</a>에서 자세히 다룹니다.
               </p>
               <p>
-                관리자 클라이언트의 <code>owner.files.upload(file)</code>은
+                관리자 클라이언트의 <code>owner.media.upload(file)</code>은
                 브라우저에서 Naru Media로 파일을 직접 올리고, 확인된 공개 URL과
                 파일 ID를 반환합니다. 문서에는 base64 대신 이 URL을 저장하세요.
                 파일 하나는 25 MiB, 사이트당 250 MiB까지 저장할 수 있습니다.
                 HTML과 SVG는 허용하지 않습니다.
               </p>
-              <Code>{`const image = await owner.files.upload(fileInput.files[0]);
+              <Code>{`const image = await owner.media.upload(fileInput.files[0]);
 await owner.collection("posts").set("hello", {
   title: "안녕하세요",
   coverImage: image.url,
@@ -574,22 +577,20 @@ await owner.collection("posts").set("hello", {
               </p>
               <h3 className="text-lg font-semibold">원자적 쓰기</h3>
               <p>
-                <code>owner.atomic()</code>은 최대 100개의 문서 추가·저장·삭제를
+                <code>owner.transaction()</code>은 최대 100개의 문서 저장·삭제를
                 한 트랜잭션으로 처리합니다. 하나라도 실패하면 모두 취소되므로,
-                <code>ifRevision</code>이 어긋난 항목 하나가 앞선 저장까지 함께
-                되돌립니다.
+                <code>condition.revision</code>이 어긋난 항목 하나가 앞선
+                저장까지 함께 되돌립니다.
               </p>
-              <Code>{`await owner.atomic([
-  { type: "set", collection: "posts", id, data: post, ifAbsent: true },
-  { type: "add", collection: "logs", data: { published: id } },
-  { type: "delete", collection: "drafts", id },
+              <Code>{`await owner.transaction([
+  { collection: "posts", set: { id, data: post, condition: { absent: true } } },
+  { collection: "logs", set: { id, data: { published: id } } },
+  { collection: "drafts", delete: { id } },
 ]);`}</Code>
               <p>
-                <code>add</code>는 서버가 ID를 정하므로 <code>id</code>나 쓰기
-                조건을 함께 보낼 수 없습니다. 정해진 ID가 필요하면{" "}
-                <code>set</code>을 쓰세요. 결과 배열은 보낸 순서대로 각 항목의{" "}
-                <code>id</code>와 <code>revision</code>을, 삭제는{" "}
-                <code>{"{ success: true }"}</code>를 돌려줍니다.
+                트랜잭션은 ID를 미리 정한 set과 delete만 받으며 성공하면 별도
+                결과 없이 끝납니다. 생성된 ID가 필요하면 컬렉션의 add를 따로
+                사용하세요.
               </p>
               <p>
                 SDK 오류의 <code>code</code>에는
@@ -692,7 +693,7 @@ await owner.collection("posts").set("hello", {
                   선택하세요.
                 </li>
               </ul>
-              <Code>{`try {\n  await naru.collection("guestbook").add({ message: "안녕하세요" });\n} catch (error) {\n  // 프로그램은 전송 방식과 무관한 NaruError.code로 구분합니다.\n  // 사용자가 취소한 요청만 브라우저의 AbortError를 그대로 돌려줍니다.\n  document.querySelector("#status").textContent =\n    error.code === "RATE_LIMITED" ? "잠시 후 다시 시도하세요." : error.message;\n}`}</Code>
+              <Code>{`try {\n  await naru.public.collection("guestbook").add({ message: "안녕하세요" });\n} catch (error) {\n  // 프로그램은 전송 방식과 무관한 NaruError.code로 구분합니다.\n  // 사용자가 취소한 요청만 브라우저의 AbortError를 그대로 돌려줍니다.\n  document.querySelector("#status").textContent =\n    error.code === "RATE_LIMITED" ? "잠시 후 다시 시도하세요." : error.message;\n}`}</Code>
               <p>
                 네트워크 오류가 나도 쓰기는 서버에 저장되었을 수 있습니다. SDK는
                 자동 재시도하지 않습니다. 특히 add()를 다시 호출하면 중복 문서가

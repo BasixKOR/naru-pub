@@ -41,6 +41,58 @@ Runtime state is stored under `.deploy-state/` and must not be committed. If the
 active-slot file is lost, inspect the nginx configuration and restore
 `.deploy-state/active-slot` to `blue` or `green` before deploying again.
 
+## Cloudflare cache rule for hosted sites
+
+Hosted pages (HTML, JS and JSON served by the site proxy) carry
+`Cache-Control: public, max-age=0, stale-if-error=86400`. Cloudflare stores
+each page but revalidates it at the origin on every request, so edits appear
+at once and pageviews are still counted. When the origin answers with a `5xx`,
+Cloudflare serves the last good copy for up to a day instead. The proxy
+therefore reports its own failures as `5xx`: `503` when PostgreSQL is
+unreachable (after at most 3 seconds) and `502` when R2 fails. Only a missing
+site or file is a `404`, which replaces the cached copy. Redirects to R2 and
+to directory URLs are cached for an hour, with the same one-day fallback.
+
+This only covers failures the origin can still answer: PostgreSQL or R2
+outages, and both proxy slots being down (the nginx gateway returns `502`).
+When the whole host or the tunnel is down, Cloudflare generates the error
+itself (`530`/1033) and `stale-if-error` does not apply.
+
+Cloudflare does not cache HTML or JSON by default, so the rule below is
+required. Without it the header has no effect (`cf-cache-status: DYNAMIC`).
+Custom domains use this zone's rules through Cloudflare for SaaS. Like the data
+rule, it is zone configuration: recreate it by hand if the zone is rebuilt.
+
+**Caching → Cache Rules → `Hosted site fallback`**
+
+Expression (list every hostname that is not a hosted site):
+
+```
+(not http.host in {"naru.pub" "www.naru.pub" "r2.naru.pub" "media.naru.pub"})
+```
+
+| Setting                                | Value                                                    |
+| -------------------------------------- | -------------------------------------------------------- |
+| Cache eligibility                      | Eligible for cache                                       |
+| Edge TTL                               | Use cache-control header if present, bypass cache if not |
+| Browser TTL                            | Respect origin TTL                                       |
+| Serve stale content while revalidating | Off                                                      |
+
+**Always Online** (Caching → Configuration) must stay off, because Cloudflare
+ignores `stale-if-error` while it is on.
+
+Enable the rule only after the proxy that sends these headers is deployed. The
+older proxy sends `max-age=3600`, and only URLs on the platform subdomain are
+purged on edit, so an edited page on a custom domain would stay stale for up
+to an hour.
+
+Check it with a GET on a hosted page. The first request is `MISS`, later ones
+are `REVALIDATED` or `EXPIRED`, never `DYNAMIC`:
+
+```bash
+curl -s -o /dev/null -D - "https://eyecntct.naru.pub/" | grep -iE 'cf-cache-status|cache-control'
+```
+
 ## Cloudflare cache rule for public data reads
 
 The site data API marks anonymous reads of `world`-readable collections

@@ -13,7 +13,15 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::TcpListener;
+
+// Hosted pages are revalidated at the origin on every request, so edits appear
+// at once and pageviews are still counted, but Cloudflare keeps the last good
+// copy and serves it for up to a day while the origin answers with a 5xx.
+const SITE_CACHE_CONTROL: &str = "public, max-age=0, stale-if-error=86400";
+// Redirects are deterministic for a path, so browsers may keep them for an hour.
+const REDIRECT_CACHE_CONTROL: &str = "public, max-age=3600, stale-if-error=86400";
 
 // Configuration struct
 struct Config {
@@ -94,8 +102,11 @@ async fn main() -> Result<()> {
     let s3_client = S3Client::new(&aws_config);
 
     // Initialize database connection pool
+    // Fail fast while PostgreSQL is unreachable: the 503 lets Cloudflare serve
+    // its stale copy instead of holding visitors for the 30-second default.
     let db_pool = PgPoolOptions::new()
         .max_connections(5)
+        .acquire_timeout(Duration::from_secs(3))
         .connect(&config.database_url)
         .await
         .expect("Failed to connect to database");
@@ -171,37 +182,30 @@ async fn resolve_site_owner(
     platform_domain: &str,
     payment_grace_days: i64,
     feature_access_mode: &str,
-) -> Option<SiteOwner> {
+) -> Result<Option<SiteOwner>, sqlx::Error> {
     let host = normalize_host(host);
     if host.is_empty() || host == platform_domain {
-        return None;
+        return Ok(None);
     }
 
     if let Some(login_name) = host.strip_suffix(&format!(".{}", platform_domain)) {
         if login_name.is_empty() || login_name.contains('.') {
-            return None;
+            return Ok(None);
         }
 
-        let user_result: Result<Option<(i32, String)>, _> =
+        let user: Option<(i32, String)> =
             sqlx::query_as("SELECT id, login_name FROM users WHERE login_name = $1")
                 .bind(login_name)
                 .fetch_optional(db_pool)
-                .await;
+                .await?;
 
-        return match user_result {
-            Ok(Some((user_id, login_name))) => Some(SiteOwner {
-                user_id,
-                login_name,
-            }),
-            Ok(None) => None,
-            Err(err) => {
-                eprintln!("Error resolving platform subdomain: {}", err);
-                None
-            }
-        };
+        return Ok(user.map(|(user_id, login_name)| SiteOwner {
+            user_id,
+            login_name,
+        }));
     }
 
-    let domain_result: Result<Option<(i32, String)>, _> = if feature_access_mode == "supporters" {
+    let domain: Option<(i32, String)> = if feature_access_mode == "supporters" {
         sqlx::query_as(
             "SELECT users.id, users.login_name
          FROM custom_domains
@@ -219,7 +223,7 @@ async fn resolve_site_owner(
         .bind(&host)
         .bind(payment_grace_days as i32)
         .fetch_optional(db_pool)
-        .await
+        .await?
     } else {
         sqlx::query_as(
             "SELECT users.id, users.login_name
@@ -233,20 +237,32 @@ async fn resolve_site_owner(
         )
         .bind(&host)
         .fetch_optional(db_pool)
-        .await
+        .await?
     };
 
-    match domain_result {
-        Ok(Some((user_id, login_name))) => Some(SiteOwner {
-            user_id,
-            login_name,
-        }),
-        Ok(None) => None,
-        Err(err) => {
-            eprintln!("Error resolving custom domain: {}", err);
-            None
-        }
-    }
+    Ok(domain.map(|(user_id, login_name)| SiteOwner {
+        user_id,
+        login_name,
+    }))
+}
+
+fn not_found() -> Response<Full<Bytes>> {
+    Response::builder()
+        .status(404)
+        .header("Cache-Control", "no-store")
+        .body(Full::new(Bytes::from("Not Found")))
+        .unwrap()
+}
+
+// A 5xx, never a 404, for failures on our side: Cloudflare replaces a cached
+// page with a 404 but falls back to it on a 5xx.
+fn unavailable(status: u16) -> Response<Full<Bytes>> {
+    Response::builder()
+        .status(status)
+        .header("Cache-Control", "no-store")
+        .header("Retry-After", "30")
+        .body(Full::new(Bytes::from("Service Unavailable")))
+        .unwrap()
 }
 
 /// Resolve a raw URL path to a file path, appending index.html for directories
@@ -366,20 +382,21 @@ async fn handle_request(
         .unwrap_or_default()
         .to_string();
 
-    let site_owner = resolve_site_owner(
+    let site_owner = match resolve_site_owner(
         &state.db_pool,
         &host,
         &state.platform_domain,
         state.payment_grace_days,
         &state.feature_access_mode,
     )
-    .await;
-
-    let Some(site_owner) = site_owner else {
-        return Ok(Response::builder()
-            .status(404)
-            .body(Full::new(Bytes::from("Not Found")))
-            .unwrap());
+    .await
+    {
+        Ok(Some(site_owner)) => site_owner,
+        Ok(None) => return Ok(not_found()),
+        Err(err) => {
+            eprintln!("Error resolving site owner for {}: {}", host, err);
+            return Ok(unavailable(503));
+        }
     };
 
     // Extract the Referer header
@@ -438,7 +455,7 @@ async fn handle_request(
         return Ok(Response::builder()
             .status(302) // HTTP status code for redirection
             .header("Location", redirect_url)
-            .header("Cache-Control", "public, max-age=3600")
+            .header("Cache-Control", REDIRECT_CACHE_CONTROL)
             .body(Full::new(Bytes::from("Redirecting...")))
             .unwrap());
     }
@@ -448,7 +465,7 @@ async fn handle_request(
         .s3_client
         .get_object()
         .bucket(&state.bucket_name)
-        .key(key)
+        .key(&key)
         .send()
         .await
     {
@@ -459,11 +476,17 @@ async fn handle_request(
                 return Ok(Response::builder()
                     .status(308)
                     .header("Location", location)
-                    .header("Cache-Control", "public, max-age=3600")
+                    .header("Cache-Control", REDIRECT_CACHE_CONTROL)
                     .body(Full::new(Bytes::new()))?);
             }
             let content_type = resp.content_type.clone().unwrap_or_default();
-            let data = resp.body.collect().await?.into_bytes();
+            let data = match resp.body.collect().await {
+                Ok(body) => body.into_bytes(),
+                Err(err) => {
+                    eprintln!("Error reading {} from S3: {}", key, err);
+                    return Ok(unavailable(502));
+                }
+            };
 
             // Record pageview for HTML pages only (fire-and-forget)
             if extension == "html" || extension == "htm" {
@@ -480,16 +503,14 @@ async fn handle_request(
             Ok(Response::builder()
                 .status(200)
                 .header("content-type", content_type)
-                .header("Cache-Control", "public, max-age=3600")
+                .header("Cache-Control", SITE_CACHE_CONTROL)
                 .body(Full::new(data))
                 .unwrap())
         }
+        Err(err) if err.as_service_error().is_some_and(|e| e.is_no_such_key()) => Ok(not_found()),
         Err(err) => {
-            eprintln!("Error fetching from S3: {}", err);
-            Ok(Response::builder()
-                .status(404)
-                .body(Full::new(Bytes::from("Not Found")))
-                .unwrap())
+            eprintln!("Error fetching {} from S3: {}", key, err);
+            Ok(unavailable(502))
         }
     }
 }

@@ -9,11 +9,9 @@ export const metadata: Metadata = {
 };
 
 const sections = [
-  ["start", "01 · 미디어 라이브러리에서 시작하기"],
-  ["upload", "02 · 웹 SDK로 올리기"],
-  ["resize", "03 · 큰 사진은 알아서 줄입니다"],
-  ["limits", "04 · 한도와 허용 형식"],
-  ["cleanup", "05 · 정리와 삭제"],
+  ["upload", "01 · 웹 SDK로 올리기"],
+  ["limits", "02 · 한도와 허용 형식"],
+  ["manage", "03 · 관리와 삭제"],
 ];
 
 function Section({
@@ -77,114 +75,52 @@ export default function MediaDocs() {
           </nav>
 
           <article className="min-w-0 space-y-12 leading-8 [&_a]:underline [&_a]:underline-offset-4">
-            <Section id="start" title="01 · 미디어 라이브러리에서 시작하기">
+            <Section id="upload" title="01 · 웹 SDK로 올리기">
               <p>
-                <a href="/media">미디어 라이브러리</a>에서 파일을 끌어 놓아
-                올리고, 저장 공간을 확인하고, 이름과 형식으로 검색하거나
-                정렬하고, 공개 URL을 복사하고, 파일을 지울 수 있습니다.
+                <a href="/docs/database#owner">관리자 로그인</a> 후{" "}
+                <code>owner.media.upload()</code>로 파일을 올리고, 돌려받은{" "}
+                <code>url</code>을 문서에 저장하세요.
               </p>
-              <p>
-                <strong>홈페이지를 이루는 파일과는 다릅니다.</strong> HTML, CSS,
-                직접 올린 사진처럼 사이트 자체를 이루는 파일은{" "}
-                <a href="/files">파일</a>에서 관리합니다. 미디어 라이브러리는
-                사이트의 코드가 웹 SDK로 올리고 불러오는 파일을 위한 곳이고,
-                저장 공간도 한도도 따로 셉니다.
-              </p>
-              <p>
-                올린 파일은 본문과 분리된 <code>media.naru.pub</code> 주소에서
-                공개로 제공됩니다.
-              </p>
-            </Section>
+              <Code>{`const owner = await naru.auth.session();
 
-            <Section id="upload" title="02 · 웹 SDK로 올리기">
-              <p>
-                파일 API는 <strong>관리자 세션에서만</strong> 열립니다. 컬렉션과
-                달리 <code>collection()</code>만으로는 쓸 수 없고,{" "}
-                <a href="/docs/database#owner">웹사이트에서 관리자 로그인</a>을
-                먼저 마쳐야 <code>owner.media</code>를 쓸 수 있습니다.
-              </p>
-              <p>
-                <code>upload()</code>는 10분짜리 서명된 업로드 주소를 받아
-                브라우저에서 저장소로 바로 보내고, 나루가 저장된 크기와 형식을
-                확인한 뒤 파일을 돌려줍니다. 문서에는 base64 대신 돌아온{" "}
-                <code>url</code>이나 <code>id</code>를 저장하세요.
-              </p>
-              <Code>{`const naru = createNaru();
-const owner = await naru.auth.session();
-
-const image = await owner.media.upload(fileInput.files[0], {
-  signal: abortController.signal,
-});
+const image = await owner.media.upload(fileInput.files[0]);
+// → { id, name, contentType, size, url, createdAt, updatedAt }
 
 await owner.collection("posts").set("hello", {
   title: "안녕하세요",
   coverImage: image.url,
 });`}</Code>
-            </Section>
-
-            <Section id="resize" title="03 · 큰 사진은 알아서 줄입니다">
               <p>
-                요즘 휴대전화 사진은 한 장에 수십 MB, 가로 8000 픽셀을 넘기도
-                합니다. <code>upload()</code>는 승인을 받기 전에 브라우저에서
-                사진을 줄이므로, 그대로면 한도에 걸렸을 사진도 올라가고 방문자가
-                내려받는 양도 줄어듭니다.
-              </p>
-              <p>
-                업로드는 나루를 거치지 않고 브라우저에서 저장소로 바로 가므로,
-                사진을 줄일 수 있는 곳은 브라우저뿐입니다. JPEG, PNG, WebP,
-                HEIC는 긴 변이 2048 픽셀을 넘거나 파일이{" "}
-                <strong>512 KiB</strong>보다 무거울 때, 긴 변 2048 픽셀 이하의
-                WebP(만들 수 없는 브라우저에서는 흰 바탕의 JPEG)로 한 번 다시
-                저장합니다. 줄인 쪽이 오히려 커지면 원본을 그대로 올립니다.
-                아이폰이 저장하는 HEIC는 사파리에서 받는 형식으로 바꿔 주므로,
-                원래대로면 거절당했을 사진도 올릴 수 있습니다.
-              </p>
-              <p>
-                다시 저장하면 EXIF가 사라집니다. 회전은 픽셀에 반영해 넣으니
-                사진이 눕지 않고, 촬영 위치는 공개 주소에 남지 않습니다. 줄이는
-                방식은 고정되어 있어 따로 넘길 설정이 없습니다. 한도는 줄인 뒤의
-                크기로 셉니다.
-              </p>
-              <p>
-                <a href="/media">미디어 라이브러리</a>에서 끌어 놓은 파일은
-                줄이지 않고 올린 그대로 저장합니다.
+                큰 사진은 올리기 전에 긴 변 2048 픽셀 정도로 자동으로 줄이고,
+                아이폰의 HEIC는 브라우저에서 열리는 형식으로 바꿉니다. 이때 촬영
+                위치 같은 사진 정보는 지워집니다.
               </p>
             </Section>
 
-            <Section id="limits" title="04 · 한도와 허용 형식">
-              <p>
-                파일 하나는 <strong>25 MiB</strong>까지, 사이트 하나는{" "}
-                <strong>250 MiB</strong>까지 저장할 수 있습니다. 데이터베이스
-                문서 한도와는 별개로 셉니다.
-              </p>
-              <p>
-                JPEG, PNG, WebP, AVIF, GIF와 지원하는 오디오, PDF, ZIP, 일반
-                텍스트를 받습니다. <strong>HTML과 SVG는 거절합니다.</strong> 두
-                형식은 스크립트를 품을 수 있어, 공개 주소에서 그대로 열리면
-                방문자에게 위험할 수 있기 때문입니다.
-              </p>
-              <p>
-                남은 용량은 제어판의 <a href="/media">미디어 라이브러리</a>에서
-                확인하세요. 사이트 SDK는 업로드만 제공하며, 목록 확인과 삭제는
-                미디어 라이브러리에서 합니다.
-              </p>
+            <Section id="limits" title="02 · 한도와 허용 형식">
+              <ul className="list-disc space-y-3 pl-6">
+                <li>
+                  파일 하나 <strong>25 MiB</strong>, 사이트당{" "}
+                  <strong>250 MiB</strong>. 데이터베이스와 따로 셉니다.
+                </li>
+                <li>
+                  이미지(JPEG, PNG, WebP, AVIF, GIF), 오디오, PDF, ZIP, 텍스트를
+                  받습니다. <strong>HTML과 SVG는 받지 않습니다.</strong>
+                </li>
+              </ul>
             </Section>
 
-            <Section id="cleanup" title="05 · 정리와 삭제">
+            <Section id="manage" title="03 · 관리와 삭제">
               <p>
-                미디어 라이브러리에서 파일을 지우면 저장된 파일과 그 정보가 함께
-                사라집니다. <strong>되돌릴 수 없습니다.</strong> 그 URL을 쓰고
-                있는 문서가 있는지는 직접 확인해야 합니다. 지운 파일의 주소를
-                가리키던 이미지는 깨집니다.
+                <a href="/media">미디어 라이브러리</a>에서 파일을 올리고,
+                사용량을 확인하고, URL을 복사하고, 지울 수 있습니다. 사이트를
+                이루는 HTML·CSS 파일은 <a href="/files">파일</a>에서 따로
+                관리합니다.
               </p>
               <p>
-                나루는 어떤 글이 어떤 파일을 쓰는지 기록하지 않습니다. 글을
-                지워도 그 글에 넣은 이미지는 저장 공간에 남으니, 더 쓰지 않는
-                파일은 미디어 라이브러리에서 골라 지우세요.
-              </p>
-              <p>
-                끝내 마무리되지 않은 업로드 승인은 한 시간 뒤 배경 정리 작업이
-                치웁니다. 계정을 지우면 그 계정의 미디어도 함께 사라집니다.
+                글을 지워도 그 글의 이미지는 남습니다. 쓰지 않는 파일은 직접
+                지우세요. 지운 파일은 되돌릴 수 없고, 그 URL을 쓰던 이미지는
+                깨집니다.
               </p>
             </Section>
           </article>

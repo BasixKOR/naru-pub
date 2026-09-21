@@ -201,36 +201,6 @@ export default async function SdkReference(props: {
           </div>
         </header>
 
-        <section
-          aria-labelledby="contract-title"
-          className="mb-12 rounded-xl border bg-muted/30 p-6 md:p-8"
-        >
-          <div className="max-w-3xl">
-            <p className="text-sm font-bold text-muted-foreground">SDK 계약</p>
-            <h2 id="contract-title" className="mt-2 text-xl font-bold">
-              앱은 의미에 의존하고, 전송 방식에는 의존하지 않습니다.
-            </h2>
-            <p className="mt-3 leading-7 text-muted-foreground">
-              공개 작업과 소유자 작업은 별도 권한입니다. 커서와 revision은
-              해석하지 않고 그대로 돌려주며, 오류 처리는 HTTP 상태 대신 안정적인
-              <code className="mx-1">NaruError.code</code>를 사용하세요.
-            </p>
-          </div>
-          <dl className="mt-6 grid gap-4 text-sm md:grid-cols-2 lg:grid-cols-4">
-            {[
-              ["공개", "get · list · add"],
-              ["소유자", "set · delete · transaction"],
-              ["미디어", "upload"],
-              ["취소", "모든 네트워크 작업에 AbortSignal"],
-            ].map(([term, description]) => (
-              <div key={term} className="rounded-lg border bg-background p-4">
-                <dt className="font-bold">{term}</dt>
-                <dd className="mt-1 text-muted-foreground">{description}</dd>
-              </div>
-            ))}
-          </dl>
-        </section>
-
         <div className="grid gap-10 lg:grid-cols-[230px_minmax(0,1fr)]">
           <nav
             aria-label="문서 목차"

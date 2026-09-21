@@ -36,32 +36,32 @@ Create a collection in the control plane, choose its permissions, then use this 
 ```html
 <script type="module">
   import {
-    collection,
-    NaruDataError,
+    createNaru,
+    NaruError,
   } from "https://naru.pub/sdk/1.0.0/naru-data.js";
-  const entries = collection("guestbook");
+  const naru = createNaru();
+  const entries = naru.collection("guestbook");
 
   try {
     const { id } = await entries.add({ name: "Visitor", message: "Hello!" });
     const document = await entries.get(id);
     // set() and delete() require owner access or full public write permission.
-    let pageToken = null;
+    let cursor = null;
     do {
-      const page = await entries.list({ limit: 20, pageToken });
+      const page = await entries.list({ limit: 20, cursor });
       render(page.documents);
-      pageToken = page.nextPageToken;
-    } while (pageToken);
+      cursor = page.nextCursor;
+    } while (cursor);
   } catch (error) {
-    if (error instanceof NaruDataError)
-      console.error(error.status, error.code, error.message);
+    if (error instanceof NaruError) console.error(error.code, error.message);
     else throw error;
   }
 </script>
 ```
 
-A page served from `<login>.naru.pub` belongs to that site, so `collection(name)` needs nothing else. A custom domain or local page passes `collection(name, { site: "login-name" })`, and the same `{ site }` goes to `signIn` and `ownerSession`.
+A page served from `<login>.naru.pub` belongs to that site, so `createNaru()` needs nothing else. A custom domain or local page uses `createNaru({ site: "login-name" })`. Every collection and authentication operation then comes from that one client.
 
-`get` returns `{ id, data, version, createdAt, updatedAt }`; a missing document throws a 404 error. `set` replaces the whole document or creates it if absent. `add` generates a UUID, without requiring read permission. `add` and `set` return `{ id, version, createdAt, updatedAt }`, so a caller rendering what it just saved uses the server's own timestamps rather than the browser clock. `delete` is idempotent and resolves with nothing. JSON null is stored as a value, not treated as deletion. Render user data with `textContent`, not `innerHTML`.
+`get` returns `{ id, data, revision, createdAt, updatedAt }`; a missing document throws `NaruError` with `code: "NOT_FOUND"`. `set` replaces the whole document or creates it if absent. `add` generates an opaque ID without requiring read permission. `add` and `set` return `{ id, revision, createdAt, updatedAt }`, so a caller rendering what it just saved uses the server's own timestamps rather than the browser clock. `delete` is idempotent and resolves with nothing. JSON null is stored as a value, not treated as deletion. Render user data with `textContent`, not `innerHTML`.
 
 SDK declarations are available alongside the module at `/sdk/1.0.0/naru-data.d.ts`. The SDK pins `https://naru.pub` as its control-plane origin, even when bundled/copied. Naru's own tests point it at a loopback server through an undocumented `controlPlaneOrigin` option, which accepts nothing else.
 
@@ -70,7 +70,7 @@ SDK declarations are available alongside the module at `/sdk/1.0.0/naru-data.d.t
 1. Open `/database` directly in the control plane (it is intentionally absent from the header).
 2. Under website administrator login, register an exact callback URL such as `https://your-login-name.naru.pub/admin.html` and select the collections it may access. The callback must be on your Naru subdomain or an active, verified custom domain; no query, fragment, credentials, wildcard or arbitrary external origin. Development mode also permits loopback callbacks.
 3. The SDK discovers the site's stable public Client ID from the exact registered callback URL. Applications no longer need to copy it into configuration. Each callback keeps independent collection permissions.
-4. Call `signIn({ collections })` from a button. Naru authenticates the owner and asks for explicit consent. The website resumes at the page that called it, which must be the registered callback, where `ownerSession()` returns a separate authenticated client.
+4. Call `naru.auth.signIn({ collections })` from a button. Naru authenticates the owner and asks for explicit consent. The website resumes at the registered callback, where `naru.auth.session()` returns a separate authenticated client.
 
 Minimal editor-page wiring:
 
@@ -81,25 +81,23 @@ Minimal editor-page wiring:
 <button id="logout" disabled>Sign out</button>
 <p id="status"></p>
 <script type="module">
-  import {
-    ownerSession,
-    signIn,
-  } from "https://naru.pub/sdk/1.0.0/naru-data.js";
+  import { createNaru } from "https://naru.pub/sdk/1.0.0/naru-data.js";
+  const naru = createNaru();
   const status = document.querySelector("#status");
   async function run(action) {
     try {
       await action();
     } catch (error) {
-      if (error.code === "OWNER_SESSION_EXPIRED") owner = null;
+      if (error.code === "AUTH_REQUIRED") owner = null;
       status.textContent = error.message;
     }
   }
   // Call early on the callback page: it strips code/state from the address.
-  let owner = await ownerSession();
+  let owner = await naru.auth.session();
   document.querySelector("#save").disabled = !owner;
   document.querySelector("#logout").disabled = !owner;
   document.querySelector("#login").onclick = () =>
-    run(() => signIn({ collections: ["posts"] }));
+    run(() => naru.auth.signIn({ collections: ["posts"] }));
   document.querySelector("#save").onclick = () =>
     run(async () => {
       await owner
@@ -119,11 +117,11 @@ Minimal editor-page wiring:
 </script>
 ```
 
-The SDK discovers the site's public Client ID from the exact registered callback URL. The requested collections must be a subset of the registration. Handles from `collection()` stay public after signing in; only `owner.collection()` sends a bearer token. Tokens permit reading, creating, replacing and deleting documents in those collections, including private documents. They are tied to collection IDs so deleting and recreating a collection does not transfer old grants.
+The SDK discovers the site's public Client ID from the exact registered callback URL. The requested collections must be a subset of the registration. Handles from `naru.collection()` stay public after signing in; only `owner.collection()` uses owner authority. Tokens permit reading, creating, replacing and deleting documents in those collections, including private documents. They are tied to collection IDs so deleting and recreating a collection does not transfer old grants.
 
-Authentication uses random state and mandatory S256 PKCE. The verifier and state live in tab-scoped sessionStorage for at most ten minutes; authorization codes expire after 60 seconds and are single-use, including concurrent exchanges. The server stores only code/token hashes. Each registered admin page has a control-plane token lifetime of 1-1440 whole minutes (default 1440). Each sign-in issues one opaque admin token capped by this setting, the duration displayed at consent, and the approving Naru session. The platform maximum remains 24 hours. The SDK stores it in sessionStorage under the site and exact callback. `ownerSession()` restores it locally on reload without a network request; each subsequent data request rechecks authorization on the server. Neither reloads nor requests extend the original expiration. There are no refresh tokens or automatic renewals.
+Authentication uses random state and mandatory S256 PKCE. The verifier and state live in tab-scoped sessionStorage for at most ten minutes; authorization codes expire after 60 seconds and are single-use, including concurrent exchanges. The server stores only code/token hashes. Each registered admin page has a control-plane token lifetime of 1-1440 whole minutes (default 1440). Each sign-in issues one opaque admin token capped by this setting, the duration displayed at consent, and the approving Naru session. The platform maximum remains 24 hours. Session storage, restoration, and expiry are SDK implementation details so the public interface can later adopt safer renewal without exposing token deadlines.
 
-Control-plane session expiry/deletion, registration removal, token revocation, and domain status are checked on every authenticated data request. Use the control panel to revoke a page's outstanding codes and tokens, or remove its registration to disable future login. `ownerSession()` only finishes a sign-in that this tab started with `signIn()`; a page's own `?code=` or `?error=` parameters are left untouched otherwise. `owner.signOut()` clears local credentials before requesting server revocation. Once `owner.expiresAt` passes, or the server answers 401, owner requests fail with `OWNER_SESSION_EXPIRED` and the stored session is cleared, so the next `ownerSession()` returns null. A network failure is reported; a copied token may remain usable until revoked or its 24-hour deadline. This does not sign out of the Naru control plane. Browser session restoration can restore sessionStorage, so use explicit logout to end access. The token is accessible to same-origin JavaScript: URL paths are not security isolation boundaries. Never share it or load untrusted scripts. A stolen token can be used longer than a short-lived access token unless revoked.
+Control-plane session expiry/deletion, registration removal, token revocation, and domain status are checked on every authenticated data request. Use the control panel to revoke a page's outstanding codes and tokens, or remove its registration to disable future login. `naru.auth.session()` only finishes a sign-in that this tab started with `naru.auth.signIn()`; a page's own `?code=` or `?error=` parameters are left untouched otherwise. `owner.signOut()` clears local credentials before requesting server revocation. An unusable owner session fails with `AUTH_REQUIRED`, and the next `naru.auth.session()` returns null. A network failure is `UNAVAILABLE`. This does not sign out of the Naru control plane. Never share owner authority or load untrusted scripts on an editor page.
 
 Authorization approval and registration changes require same-origin owner requests. Token exchange and API access require the registered origin plus the explicit code/verifier or bearer token; CORS never grants authorization. The consent page disallows framing. An origin check cannot prevent use of a stolen bearer token by a non-browser client: scripts running on your editor page can exercise owner privileges while signed in. Use a minimal trusted editor without third-party scripts, avoid unsafe HTML rendering, and set a no-referrer policy on the callback page.
 
@@ -135,11 +133,17 @@ Unversioned SDK URLs are not served. Existing `/sdk/naru-data.js` imports must b
 
 SDK versioning does not itself version the backend protocol. Version 1.0.0 uses `/api/data/:site`; preserve existing public CRUD behavior when extending it. Breaking server changes should introduce a separate API version.
 
-The 1.0.0 SDK is deliberately small, because every option it sends is a contract the server has to keep. Its whole surface is `collection()` with `get`, `list`, `add`, `set` and `delete`; `signIn()`; `ownerSession()` returning `expiresAt`, `collection()`, `batch()`, `files.upload / list / delete` and `signOut()`; and `NaruDataError`. Features are added when a site needs them, not in advance.
+The 1.0.0 SDK is deliberately small. Its runtime exports are only `createNaru` and `NaruError`. A client has `collection()` and `auth`; an owner has `collection()`, `atomic()`, `files.upload()` and `signOut()`. Media listing and deletion remain in the control panel. Features are added when a site needs them, not in advance.
 
 During 1.0.0 development the SDK dropped `createDatabase`, per-collection `parse`/`map`, `schemas`, `update` merge patches and `unset`, `count()`, `all()`, string `orderBy` with `direction`, `fresh`, `timeoutMs`, `createRequestChannel`, session events, client-side request and response validation, upload progress, image tuning options, and the file `get`, `update` and `usage` methods. The server removed the matching endpoints and parameters.
 
-## HTTP API
+## Internal HTTP protocol
+
+This is the current SDK/control-plane wire format, not the browser application's
+public interface. The SDK sends `Accept: application/vnd.naru.data.v1+json` and
+translates these transport names and numeric versions into public cursors,
+revisions, and semantic errors. Server revisions may change this table while the
+SDK surface remains stable.
 
 Public/website-token root: `/api/data/:site`. Control-plane root: `/api/account/database` (site derived from the session). Collection management is restricted to the control-plane root.
 
@@ -188,7 +192,7 @@ There are at most 20 registrations per site, 20 pending codes and 50 live tokens
 - PostgreSQL JSONB semantics apply, including JavaScript number precision and no significant object key order.
 - Owner-row locks serialize permission checks, writes, and quota checks across server processes. Reads take no such lock. Deletes free quota; account deletion cascades through collections and documents.
 - A site holds at most 10,000 media files: the byte quota alone does not bound row count, since the smallest accepted file is one byte.
-- Each individual replacement, update, or delete is atomic. `owner.batch()` makes all of its operations one atomic server transaction, and creates are insert-only. Writes are last-write-wins when `ifVersion` is omitted; `set`, `delete`, and the corresponding batch operations support optimistic compare-and-set with `ifVersion`. There are no realtime subscriptions, offline persistence, custom indexes, arbitrary query expressions, per-document rules, or visitor accounts in v1.
+- Each individual replacement or delete is atomic. `owner.atomic()` makes all of its operations one atomic server transaction, and creates are insert-only. Writes are last-write-wins when no condition is supplied; `ifRevision` rejects stale writes and `ifAbsent` guards creation. There are no realtime subscriptions, offline persistence, custom indexes, arbitrary query expressions, per-document rules, or visitor accounts in v1.
 
 ## File uploads (SDK 1.0.0)
 
@@ -207,14 +211,10 @@ await owner.collection("posts").set("hello", {
 });
 ```
 
-The library pages like a collection, newest first. Naru does not record which
-documents use a file: a page that uses a file stores its URL, and deleting a file
-is a deliberate act in the media library or through `owner.files.delete(id)`.
-Uploads that are no longer referenced stay until someone deletes them.
-
-```js
-const { files, nextPageToken } = await owner.files.list({ limit: 50 });
-```
+Naru does not record which documents use a file: a page that uses a file stores
+its URL, and deletion is a deliberate act in the control-plane media library.
+The site SDK deliberately exposes upload only. Uploads that are no longer
+referenced stay until someone deletes them in the media library.
 
 사이트 소유자는 **미디어 라이브러리**(`/media`)에서 파일을 끌어
 놓아 업로드하고, 저장 공간을 확인하고, 이름·형식으로 검색하거나 정렬하고, 공개
@@ -301,39 +301,40 @@ The Korean guides are served publicly at `/docs` (index), `/docs/database` and `
 ## Server-side sorting and pagination (SDK 1.0.0)
 
 ```js
-const posts = collection("posts");
+const naru = createNaru();
+const posts = naru.collection("posts");
 const query = {
   orderBy: [
-    ["data.publishedOn", "desc"],
-    ["createdAt", "desc"],
+    ["publishedOn", "desc"],
+    ["$createdAt", "desc"],
   ],
   limit: 20,
 };
-const first = await posts.list({ ...query, includeTotal: true });
-const next = await posts.list({ ...query, pageToken: first.nextPageToken });
+const first = await posts.list({ ...query, count: true });
+const next = await posts.list({ ...query, cursor: first.nextCursor });
 ```
 
-`orderBy` is always a list of one or two `[field, direction]` pairs. A field is `createdAt`, `updatedAt`, or `data.<field>` for one top-level document field; `direction` is `asc` or `desc`. The document ID is appended automatically as the final tie-breaker, so it may only be named on its own (`[["id", "desc"]]`). Without `orderBy`, a list reads in ID order.
+`orderBy` is always a list of one or two `[field, direction]` pairs. User fields are named directly; metadata uses `$id`, `$createdAt`, or `$updatedAt`. `direction` is `asc` or `desc`. The document ID is appended automatically as the final tie-breaker. Without `orderBy`, a list reads in ID order.
 
 Metadata timestamp ties use document ID in the last direction. JSON-field values use PostgreSQL JSONB ordering; missing fields sort at the same position as JSON null, followed by strings and then numbers. The metadata orders have composite collection/time/ID indexes; JSON-field sorting scans the narrowed collection and has no per-field index.
 
 `get` and `list` return `createdAt` as well as `updatedAt`. Server metadata is camelCase throughout the API; the underlying columns stay snake_case. Creation time is assigned by the server, preserved on replacement, and cannot be changed by fields in `data`. The migration backfills existing documents from their recorded modification time; their original creation time is unknown.
 
-Pass `nextPageToken` unchanged as `pageToken` with the same collection, ordering, and filters. Page tokens are opaque, query-bound continuation state: applications must not inspect or construct them. They preserve PostgreSQL timestamp precision and the last ID, remain usable after that document is deleted, and are bound to the collection's internal ID, every sort key and direction, and the canonical filter fingerprint. Mismatches and malformed tokens return 400. They are not credentials; read permissions are checked on every request. Changing page size is allowed.
+Pass `nextCursor` unchanged as `cursor` with the same collection, ordering, and filters. Cursors are opaque, query-bound continuation state: applications must not inspect or construct them. The SDK and server may change their representation. They are not credentials; read permissions are checked on every request. Changing page size is allowed.
 
-A null page token marks the end, and passing `null` as `pageToken` reads the first page, so a "load more" loop can hand `nextPageToken` straight back. Cache prior pages or their starting tokens for a Previous button. There are no page numbers or offsets. `includeTotal: true` returns the filtered total with the page; for only the number, ask for `limit: 1` with it. Reset the token and displayed results when switching sort order or filters. Pagination is not a snapshot: newly inserted records before the token require a refresh; changing a sort value during traversal can skip or repeat a record.
+A null cursor marks the end, and passing `null` as `cursor` reads the first page. Cache prior pages or their starting cursors for a Previous button. There are no page numbers or offsets. `count: true` returns `totalCount` with the page; for only the number, ask for `limit: 1` with it. Reset the cursor and displayed results when switching sort order or filters. Pagination is not a snapshot: newly inserted records before the cursor require a refresh; changing a sort value during traversal can skip or repeat a record.
 
 Cancel a superseded read with a standard `AbortController`, passing its `signal`; the request then rejects with the browser's own `AbortError`.
 
 ## Equality and range filters with automatic indexes
 
 ```js
-const page = await collection("posts").list({
+const page = await naru.collection("posts").list({
   where: {
     category: "일상",
     date: { gte: "2026-09-01", lt: "2026-10-01" },
   },
-  orderBy: [["data.date", "desc"]],
+  orderBy: [["date", "desc"]],
   limit: 20,
 });
 ```
@@ -352,7 +353,7 @@ Create `posts` (world/admin), `guestbook` (world/create), and **`drafts` (admin/
 
 The public list filters by exact `category`. The editor loads paginated posts/drafts, edits documents while preserving other JSON fields, saves private drafts, publishes, and deletes the selected document after confirmation. Local tab storage preserves the editor through the login redirect; explicit server draft saving persists across sessions. Signing out clears the editor and local draft.
 
-Draft and public copies share an ID. Saving a private draft does not unpublish or change an existing public post. Publication uses `owner.batch()` to write the post and remove its draft atomically; failure preserves the draft and leaves the public post unchanged. Deletion affects only the selected collection. Writes that omit `ifVersion` are last-write-wins; an editor can send the version it read to detect a concurrent change and receive `VERSION_CONFLICT` instead of overwriting it. Guestbook moderation remains in the control panel.
+Draft and public copies share an ID. Saving a private draft does not unpublish or change an existing public post. Publication uses `owner.atomic()` to write the post and remove its draft atomically; failure preserves the draft and leaves the public post unchanged. Deletion affects only the selected collection. An editor sends the opaque revision it read as `ifRevision` to detect a concurrent change and receive `CONFLICT` instead of overwriting it. Guestbook moderation remains in the control panel.
 
 ### Website identity and admin tokens
 
@@ -375,16 +376,15 @@ schema; the SDK does not validate documents or server responses at runtime.
 Data is sent with `JSON.stringify`, so values it drops or coerces (undefined,
 functions, `Date`) are stored the way it serializes them. Convert dates to
 strings explicitly. `set()` replaces the entire document; there is no merge.
-Each successful document write increments `version`. Pass a previously read
-version as `ifVersion` to `set()` or `delete()` to reject a stale write with
-`status: 409` and `code: "VERSION_CONFLICT"`; `ifVersion: 0` asserts that the
-document does not exist.
+Each successful document write returns an opaque `revision`. Pass a previously
+read revision as `ifRevision` to `set()` or `delete()` to reject a stale write
+with `code: "CONFLICT"`; `ifAbsent: true` asserts that the document does not
+exist. Applications must not parse or construct revisions.
 
-A response with an error status throws `NaruDataError` with that `status` and
-the server's `code`, or `REQUEST_FAILED` (`OWNER_SESSION_EXPIRED` for 401) when
-it sent none, including non-JSON proxy responses. A success status whose body
-is not a JSON object (a proxy or challenge page) throws `INVALID_RESPONSE`. Network failures and
-cancellation reject with the browser's own `TypeError` and `AbortError`. A
+A failed operation throws `NaruError` with a stable semantic `code` such as
+`CONFLICT`, `AUTH_REQUIRED`, `RATE_LIMITED`, or `UNAVAILABLE`. HTTP status and
+the original cause are diagnostic only. Network and invalid proxy responses are
+normalized to `UNAVAILABLE`; cancellation remains the browser's `AbortError`. A
 collection name or ID outside 1–64 ASCII letters, digits, underscores and
 hyphens throws `TypeError` before any request. Other invalid input is the
 server's to refuse with a 400.

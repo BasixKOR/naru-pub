@@ -106,7 +106,8 @@ export default function MediaDocs() {
                 확인한 뒤 파일을 돌려줍니다. 문서에는 base64 대신 돌아온{" "}
                 <code>url</code>이나 <code>id</code>를 저장하세요.
               </p>
-              <Code>{`const owner = await ownerSession();
+              <Code>{`const naru = createNaru();
+const owner = await naru.auth.session();
 
 const image = await owner.files.upload(fileInput.files[0], {
   signal: abortController.signal,
@@ -161,26 +162,23 @@ await owner.collection("posts").set("hello", {
               </p>
               <p>
                 남은 용량은 제어판의 <a href="/media">미디어 라이브러리</a>에서
-                확인하세요. 목록은 <code>files.list()</code>가 최근에 올린
-                것부터 한 쪽씩, 컬렉션과 똑같이 커서로 돌려줍니다.
+                확인하세요. 사이트 SDK는 업로드만 제공하며, 목록 확인과 삭제는
+                미디어 라이브러리에서 합니다.
               </p>
-              <Code>{`const { files, nextPageToken } = await owner.files.list({ limit: 50 });`}</Code>
             </Section>
 
             <Section id="cleanup" title="05 · 정리와 삭제">
               <p>
-                <code>files.delete(id)</code>는 저장된 파일과 그 정보를 함께
-                지웁니다. <strong>되돌릴 수 없습니다.</strong> 미디어
-                라이브러리에서 지울 때도 마찬가지이며, 그 URL을 쓰고 있는 문서가
-                있는지는 직접 확인해야 합니다. 지운 파일의 주소를 가리키던
-                이미지는 깨집니다.
+                미디어 라이브러리에서 파일을 지우면 저장된 파일과 그 정보가 함께
+                사라집니다. <strong>되돌릴 수 없습니다.</strong> 그 URL을 쓰고
+                있는 문서가 있는지는 직접 확인해야 합니다. 지운 파일의 주소를
+                가리키던 이미지는 깨집니다.
               </p>
               <p>
                 나루는 어떤 글이 어떤 파일을 쓰는지 기록하지 않습니다. 글을
                 지워도 그 글에 넣은 이미지는 저장 공간에 남으니, 더 쓰지 않는
                 파일은 미디어 라이브러리에서 골라 지우세요.
               </p>
-              <Code>{`await owner.files.delete(image.id);`}</Code>
               <p>
                 끝내 마무리되지 않은 업로드 승인은 한 시간 뒤 배경 정리 작업이
                 치웁니다. 계정을 지우면 그 계정의 미디어도 함께 사라집니다.

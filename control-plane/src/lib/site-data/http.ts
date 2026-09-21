@@ -43,6 +43,7 @@ export async function dataRequest(
     ...(admin ? {} : publicHeaders),
     "Cache-Control": "no-store",
     Vary: "Origin, Authorization",
+    ...(!admin ? { "Naru-Data-Protocol": "1" } : {}),
     ...(!admin &&
     request.headers.get("origin") &&
     (request.headers.has("authorization") || request.method === "OPTIONS")

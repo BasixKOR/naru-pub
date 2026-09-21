@@ -2,7 +2,7 @@
   "version": "1.0.0",
   "entries": [
     {
-      "name": "collection",
+      "name": "createNaru",
       "kind": "function",
       "summary": [
         {
@@ -10,156 +10,17 @@
           "spans": [
             {
               "type": "text",
-              "value": "사이트의 컬렉션 하나를 가리킵니다."
+              "value": "사이트 하나에 묶인 나루 클라이언트를 만듭니다."
             }
           ]
-        },
-        {
-          "type": "code",
-          "language": "javascript",
-          "code": "const guestbook = collection(\"guestbook\");\nawait guestbook.add({ name: \"방문자\", message: \"안녕하세요\" });"
-        }
-      ],
-      "throws": [
-        [
-          {
-            "type": "paragraph",
-            "spans": [
-              {
-                "type": "text",
-                "value": "사이트를 알 수 없거나 이름이 올바르지 않으면 TypeError."
-              }
-            ]
-          }
-        ]
-      ],
-      "signature": "collection<T = Json>(\n  name: string,\n  options?: SiteOptions,\n): Collection<T>",
-      "parameters": [
-        {
-          "name": "name",
-          "type": "string",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "options",
-          "type": "SiteOptions",
-          "summary": [],
-          "throws": []
-        }
-      ]
-    },
-    {
-      "name": "ownerSession",
-      "kind": "function",
-      "summary": [
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "이 페이지의 관리자 클라이언트이거나 null입니다."
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "이 탭에서 "
-            },
-            {
-              "type": "code",
-              "value": "signIn()"
-            },
-            {
-              "type": "text",
-              "value": "으로 떠났다가 나루에서 막 돌아왔으면 로그인을 마무리하고, 아니면 이 탭의 세션을 되살립니다. 로그인을 마무리할 때는 주소에서 일회용 코드를 지우므로 화면을 그리기 전에 부르세요. 로그인을 시작하지 않은 페이지의 "
-            },
-            {
-              "type": "code",
-              "value": "?code="
-            },
-            {
-              "type": "text",
-              "value": "나 "
-            },
-            {
-              "type": "code",
-              "value": "?error="
-            },
-            {
-              "type": "text",
-              "value": "는 건드리지 않습니다."
-            }
-          ]
-        },
-        {
-          "type": "code",
-          "language": "javascript",
-          "code": "const owner = await ownerSession();\nif (owner) await owner.collection(\"posts\").set(\"hello\", { title: \"안녕\" });\nelse await signIn({ collections: [\"posts\"] });"
         }
       ],
       "throws": [],
-      "signature": "ownerSession(options?: SiteOptions): Promise<Owner | null>",
+      "signature": "createNaru(options?: { site?: string }): NaruClient",
       "parameters": [
         {
           "name": "options",
-          "type": "SiteOptions",
-          "summary": [],
-          "throws": []
-        }
-      ]
-    },
-    {
-      "name": "signIn",
-      "kind": "function",
-      "summary": [
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "나루로 이동해 관리자가 "
-            },
-            {
-              "type": "code",
-              "value": "collections"
-            },
-            {
-              "type": "text",
-              "value": "에 대한 접근을 승인하고, 이 페이지로 돌아옵니다. 이 페이지의 주소(질의 문자열 제외)를 제어판에 관리자 콜백으로 먼저 등록하세요. 페이지를 떠나므로 이 호출 뒤의 코드는 실행되지 않습니다."
-            }
-          ]
-        }
-      ],
-      "throws": [
-        [
-          {
-            "type": "paragraph",
-            "spans": [
-              {
-                "type": "text",
-                "value": "등록하지 않은 페이지이면 "
-              },
-              {
-                "type": "code",
-                "value": "UNREGISTERED_REDIRECT_URI"
-              },
-              {
-                "type": "text",
-                "value": "."
-              }
-            ]
-          }
-        ]
-      ],
-      "signature": "signIn(\n  options: SiteOptions & { collections: string[] },\n): Promise<void>",
-      "parameters": [
-        {
-          "name": "options",
-          "type": "SiteOptions & { collections: string[] }",
+          "type": "{ site?: string }",
           "summary": [],
           "throws": []
         }
@@ -168,26 +29,7 @@
     {
       "name": "Collection",
       "kind": "interface",
-      "summary": [
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "컬렉션 하나입니다. 만드는 것만으로는 요청이 일어나지 않습니다."
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "이 브라우저가 쓴 컬렉션은 10초 동안 캐시를 건너뛰고 읽으므로, 방금 쓴 것이 곧바로 목록에 보입니다."
-            }
-          ]
-        }
-      ],
+      "summary": [],
       "throws": [],
       "signature": "interface Collection<T = Json>",
       "extends": [],
@@ -195,24 +37,14 @@
         {
           "name": "add",
           "optional": false,
-          "signature": "add(data: T, options?: RequestOptions): Promise<Written>",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "서버가 매긴 UUID로 새 문서를 만듭니다. 읽기 권한이 없어도 됩니다."
-                }
-              ]
-            }
-          ],
+          "signature": "add(data: T, options?: RequestOptions): Promise<WriteResult>",
+          "summary": [],
           "throws": []
         },
         {
           "name": "delete",
           "optional": false,
-          "signature": "delete(id: string, options?: RequestOptions & Conditional): Promise<void>",
+          "signature": "delete(id: string, options?: WriteOptions): Promise<void>",
           "summary": [
             {
               "type": "paragraph",
@@ -231,45 +63,19 @@
           "optional": false,
           "signature": "get(id: string, options?: RequestOptions): Promise<Document<T>>",
           "summary": [],
-          "throws": [
-            [
-              {
-                "type": "paragraph",
-                "spans": [
-                  {
-                    "type": "text",
-                    "value": "문서가 없으면 "
-                  },
-                  {
-                    "type": "code",
-                    "value": "status: 404"
-                  },
-                  {
-                    "type": "text",
-                    "value": "."
-                  }
-                ]
-              }
-            ]
-          ]
+          "throws": []
         },
         {
           "name": "list",
           "optional": false,
           "signature": "list(options?: ListOptions): Promise<Page<T>>",
-          "summary": [
-            {
-              "type": "code",
-              "language": "javascript",
-              "code": "let pageToken = null;\ndo {\n  const page = await posts.list({ limit: 20, pageToken });\n  render(page.documents);\n  pageToken = page.nextPageToken;\n} while (pageToken);"
-            }
-          ],
+          "summary": [],
           "throws": []
         },
         {
           "name": "set",
           "optional": false,
-          "signature": "set(\n  id: string,\n  data: T,\n  options?: RequestOptions & Conditional,\n): Promise<Written>",
+          "signature": "set(id: string, data: T, options?: WriteOptions): Promise<WriteResult>",
           "summary": [
             {
               "type": "paragraph",
@@ -277,59 +83,6 @@
                 {
                   "type": "text",
                   "value": "문서 전체를 교체하거나 새로 만듭니다."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        }
-      ]
-    },
-    {
-      "name": "Conditional",
-      "kind": "interface",
-      "summary": [
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "쓰기를, 읽어 둔 버전이 그대로일 때만 반영합니다."
-            }
-          ]
-        }
-      ],
-      "throws": [],
-      "signature": "interface Conditional",
-      "extends": [],
-      "members": [
-        {
-          "name": "ifVersion",
-          "optional": true,
-          "signature": "ifVersion?: number",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "다르면 "
-                },
-                {
-                  "type": "code",
-                  "value": "VERSION_CONFLICT"
-                },
-                {
-                  "type": "text",
-                  "value": "로 거부됩니다. "
-                },
-                {
-                  "type": "code",
-                  "value": "0"
-                },
-                {
-                  "type": "text",
-                  "value": "은 아직 없어야 한다는 뜻입니다."
                 }
               ]
             }
@@ -347,7 +100,7 @@
           "spans": [
             {
               "type": "text",
-              "value": "저장된 문서 하나와 서버 메타데이터입니다."
+              "value": "저장된 값과 나루가 관리하는 메타데이터입니다."
             }
           ]
         }
@@ -360,63 +113,34 @@
           "name": "createdAt",
           "optional": false,
           "signature": "createdAt: string",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "서버가 매긴 ISO 8601 생성 시각이며, "
-                },
-                {
-                  "type": "code",
-                  "value": "set"
-                },
-                {
-                  "type": "text",
-                  "value": "으로 교체해도 유지됩니다."
-                }
-              ]
-            }
-          ],
+          "summary": [],
           "throws": []
         },
         {
           "name": "data",
           "optional": false,
           "signature": "data: T",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "저장한 JSON입니다. 서버는 "
-                },
-                {
-                  "type": "code",
-                  "value": "T"
-                },
-                {
-                  "type": "text",
-                  "value": "를 검사하지 않습니다."
-                }
-              ]
-            }
-          ],
+          "summary": [],
           "throws": []
         },
         {
           "name": "id",
           "optional": false,
           "signature": "id: string",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "revision",
+          "optional": false,
+          "signature": "revision: string",
           "summary": [
             {
               "type": "paragraph",
               "spans": [
                 {
                   "type": "text",
-                  "value": "ASCII 영문자, 숫자, 밑줄, 하이픈 1~64자입니다."
+                  "value": "동시 수정을 막을 때 그대로 돌려주는 불투명한 값입니다."
                 }
               ]
             }
@@ -427,42 +151,7 @@
           "name": "updatedAt",
           "optional": false,
           "signature": "updatedAt: string",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "가장 최근 쓰기의 ISO 8601 시각입니다."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
-          "name": "version",
-          "optional": false,
-          "signature": "version: number",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "쓰기마다 증가합니다. "
-                },
-                {
-                  "type": "code",
-                  "value": "ifVersion"
-                },
-                {
-                  "type": "text",
-                  "value": "으로 되돌려 주세요."
-                }
-              ]
-            }
-          ],
+          "summary": [],
           "throws": []
         }
       ]
@@ -470,17 +159,7 @@
     {
       "name": "ListOptions",
       "kind": "interface",
-      "summary": [
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "한 쪽을 읽는 조건입니다."
-            }
-          ]
-        }
-      ],
+      "summary": [],
       "throws": [],
       "signature": "interface ListOptions extends RequestOptions",
       "extends": [
@@ -488,9 +167,9 @@
       ],
       "members": [
         {
-          "name": "includeTotal",
+          "name": "count",
           "optional": true,
-          "signature": "includeTotal?: boolean",
+          "signature": "count?: boolean",
           "summary": [
             {
               "type": "paragraph",
@@ -501,11 +180,36 @@
                 },
                 {
                   "type": "code",
-                  "value": "total"
+                  "value": "totalCount"
                 },
                 {
                   "type": "text",
                   "value": "에 함께 받습니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "cursor",
+          "optional": true,
+          "signature": "cursor?: string | null",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "앞 쪽의 "
+                },
+                {
+                  "type": "code",
+                  "value": "nextCursor"
+                },
+                {
+                  "type": "text",
+                  "value": "를 수정하지 않고 넘기세요."
                 }
               ]
             }
@@ -537,58 +241,33 @@
           "throws": []
         },
         {
-          "name": "pageToken",
-          "optional": true,
-          "signature": "pageToken?: string | null",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "앞 쪽의 "
-                },
-                {
-                  "type": "code",
-                  "value": "nextPageToken"
-                },
-                {
-                  "type": "text",
-                  "value": "을 그대로 넘기세요. "
-                },
-                {
-                  "type": "code",
-                  "value": "null"
-                },
-                {
-                  "type": "text",
-                  "value": "이면 첫 쪽입니다. 같은 "
-                },
-                {
-                  "type": "code",
-                  "value": "where"
-                },
-                {
-                  "type": "text",
-                  "value": "와 "
-                },
-                {
-                  "type": "code",
-                  "value": "orderBy"
-                },
-                {
-                  "type": "text",
-                  "value": "에서만 쓸 수 있습니다."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
           "name": "where",
           "optional": true,
           "signature": "where?: Filter",
+          "summary": [],
+          "throws": []
+        }
+      ]
+    },
+    {
+      "name": "NaruClient",
+      "kind": "interface",
+      "summary": [],
+      "throws": [],
+      "signature": "interface NaruClient",
+      "extends": [],
+      "members": [
+        {
+          "name": "auth",
+          "optional": false,
+          "signature": "auth: {\n  session(): Promise<Owner | null>;\n  signIn(options: { collections: string[] }): Promise<void>;\n}",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "collection",
+          "optional": false,
+          "signature": "collection<T = Json>(name: string): Collection<T>",
           "summary": [],
           "throws": []
         }
@@ -602,29 +281,8 @@
           "type": "paragraph",
           "spans": [
             {
-              "type": "code",
-              "value": "ownerSession()"
-            },
-            {
               "type": "text",
-              "value": "이 돌려주는, 사이트 관리자로 인증된 클라이언트입니다."
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "로그인할 때 고른 컬렉션까지만 닿습니다. 토큰은 이 탭의 "
-            },
-            {
-              "type": "code",
-              "value": "sessionStorage"
-            },
-            {
-              "type": "text",
-              "value": "에 있고 같은 페이지의 스크립트가 읽을 수 있으니, 편집 페이지에는 외부 스크립트를 두지 마세요."
+              "value": "승인한 컬렉션만 다룰 수 있는 관리자 클라이언트입니다."
             }
           ]
         }
@@ -634,63 +292,25 @@
       "extends": [],
       "members": [
         {
-          "name": "expiresAt",
-          "optional": false,
-          "signature": "expiresAt: number",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "세션이 끝나는 유닉스 밀리초입니다(최대 24시간). 이 시각이 지나거나 서버가 401로 답하면 요청은 "
-                },
-                {
-                  "type": "code",
-                  "value": "OWNER_SESSION_EXPIRED"
-                },
-                {
-                  "type": "text",
-                  "value": "로 실패하고, 다음 "
-                },
-                {
-                  "type": "code",
-                  "value": "ownerSession()"
-                },
-                {
-                  "type": "text",
-                  "value": "은 null을 돌려줍니다."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
           "name": "files",
           "optional": false,
-          "signature": "files: {\n  delete(id: string, options?: RequestOptions): Promise<void>;\n  list(\n    options?: RequestOptions & {\n      limit?: number;\n      pageToken?: string | null;\n    },\n  ): Promise<{ files: StoredFile[]; nextPageToken: string | null }>;\n  upload(\n    file: Blob | File,\n    options?: RequestOptions,\n  ): Promise<StoredFile>;\n}",
+          "signature": "files: {\n  upload(\n    file: Blob | File,\n    options?: RequestOptions,\n  ): Promise<StoredFile>;\n}",
           "summary": [],
           "throws": []
         },
         {
-          "name": "batch",
+          "name": "atomic",
           "optional": false,
-          "signature": "batch(\n  operations: BatchOperation[],\n  options?: RequestOptions,\n): Promise<(Written | { success: true })[]>",
+          "signature": "atomic(\n  operations: AtomicOperation[],\n  options?: RequestOptions,\n): Promise<(WriteResult | { success: true })[]>",
           "summary": [
             {
               "type": "paragraph",
               "spans": [
                 {
                   "type": "text",
-                  "value": "전부 반영하거나 전부 되돌립니다. 결과는 넘긴 순서대로입니다."
+                  "value": "모든 작업을 반영하거나 하나도 반영하지 않습니다."
                 }
               ]
-            },
-            {
-              "type": "code",
-              "language": "javascript",
-              "code": "await owner.batch([\n  { type: \"set\", collection: \"posts\", id: \"hello\", data: post },\n  { type: \"delete\", collection: \"drafts\", id: \"hello\" },\n]);"
             }
           ],
           "throws": []
@@ -706,17 +326,7 @@
           "name": "signOut",
           "optional": false,
           "signature": "signOut(): Promise<void>",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "이 탭의 세션을 지운 뒤 서버에 폐기를 요청합니다. 연결이 끊겨 있으면 폐기 요청은 실패할 수 있습니다."
-                }
-              ]
-            }
-          ],
+          "summary": [],
           "throws": []
         }
       ]
@@ -724,17 +334,7 @@
     {
       "name": "Page",
       "kind": "interface",
-      "summary": [
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "컬렉션 하나의 한 쪽입니다."
-            }
-          ]
-        }
-      ],
+      "summary": [],
       "throws": [],
       "signature": "interface Page<T>",
       "extends": [],
@@ -747,49 +347,17 @@
           "throws": []
         },
         {
-          "name": "nextPageToken",
+          "name": "nextCursor",
           "optional": false,
-          "signature": "nextPageToken: string | null",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "마지막 쪽이면 "
-                },
-                {
-                  "type": "code",
-                  "value": "null"
-                },
-                {
-                  "type": "text",
-                  "value": "입니다."
-                }
-              ]
-            }
-          ],
+          "signature": "nextCursor: string | null",
+          "summary": [],
           "throws": []
         },
         {
-          "name": "total",
+          "name": "totalCount",
           "optional": true,
-          "signature": "total?: number",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "code",
-                  "value": "includeTotal"
-                },
-                {
-                  "type": "text",
-                  "value": "을 넘겼을 때만 있습니다."
-                }
-              ]
-            }
-          ],
+          "signature": "totalCount?: number",
+          "summary": [],
           "throws": []
         }
       ]
@@ -797,17 +365,7 @@
     {
       "name": "RangeFilter",
       "kind": "interface",
-      "summary": [
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "범위 비교입니다. 문자열 경계는 문자열 필드와, 수 경계는 수 필드와만 비교되고, 필드가 없는 문서는 빠집니다."
-            }
-          ]
-        }
-      ],
+      "summary": [],
       "throws": [],
       "signature": "interface RangeFilter",
       "extends": [],
@@ -854,70 +412,7 @@
           "name": "signal",
           "optional": true,
           "signature": "signal?: AbortSignal",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "취소하면 요청이 "
-                },
-                {
-                  "type": "code",
-                  "value": "AbortError"
-                },
-                {
-                  "type": "text",
-                  "value": "로 끝납니다."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        }
-      ]
-    },
-    {
-      "name": "SiteOptions",
-      "kind": "interface",
-      "summary": [
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "어느 사이트의 데이터인지 정합니다."
-            }
-          ]
-        }
-      ],
-      "throws": [],
-      "signature": "interface SiteOptions",
-      "extends": [],
-      "members": [
-        {
-          "name": "site",
-          "optional": true,
-          "signature": "site?: string",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "나루 로그인 이름입니다. "
-                },
-                {
-                  "type": "code",
-                  "value": "이름.naru.pub"
-                },
-                {
-                  "type": "text",
-                  "value": "에 올린 페이지에서는 생략합니다."
-                }
-              ]
-            }
-          ],
+          "summary": [],
           "throws": []
         }
       ]
@@ -925,17 +420,7 @@
     {
       "name": "StoredFile",
       "kind": "interface",
-      "summary": [
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "미디어 라이브러리에 있는 파일입니다."
-            }
-          ]
-        }
-      ],
+      "summary": [],
       "throws": [],
       "signature": "interface StoredFile",
       "extends": [],
@@ -965,17 +450,7 @@
           "name": "name",
           "optional": false,
           "signature": "name: string",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "원래 파일 이름입니다. 줄인 사진은 확장자가 바뀝니다."
-                }
-              ]
-            }
-          ],
+          "summary": [],
           "throws": []
         },
         {
@@ -996,17 +471,57 @@
           "name": "url",
           "optional": false,
           "signature": "url: string",
+          "summary": [],
+          "throws": []
+        }
+      ]
+    },
+    {
+      "name": "WriteOptions",
+      "kind": "interface",
+      "summary": [],
+      "throws": [],
+      "signature": "interface WriteOptions extends RequestOptions",
+      "extends": [
+        "RequestOptions"
+      ],
+      "members": [
+        {
+          "name": "ifAbsent",
+          "optional": true,
+          "signature": "ifAbsent?: boolean",
           "summary": [
             {
               "type": "paragraph",
               "spans": [
                 {
+                  "type": "text",
+                  "value": "문서가 아직 없을 때만 씁니다."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "ifRevision",
+          "optional": true,
+          "signature": "ifRevision?: string",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "읽어 둔 문서의 "
+                },
+                {
                   "type": "code",
-                  "value": "media.naru.pub"
+                  "value": "revision"
                 },
                 {
                   "type": "text",
-                  "value": "의 공개 주소입니다. 이 파일을 쓰는 문서에 이 주소를 저장하세요. 파일이 어느 문서에 쓰이는지는 나루가 기록하지 않습니다."
+                  "value": "과 같을 때만 씁니다."
                 }
               ]
             }
@@ -1016,7 +531,7 @@
       ]
     },
     {
-      "name": "Written",
+      "name": "WriteResult",
       "kind": "interface",
       "summary": [
         {
@@ -1024,13 +539,13 @@
           "spans": [
             {
               "type": "text",
-              "value": "쓰기가 반영되면 돌아오는 값입니다. 방금 저장한 것을 그릴 때 브라우저 시계 대신 이 시각을 쓰세요."
+              "value": "쓰기가 반영된 뒤의 서버 메타데이터입니다."
             }
           ]
         }
       ],
       "throws": [],
-      "signature": "interface Written",
+      "signature": "interface WriteResult",
       "extends": [],
       "members": [
         {
@@ -1048,23 +563,23 @@
           "throws": []
         },
         {
-          "name": "updatedAt",
+          "name": "revision",
           "optional": false,
-          "signature": "updatedAt: string",
+          "signature": "revision: string",
           "summary": [],
           "throws": []
         },
         {
-          "name": "version",
+          "name": "updatedAt",
           "optional": false,
-          "signature": "version: number",
+          "signature": "updatedAt: string",
           "summary": [],
           "throws": []
         }
       ]
     },
     {
-      "name": "NaruDataError",
+      "name": "NaruError",
       "kind": "class",
       "summary": [
         {
@@ -1072,126 +587,57 @@
           "spans": [
             {
               "type": "text",
-              "value": "데이터 API가 오류로 답한 요청입니다."
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "연결이 끊긴 요청은 "
+              "value": "프로그램은 HTTP 상태가 아니라 "
             },
             {
               "type": "code",
-              "value": "fetch"
+              "value": "code"
             },
             {
               "type": "text",
-              "value": "의 "
-            },
-            {
-              "type": "code",
-              "value": "TypeError"
-            },
-            {
-              "type": "text",
-              "value": "로, 취소한 요청은 "
-            },
-            {
-              "type": "code",
-              "value": "AbortError"
-            },
-            {
-              "type": "text",
-              "value": "로 그대로 전달됩니다."
+              "value": "로 실패를 구분하세요."
             }
           ]
         }
       ],
       "throws": [],
-      "signature": "class NaruDataError extends Error",
+      "signature": "class NaruError extends Error",
       "extends": [
         "Error"
       ],
       "members": [
         {
+          "name": "cause",
+          "optional": true,
+          "signature": "cause?: unknown",
+          "summary": [],
+          "throws": []
+        },
+        {
           "name": "code",
           "optional": false,
-          "signature": "code: string",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "프로그램이 판단할 수 있는 실패 코드입니다. "
-                },
-                {
-                  "type": "code",
-                  "value": "VERSION_CONFLICT"
-                },
-                {
-                  "type": "text",
-                  "value": ", "
-                },
-                {
-                  "type": "code",
-                  "value": "OWNER_SESSION_EXPIRED"
-                },
-                {
-                  "type": "text",
-                  "value": ", "
-                },
-                {
-                  "type": "code",
-                  "value": "COLLECTION_NOT_AUTHORIZED"
-                },
-                {
-                  "type": "text",
-                  "value": ", "
-                },
-                {
-                  "type": "code",
-                  "value": "UNREGISTERED_REDIRECT_URI"
-                },
-                {
-                  "type": "text",
-                  "value": " 등이 있고, 분류되지 않은 실패는 "
-                },
-                {
-                  "type": "code",
-                  "value": "REQUEST_FAILED"
-                },
-                {
-                  "type": "text",
-                  "value": "입니다. 성공 상태인데 JSON이 아닌 응답(프록시 오류 페이지 등)은 "
-                },
-                {
-                  "type": "code",
-                  "value": "INVALID_RESPONSE"
-                },
-                {
-                  "type": "text",
-                  "value": "입니다."
-                }
-              ]
-            }
-          ],
+          "signature": "code: NaruErrorCode",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "retryable",
+          "optional": false,
+          "signature": "retryable: boolean",
+          "summary": [],
           "throws": []
         },
         {
           "name": "status",
-          "optional": false,
-          "signature": "status: number",
+          "optional": true,
+          "signature": "status?: number",
           "summary": [
             {
               "type": "paragraph",
               "spans": [
                 {
                   "type": "text",
-                  "value": "HTTP 상태 코드입니다."
+                  "value": "진단용 값입니다. 프로그램의 흐름을 이 값에 의존하지 마세요."
                 }
               ]
             }
@@ -1201,49 +647,18 @@
       ]
     },
     {
-      "name": "BatchOperation",
+      "name": "AtomicOperation",
       "kind": "type",
-      "summary": [
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "code",
-              "value": "add"
-            },
-            {
-              "type": "text",
-              "value": "와 "
-            },
-            {
-              "type": "code",
-              "value": "set"
-            },
-            {
-              "type": "text",
-              "value": "은 쓰기 결과를, "
-            },
-            {
-              "type": "code",
-              "value": "delete"
-            },
-            {
-              "type": "text",
-              "value": "는 "
-            },
-            {
-              "type": "code",
-              "value": "{ success: true }"
-            },
-            {
-              "type": "text",
-              "value": "를 돌려줍니다."
-            }
-          ]
-        }
-      ],
+      "summary": [],
       "throws": [],
-      "signature": "type BatchOperation =\n  | { collection: string; data: Json; type: \"add\" }\n  | ({\n      collection: string;\n      data: Json;\n      id: string;\n      type: \"set\";\n    } & Conditional)\n  | ({ collection: string; id: string; type: \"delete\" } & Conditional)"
+      "signature": "type AtomicOperation =\n  | { collection: string; data: Json; type: \"add\" }\n  | ({ collection: string; data: Json; id: string; type: \"set\" } & Omit<\n      WriteOptions,\n      \"signal\"\n    >)\n  | ({ collection: string; id: string; type: \"delete\" } & Omit<\n      WriteOptions,\n      \"signal\"\n    >)"
+    },
+    {
+      "name": "Direction",
+      "kind": "type",
+      "summary": [],
+      "throws": [],
+      "signature": "type Direction = \"asc\" | \"desc\""
     },
     {
       "name": "Filter",
@@ -1254,15 +669,7 @@
           "spans": [
             {
               "type": "text",
-              "value": "최상위 필드 조건을 최대 5개까지 AND로 묶습니다. 값은 정확히 같은지를, 비교 객체는 범위를 봅니다. "
-            },
-            {
-              "type": "code",
-              "value": "{}"
-            },
-            {
-              "type": "text",
-              "value": "는 거르지 않는다는 뜻입니다. 주소에 실려 가므로 비밀 값으로 거르지 마세요."
+              "value": "최상위 사용자 필드 조건을 최대 5개까지 AND로 묶습니다."
             }
           ]
         }
@@ -1273,19 +680,16 @@
     {
       "name": "Json",
       "kind": "type",
-      "summary": [
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "JSON으로 오갈 수 있는 값입니다. 날짜는 문자열로 바꿔 저장하세요."
-            }
-          ]
-        }
-      ],
+      "summary": [],
       "throws": [],
       "signature": "type Json =\n  | null\n  | boolean\n  | number\n  | string\n  | Json[]\n  | { [key: string]: Json }"
+    },
+    {
+      "name": "NaruErrorCode",
+      "kind": "type",
+      "summary": [],
+      "throws": [],
+      "signature": "type NaruErrorCode =\n  | \"CONFLICT\"\n  | \"AUTH_REQUIRED\"\n  | \"ACCESS_DENIED\"\n  | \"NOT_FOUND\"\n  | \"RATE_LIMITED\"\n  | \"INVALID_REQUEST\"\n  | \"REDIRECT_NOT_REGISTERED\"\n  | \"UNAVAILABLE\""
     },
     {
       "name": "OrderBy",
@@ -1296,19 +700,11 @@
           "spans": [
             {
               "type": "text",
-              "value": "한두 개의 "
+              "value": "사용자 필드는 이름 그대로, 메타데이터는 "
             },
             {
               "type": "code",
-              "value": "[필드, 방향]"
-            },
-            {
-              "type": "text",
-              "value": "입니다. 필드는 "
-            },
-            {
-              "type": "code",
-              "value": "createdAt"
+              "value": "$id"
             },
             {
               "type": "text",
@@ -1316,7 +712,7 @@
             },
             {
               "type": "code",
-              "value": "updatedAt"
+              "value": "$createdAt"
             },
             {
               "type": "text",
@@ -1324,25 +720,17 @@
             },
             {
               "type": "code",
-              "value": "data.<최상위 필드>"
+              "value": "$updatedAt"
             },
             {
               "type": "text",
-              "value": "이고, 문서 ID가 마지막 기준으로 자동으로 붙습니다. ID만으로 정렬하려면 "
-            },
-            {
-              "type": "code",
-              "value": "[[\"id\", \"desc\"]]"
-            },
-            {
-              "type": "text",
-              "value": "처럼 혼자 쓰세요. 생략하면 ID 오름차순입니다."
+              "value": "입니다."
             }
           ]
         }
       ],
       "throws": [],
-      "signature": "type OrderBy =\n  | [[string, \"asc\" | \"desc\"]]\n  | [[string, \"asc\" | \"desc\"], [string, \"asc\" | \"desc\"]]"
+      "signature": "type OrderBy =\n  | [[string, Direction]]\n  | [[string, Direction], [string, Direction]]"
     }
   ]
 }

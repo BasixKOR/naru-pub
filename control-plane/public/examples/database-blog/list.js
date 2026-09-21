@@ -20,8 +20,8 @@ async function load(reset = false) {
     const page = await db.collection(guestbook ? "guestbook" : "posts").list({
       limit: 20,
       where: category ? { category } : {},
-      orderBy: [["createdAt", "desc"]],
-      pageToken: cursor,
+      orderBy: [["$createdAt", "desc"]],
+      cursor,
     });
     if (reset) $("entries").replaceChildren();
     for (const doc of page.documents) {
@@ -46,7 +46,7 @@ async function load(reset = false) {
       card.append(element("p", date(doc.createdAt), "meta"));
       $("entries").append(card);
     }
-    cursor = page.nextPageToken;
+    cursor = page.nextCursor;
     $("more").hidden = !cursor;
     message(
       $("entries").children.length

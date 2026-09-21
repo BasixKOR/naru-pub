@@ -1,15 +1,29 @@
 /** Naru Data SDK 1.0.0. This release is still under active development. */
 
-/** A request the data API answered with an error. */
-export class NaruDataError extends Error {
-  constructor(status, message, code) {
+/** A Naru operation that could not be completed. */
+export class NaruError extends Error {
+  constructor(message, code, { status, retryable = false, cause } = {}) {
     super(message);
-    this.name = "NaruDataError";
+    this.name = "NaruError";
     this.status = status;
-    this.code =
-      code || (status === 401 ? "OWNER_SESSION_EXPIRED" : "REQUEST_FAILED");
+    this.code = code;
+    this.retryable = retryable;
+    if (cause !== undefined) this.cause = cause;
   }
 }
+
+const errorCode = (status, code) => {
+  if (code === "VERSION_CONFLICT") return "CONFLICT";
+  if (code === "OWNER_SESSION_EXPIRED" || status === 401)
+    return "AUTH_REQUIRED";
+  if (code === "COLLECTION_NOT_AUTHORIZED" || status === 403)
+    return "ACCESS_DENIED";
+  if (code === "UNREGISTERED_REDIRECT_URI") return "REDIRECT_NOT_REGISTERED";
+  if (status === 404) return "NOT_FOUND";
+  if (status === 429) return "RATE_LIMITED";
+  if (status >= 500) return "UNAVAILABLE";
+  return "INVALID_REQUEST";
+};
 
 const CONTROL_PLANE = "https://naru.pub";
 const SITE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -71,10 +85,17 @@ async function request(url, { method = "GET", body, token, signal, touches }) {
       redirect: "error",
       cache: fresh ? "no-store" : "default",
       headers: {
+        Accept: "application/vnd.naru.data.v1+json",
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (cause) {
+    if (cause?.name === "AbortError") throw cause;
+    throw new NaruError("Naru is unavailable.", "UNAVAILABLE", {
+      retryable: true,
+      cause,
     });
   } finally {
     // Also when the response was lost: the write may still have landed.
@@ -84,36 +105,81 @@ async function request(url, { method = "GET", body, token, signal, touches }) {
   }
   const result = await response.json().catch(() => null);
   if (!response.ok)
-    throw new NaruDataError(
-      response.status,
+    throw new NaruError(
       result?.error ?? `Database request failed (HTTP ${response.status}).`,
-      result?.code,
+      errorCode(response.status, result?.code),
+      {
+        status: response.status,
+        retryable: response.status === 429 || response.status >= 500,
+      },
     );
   // A proxy or challenge page can answer 200 with HTML. Handing that back as
   // an empty result would make a missing document look like a present one.
   if (result === null || typeof result !== "object")
-    throw new NaruDataError(
-      response.status,
+    throw new NaruError(
       "The data API did not answer with JSON.",
-      "INVALID_RESPONSE",
+      "UNAVAILABLE",
+      { status: response.status, retryable: true },
     );
   return result;
 }
 
-function query({ where, orderBy, limit, pageToken, includeTotal } = {}) {
+function query({ where, orderBy, limit, cursor, count } = {}) {
   const parameters = new URLSearchParams();
   if (where && Object.keys(where).length)
     parameters.set("where", JSON.stringify(where));
-  if (orderBy) parameters.set("orderBy", JSON.stringify(orderBy));
+  if (orderBy) {
+    const fields = orderBy.map(([field, direction]) => {
+      if (typeof field !== "string" || field.startsWith("data."))
+        throw new TypeError("Sort user fields without a data. prefix.");
+      const wire = {
+        $id: "id",
+        $createdAt: "createdAt",
+        $updatedAt: "updatedAt",
+      }[field];
+      if (!wire && field.startsWith("$"))
+        throw new TypeError(`Unknown metadata field: ${field}`);
+      return [wire ?? `data.${field}`, direction];
+    });
+    parameters.set("orderBy", JSON.stringify(fields));
+  }
   if (limit !== undefined) parameters.set("limit", String(limit));
-  if (pageToken) parameters.set("pageToken", pageToken);
-  if (includeTotal) parameters.set("includeTotal", "1");
+  if (cursor) parameters.set("pageToken", cursor);
+  if (count) parameters.set("includeTotal", "1");
   const text = String(parameters);
   return text ? `?${text}` : "";
 }
 
-const version = (ifVersion) =>
-  ifVersion === undefined ? "" : `?ifVersion=${ifVersion}`;
+const revision = (version) => {
+  if (!Number.isSafeInteger(version) || version < 1)
+    throw new NaruError("Naru returned an invalid revision.", "UNAVAILABLE", {
+      retryable: true,
+    });
+  return `r1.${version.toString(36)}`;
+};
+function version({ ifRevision, ifAbsent } = {}) {
+  if (ifRevision !== undefined && ifAbsent)
+    throw new TypeError("Use either ifRevision or ifAbsent, not both.");
+  if (ifAbsent) return "?ifVersion=0";
+  if (ifRevision === undefined) return "";
+  const match = /^r1\.([0-9a-z]+)$/.exec(ifRevision);
+  const value = match ? Number.parseInt(match[1], 36) : NaN;
+  if (!Number.isSafeInteger(value) || value < 1)
+    throw new TypeError("ifRevision must be a revision returned by Naru.");
+  return `?ifVersion=${value}`;
+}
+
+const document = ({ version: value, ...result }) => ({
+  ...result,
+  revision: revision(value),
+});
+const written = document;
+const page = ({ documents: rows, nextPageToken, total, ...rest }) => ({
+  ...rest,
+  documents: rows.map(document),
+  nextCursor: nextPageToken,
+  ...(total === undefined ? {} : { totalCount: total }),
+});
 
 function documents(root, name, send) {
   const path = `${root}/${segment(name)}`;
@@ -121,27 +187,34 @@ function documents(root, name, send) {
   return Object.freeze({
     async get(id, { signal } = {}) {
       const result = await send(`${path}/${segment(id)}`, { signal, touches });
-      return result.document;
+      return document(result.document);
     },
-    list(options = {}) {
-      return send(`${path}${query(options)}`, {
-        signal: options.signal,
-        touches,
-      });
+    async list(options = {}) {
+      return page(
+        await send(`${path}${query(options)}`, {
+          signal: options.signal,
+          touches,
+        }),
+      );
     },
     add(data, { signal } = {}) {
-      return send(path, { method: "POST", body: { data }, signal, touches });
+      return send(path, {
+        method: "POST",
+        body: { data },
+        signal,
+        touches,
+      }).then(written);
     },
-    set(id, data, { ifVersion, signal } = {}) {
-      return send(`${path}/${segment(id)}${version(ifVersion)}`, {
+    set(id, data, { signal, ...condition } = {}) {
+      return send(`${path}/${segment(id)}${version(condition)}`, {
         method: "PUT",
         body: { data },
         signal,
         touches,
-      });
+      }).then(written);
     },
-    async delete(id, { ifVersion, signal } = {}) {
-      await send(`${path}/${segment(id)}${version(ifVersion)}`, {
+    async delete(id, { signal, ...condition } = {}) {
+      await send(`${path}/${segment(id)}${version(condition)}`, {
         method: "DELETE",
         signal,
         touches,
@@ -151,10 +224,6 @@ function documents(root, name, send) {
 }
 
 /** A collection of the site this page belongs to. Nothing is requested yet. */
-export function collection(name, options) {
-  return documents(target(options).root, name, request);
-}
-
 // Photos straight off a phone are several megabytes and thousands of pixels
 // for an image a page shows at a fraction of that. Uploads go straight to
 // object storage, so the browser is the only place to shrink them: before the
@@ -231,38 +300,45 @@ function owner(context, token, expiresAt) {
   const send = async (url, init) => {
     if (Date.now() >= expiresAt) {
       forget(key, token);
-      throw new NaruDataError(401, "Owner session expired. Sign in again.");
+      throw new NaruError("Sign in again.", "AUTH_REQUIRED");
     }
     try {
       return await request(url, { ...init, token });
     } catch (error) {
-      if (error.status === 401) forget(key, token);
+      if (error.code === "AUTH_REQUIRED") forget(key, token);
       throw error;
     }
   };
   return Object.freeze({
-    /** Unix milliseconds after which requests fail and sign-in is needed. */
-    expiresAt,
     collection: (name) => documents(root, name, send),
-    async batch(operations, { signal } = {}) {
+    async atomic(operations, { signal } = {}) {
       const touches = [
         ...new Set(operations.map((item) => `${root}/${item.collection}`)),
       ];
+      const wire = operations.map(({ ifRevision, ifAbsent, ...operation }) => {
+        const search = version({ ifRevision, ifAbsent });
+        return {
+          ...operation,
+          ...(search
+            ? {
+                ifVersion: Number(
+                  new URLSearchParams(search.slice(1)).get("ifVersion"),
+                ),
+              }
+            : {}),
+        };
+      });
       const result = await send(`${root}/_batch`, {
         method: "POST",
-        body: { operations },
+        body: { operations: wire },
         signal,
         touches,
       });
-      return result.results;
+      return result.results.map((item) =>
+        "version" in item ? written(item) : item,
+      );
     },
     files: Object.freeze({
-      list(options = {}) {
-        return send(`${root}/_files${query(options)}`, {
-          signal: options.signal,
-          touches: [],
-        });
-      },
       async upload(source, { signal } = {}) {
         const file = await shrink(source);
         const authorization = await send(`${root}/_files`, {
@@ -275,32 +351,35 @@ function owner(context, token, expiresAt) {
           signal,
           touches: [],
         });
-        const upload = await fetch(authorization.uploadUrl, {
-          method: "PUT",
-          headers: authorization.headers,
-          body: file,
-          signal,
-          credentials: "omit",
-          redirect: "error",
-        });
+        let upload;
+        try {
+          upload = await fetch(authorization.uploadUrl, {
+            method: "PUT",
+            headers: authorization.headers,
+            body: file,
+            signal,
+            credentials: "omit",
+            redirect: "error",
+          });
+        } catch (cause) {
+          if (cause?.name === "AbortError") throw cause;
+          throw new NaruError("File upload failed.", "UNAVAILABLE", {
+            retryable: true,
+            cause,
+          });
+        }
         // An upload that never finishes is removed by the server within an hour.
         if (!upload.ok)
-          throw new NaruDataError(
-            upload.status,
+          throw new NaruError(
             `File upload failed (HTTP ${upload.status}).`,
+            "UNAVAILABLE",
+            { status: upload.status, retryable: upload.status >= 500 },
           );
         const finished = await send(
           `${root}/_files/${segment(authorization.id)}`,
           { method: "PUT", body: {}, signal, touches: [] },
         );
         return finished.file;
-      },
-      async delete(id, { signal } = {}) {
-        await send(`${root}/_files/${segment(id)}`, {
-          method: "DELETE",
-          signal,
-          touches: [],
-        });
       },
     }),
     /** Forgets the session here first, then asks Naru to revoke it. */
@@ -328,8 +407,7 @@ const callback = () => location.origin + location.pathname;
  * back to this page. Register this page's URL as an administrator callback in
  * the control panel first.
  */
-export async function signIn({ collections, ...options }) {
-  const context = target(options);
+async function signIn(context, collections) {
   const { site, origin } = context;
   const discovery = new URL("/api/data-auth/discover", origin);
   discovery.search = String(
@@ -365,8 +443,7 @@ export async function signIn({ collections, ...options }) {
  * Naru has just redirected back, and otherwise restores this tab's session.
  * Call it before rendering: it removes the one-time code from the address bar.
  */
-export async function ownerSession(options) {
-  const context = target(options);
+async function ownerSession(context) {
   const key = sessionKey(context);
   const url = new URL(location.href);
   const code = url.searchParams.get("code");
@@ -398,8 +475,12 @@ export async function ownerSession(options) {
     pending.state !== state ||
     !(Date.now() - pending.startedAt < 10 * 60 * 1000)
   )
-    throw new NaruDataError(401, "Sign-in expired or did not start here.");
-  if (denied !== null) throw new NaruDataError(403, "Sign-in was denied.");
+    throw new NaruError(
+      "Sign-in expired or did not start here.",
+      "AUTH_REQUIRED",
+    );
+  if (denied !== null)
+    throw new NaruError("Sign-in was denied.", "ACCESS_DENIED");
   const token = await request(`${context.origin}/api/data-auth/token`, {
     method: "POST",
     body: {
@@ -418,4 +499,16 @@ export async function ownerSession(options) {
     }),
   );
   return owner(context, token.accessToken, token.expiresAt);
+}
+
+/** Creates a client for one Naru site. */
+export function createNaru(options) {
+  const context = target(options);
+  return Object.freeze({
+    collection: (name) => documents(context.root, name, request),
+    auth: Object.freeze({
+      session: () => ownerSession(context),
+      signIn: ({ collections }) => signIn(context, collections),
+    }),
+  });
 }

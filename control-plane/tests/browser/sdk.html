@@ -10,12 +10,8 @@
 <button id="reload">Check page reload</button>
 <pre id="results" role="status">Ready</pre>
 <script type="module">
-  import {
-    collection,
-    NaruDataError,
-    ownerSession,
-  } from "/sdk/1.0.0/naru-data.js";
-  const site = { site: "sdk-browser-test" };
+  import { createNaru, NaruError } from "/sdk/1.0.0/naru-data.js";
+  const naru = createNaru({ site: "sdk-browser-test" });
   const sessionKey = `naru:owner:https://naru.pub:sdk-browser-test:${location.origin}${location.pathname}`;
   const reloadKey = "naru-sdk-fixture-reload";
   const output = document.querySelector("#results");
@@ -32,11 +28,10 @@
   const reloadDeadline = sessionStorage.getItem(reloadKey);
   if (reloadDeadline) {
     try {
-      const owner = await ownerSession(site);
-      output.textContent =
-        owner?.expiresAt === Number(reloadDeadline)
-          ? "PASS actual page reload restores the original deadline"
-          : "FAIL page reload changed or lost the deadline";
+      const owner = await naru.auth.session();
+      output.textContent = owner
+        ? "PASS actual page reload restores the session"
+        : "FAIL page reload lost the session";
     } finally {
       sessionStorage.removeItem(reloadKey);
       sessionStorage.removeItem(sessionKey);
@@ -67,11 +62,8 @@
     const original = window.fetch;
     try {
       saveSession(Date.now() + 60000);
-      const owner = await ownerSession(site);
-      check(
-        owner?.expiresAt > Date.now(),
-        "native sessionStorage restores a session",
-      );
+      const owner = await naru.auth.session();
+      check(owner, "native sessionStorage restores a session");
 
       const calls = [];
       window.fetch = async (url, init = {}) => {
@@ -87,11 +79,11 @@
             : { documents: [], nextPageToken: null },
         );
       };
-      const notes = collection("notes", site);
+      const notes = naru.collection("notes");
       await notes.list({ where: { tag: "한글" } });
       await owner
         .collection("notes")
-        .set("one", { title: "x" }, { ifVersion: 1 });
+        .set("one", { title: "x" }, { ifRevision: "r1.1" });
       await notes.list({ where: { tag: "한글" } });
       check(
         JSON.parse(calls[0].url.searchParams.get("where")).tag === "한글",
@@ -122,9 +114,7 @@
       try {
         await owner.collection("notes").get("one");
       } catch (error) {
-        expired =
-          error instanceof NaruDataError &&
-          error.code === "OWNER_SESSION_EXPIRED";
+        expired = error instanceof NaruError && error.code === "AUTH_REQUIRED";
       }
       check(
         expired && !sessionStorage.getItem(sessionKey),
@@ -132,7 +122,7 @@
       );
 
       saveSession(Date.now() + 60000);
-      const uploader = await ownerSession(site);
+      const uploader = await naru.auth.session();
       const declared = [];
       window.fetch = async (url, init = {}) => {
         if (String(url).endsWith("/upload")) return original("/upload", init);

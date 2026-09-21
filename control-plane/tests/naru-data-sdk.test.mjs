@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  collection,
-  NaruDataError,
-  ownerSession,
-  signIn,
-} from "../public/sdk/1.0.0/naru-data.js";
+import { createNaru, NaruError } from "../public/sdk/1.0.0/naru-data.js";
+
+const collection = (name, options) => createNaru(options).collection(name);
+const ownerSession = (options) => createNaru(options).auth.session();
+const signIn = ({ collections, ...options }) =>
+  createNaru(options).auth.signIn({ collections });
 
 const SESSION =
   "naru:owner:https://naru.pub:alice:https://alice.naru.pub/admin.html";
@@ -83,6 +83,7 @@ const written = (id = "one", version = 1) => ({
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 });
+const revision = (version = 1) => `r1.${version.toString(36)}`;
 const saveSession = (storage, expiresAt = Date.now() + 3600000) =>
   storage.set(
     SESSION,
@@ -132,10 +133,24 @@ test("documents are read and written with plain requests that carry no cookies",
       ),
     );
     const posts = collection("posts");
-    assert.deepEqual(await posts.get("one"), document);
-    assert.deepEqual(await posts.add({ title: "new" }), written());
-    await posts.set("one", { title: "x" }, { ifVersion: 0 });
-    assert.equal(await posts.delete("one", { ifVersion: 3 }), undefined);
+    assert.deepEqual(await posts.get("one"), {
+      id: "one",
+      data: { title: "hello" },
+      revision: "r1.1",
+      createdAt: document.createdAt,
+      updatedAt: document.updatedAt,
+    });
+    assert.deepEqual(await posts.add({ title: "new" }), {
+      id: "one",
+      revision: "r1.1",
+      createdAt: written().createdAt,
+      updatedAt: written().updatedAt,
+    });
+    await posts.set("one", { title: "x" }, { ifAbsent: true });
+    assert.equal(
+      await posts.delete("one", { ifRevision: revision(3) }),
+      undefined,
+    );
     assert.deepEqual(
       calls.map(({ method, url }) => [method, url.pathname + url.search]),
       [
@@ -146,11 +161,13 @@ test("documents are read and written with plain requests that carry no cookies",
       ],
     );
     assert.deepEqual(JSON.parse(calls[1].body), { data: { title: "new" } });
+    assert.equal((await posts.add({ title: "revision" })).revision, "r1.1");
     assert.equal(calls[3].body, undefined);
     for (const call of calls) {
       assert.equal(call.credentials, "omit");
       assert.equal(call.redirect, "error");
       assert.equal(call.headers.Authorization, undefined);
+      assert.equal(call.headers.Accept, "application/vnd.naru.data.v1+json");
     }
     // ".." would resolve to another path once inside a URL.
     assert.throws(() => posts.set("..", {}), TypeError);
@@ -164,19 +181,19 @@ test("list sends only the query options that constrain something", async () => {
       Response.json({ documents: [], nextPageToken: "next", total: 3 }),
     );
     const posts = collection("posts");
-    await posts.list({ where: {}, pageToken: null });
+    await posts.list({ where: {}, cursor: null });
     assert.equal(calls[0].url.search, "");
     const page = await posts.list({
       where: { category: "일상", date: { gte: "2026-09-01" } },
       orderBy: [
-        ["data.date", "desc"],
-        ["createdAt", "desc"],
+        ["date", "desc"],
+        ["$createdAt", "desc"],
       ],
       limit: 8,
-      pageToken: "next",
-      includeTotal: true,
+      cursor: "next",
+      count: true,
     });
-    assert.equal(page.total, 3);
+    assert.equal(page.totalCount, 3);
     const search = calls[1].url.searchParams;
     assert.deepEqual(JSON.parse(search.get("where")), {
       category: "일상",
@@ -192,7 +209,7 @@ test("list sends only the query options that constrain something", async () => {
   });
 });
 
-test("server errors carry status and code; transport failures stay native", async () => {
+test("errors have semantic codes and transport details stay diagnostic", async () => {
   await browser(async ({ respond }) => {
     const posts = collection("posts");
     respond(() =>
@@ -201,30 +218,33 @@ test("server errors carry status and code; transport failures stay native", asyn
         { status: 409 },
       ),
     );
-    await assert.rejects(posts.set("one", {}, { ifVersion: 1 }), (error) => {
-      assert.ok(error instanceof NaruDataError);
-      assert.equal(error.status, 409);
-      assert.equal(error.code, "VERSION_CONFLICT");
-      assert.equal(error.message, "Document version does not match.");
-      return true;
-    });
+    await assert.rejects(
+      posts.set("one", {}, { ifRevision: revision(1) }),
+      (error) => {
+        assert.ok(error instanceof NaruError);
+        assert.equal(error.status, 409);
+        assert.equal(error.code, "CONFLICT");
+        assert.equal(error.message, "Document version does not match.");
+        return true;
+      },
+    );
     // A challenge or proxy page can answer 200; it is not an empty result.
     respond(() => new Response("<html>checking your browser</html>"));
     await assert.rejects(posts.get("one"), {
       status: 200,
-      code: "INVALID_RESPONSE",
+      code: "UNAVAILABLE",
     });
     respond(() => Response.json(null));
-    await assert.rejects(posts.list(), { code: "INVALID_RESPONSE" });
+    await assert.rejects(posts.list(), { code: "UNAVAILABLE" });
     respond(() => new Response("<html>bad gateway</html>", { status: 502 }));
     await assert.rejects(posts.get("one"), {
       status: 502,
-      code: "REQUEST_FAILED",
+      code: "UNAVAILABLE",
     });
     respond(() => {
       throw new TypeError("offline");
     });
-    await assert.rejects(posts.get("one"), TypeError);
+    await assert.rejects(posts.get("one"), { code: "UNAVAILABLE" });
     const controller = new AbortController();
     respond(({ signal }) => {
       assert.equal(signal, controller.signal);
@@ -266,7 +286,9 @@ test("a collection this browser wrote is read past the shared cache for ten seco
         if (method === "POST") throw new TypeError("offline");
         return emptyPage();
       });
-      await assert.rejects(guestbook.add({ message: "again" }), TypeError);
+      await assert.rejects(guestbook.add({ message: "again" }), {
+        code: "UNAVAILABLE",
+      });
       await guestbook.list();
       assert.equal(calls.at(-1).cache, "no-store");
     });
@@ -314,7 +336,7 @@ test("signIn discovers the client and leaves for approval with a PKCE challenge"
       ),
     );
     await assert.rejects(signIn({ collections: ["posts"] }), {
-      code: "UNREGISTERED_REDIRECT_URI",
+      code: "REDIRECT_NOT_REGISTERED",
     });
     assert.equal(location.href, "https://alice.naru.pub/admin.html");
   });
@@ -335,7 +357,7 @@ test("ownerSession exchanges the returned code once and strips it from the addre
     const expiresAt = Date.now() + 3600000;
     respond(() => Response.json({ accessToken: "t".repeat(43), expiresAt }));
     const owner = await ownerSession();
-    assert.equal(owner.expiresAt, expiresAt);
+    assert.ok(owner);
     assert.equal(location.href, "https://alice.naru.pub/admin.html?tab=2");
     assert.equal(calls[0].url.href, "https://naru.pub/api/data-auth/token");
     assert.deepEqual(JSON.parse(calls[0].body), {
@@ -350,7 +372,7 @@ test("ownerSession exchanges the returned code once and strips it from the addre
       expiresAt,
     });
     // A reload restores the same deadline without a request.
-    assert.equal((await ownerSession()).expiresAt, expiresAt);
+    assert.ok(await ownerSession());
     assert.equal(calls.length, 1);
   });
   for (const query of [
@@ -363,7 +385,7 @@ test("ownerSession exchanges the returned code once and strips it from the addre
         JSON.stringify({ state: "s1", startedAt: Date.now() }),
       );
       location.href = `https://alice.naru.pub/admin.html${query}`;
-      await assert.rejects(ownerSession(), NaruDataError);
+      await assert.rejects(ownerSession(), NaruError);
       assert.equal(calls.length, 0);
       assert.equal(location.href, "https://alice.naru.pub/admin.html");
     });
@@ -411,7 +433,7 @@ test("the owner client sends its token and forgets it when the session ends", as
 
     respond(() => Response.json({ error: "Revoked." }, { status: 401 }));
     await assert.rejects(owner.collection("posts").get("one"), {
-      code: "OWNER_SESSION_EXPIRED",
+      code: "AUTH_REQUIRED",
     });
     assert.equal(storage.has(SESSION), false);
     assert.equal(await ownerSession(), null);
@@ -423,7 +445,7 @@ test("the owner client sends its token and forgets it when the session ends", as
     Date.now = () => realNow() + 2000;
     try {
       await assert.rejects(owner.collection("posts").list(), {
-        code: "OWNER_SESSION_EXPIRED",
+        code: "AUTH_REQUIRED",
       });
     } finally {
       Date.now = realNow;
@@ -441,7 +463,7 @@ test("signing out forgets the session before revoking, and never erases a newer 
       assert.equal(storage.has(SESSION), false);
       throw new TypeError("offline");
     });
-    await assert.rejects(owner.signOut(), TypeError);
+    await assert.rejects(owner.signOut(), { code: "UNAVAILABLE" });
     assert.equal(calls[0].url.pathname, "/api/data-auth/revoke");
     assert.equal(calls[0].headers.Authorization, `Bearer ${"t".repeat(43)}`);
 
@@ -460,7 +482,7 @@ test("signing out forgets the session before revoking, and never erases a newer 
   });
 });
 
-test("batch posts operations as given and returns their results in order", async () => {
+test("atomic translates opaque revisions and returns results in order", async () => {
   await browser(async ({ calls, respond, storage }) => {
     saveSession(storage);
     const owner = await ownerSession();
@@ -468,15 +490,37 @@ test("batch posts operations as given and returns their results in order", async
       Response.json({ results: [written("hello"), { success: true }] }),
     );
     const operations = [
-      { type: "set", collection: "posts", id: "hello", data: {}, ifVersion: 0 },
+      {
+        type: "set",
+        collection: "posts",
+        id: "hello",
+        data: {},
+        ifAbsent: true,
+      },
       { type: "delete", collection: "drafts", id: "hello" },
     ];
-    assert.deepEqual(await owner.batch(operations), [
-      written("hello"),
+    assert.deepEqual(await owner.atomic(operations), [
+      {
+        id: "hello",
+        revision: "r1.1",
+        createdAt: written().createdAt,
+        updatedAt: written().updatedAt,
+      },
       { success: true },
     ]);
     assert.equal(calls[0].url.pathname, "/api/data/alice/_batch");
-    assert.deepEqual(JSON.parse(calls[0].body), { operations });
+    assert.deepEqual(JSON.parse(calls[0].body), {
+      operations: [
+        {
+          type: "set",
+          collection: "posts",
+          id: "hello",
+          data: {},
+          ifVersion: 0,
+        },
+        operations[1],
+      ],
+    });
     // The public client reads both collections past the cache afterwards.
     respond(emptyPage);
     await collection("drafts").list();
@@ -652,31 +696,5 @@ test("a failed transfer is reported and not finalized", async () => {
       { status: 403 },
     );
     assert.equal(calls.length, 2);
-  });
-});
-
-test("the media library pages newest first and deletes by ID", async () => {
-  await browser(async ({ calls, respond, storage }) => {
-    saveSession(storage);
-    const owner = await ownerSession();
-    respond(({ method }) =>
-      Response.json(
-        method === "DELETE"
-          ? { success: true }
-          : { files: [], nextPageToken: null },
-      ),
-    );
-    await owner.files.list({ limit: 100, pageToken: "next" });
-    assert.equal(calls[0].url.searchParams.get("limit"), "100");
-    assert.equal(calls[0].url.searchParams.get("pageToken"), "next");
-    // A filter is sent as given, for the server to refuse, never dropped:
-    // a caller filtering by owner would otherwise act on every file.
-    await owner.files.list({ where: { postId: "hello" } });
-    assert.equal(
-      calls[1].url.searchParams.get("where"),
-      JSON.stringify({ postId: "hello" }),
-    );
-    assert.equal(await owner.files.delete("f1"), undefined);
-    assert.equal(calls[2].url.pathname, "/api/data/alice/_files/f1");
   });
 });

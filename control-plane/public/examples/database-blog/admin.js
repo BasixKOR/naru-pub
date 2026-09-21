@@ -48,7 +48,7 @@ function updateUI() {
   for (const id of ["title", "body", "category"]) $(id).readOnly = busy;
   $("manage-list").disabled = busy || !owner;
   $("auth").textContent = owner
-    ? `관리자 로그인됨 · ${new Date(owner.expiresAt).toLocaleTimeString("ko-KR")}까지`
+    ? "관리자 로그인됨"
     : "글을 관리하려면 사이트 소유자로 로그인하세요.";
   $("editing").textContent =
     state.kind === "posts"
@@ -72,7 +72,7 @@ async function run(action) {
   try {
     await action();
   } catch (e) {
-    if (e.code === "OWNER_SESSION_EXPIRED") owner = null;
+    if (e.code === "AUTH_REQUIRED") owner = null;
     message(errorMessage(e));
   } finally {
     busy = false;
@@ -99,8 +99,8 @@ async function loadList(reset = true) {
   listKind = kind;
   const page = await owner.collection(kind).list({
     limit: 20,
-    orderBy: [["updatedAt", "desc"]],
-    pageToken: cursor,
+    orderBy: [["$updatedAt", "desc"]],
+    cursor,
   });
   for (const doc of page.documents) {
     const row = element("div", "", "manage-row");
@@ -138,7 +138,7 @@ async function loadList(reset = true) {
     row.append(button, element("span", date(doc.updatedAt), "meta"));
     $("manage-list").append(row);
   }
-  cursor = page.nextPageToken;
+  cursor = page.nextCursor;
   $("manage-more").hidden = !cursor;
   if (!$("manage-list").children.length)
     $("manage-list").append(element("p", "저장된 글이 없습니다.", "hint"));
@@ -148,13 +148,13 @@ async function refreshAfterWrite(notice) {
     await loadList(true);
     message(notice);
   } catch (e) {
-    if (e.code === "OWNER_SESSION_EXPIRED") owner = null;
+    if (e.code === "AUTH_REQUIRED") owner = null;
     message(`${notice} 목록 갱신에 실패했습니다. ${errorMessage(e)}`);
   }
 }
 try {
   db = await connect();
-  owner = await db.ownerSession();
+  owner = await db.auth.session();
   message(
     owner ? "승인되었습니다. 공개 글과 비공개 초안을 관리할 수 있습니다." : "",
   );
@@ -197,7 +197,7 @@ $("login").addEventListener("click", () =>
   run(async () => {
     saveLocal();
     db ??= await connect();
-    await db.signIn(["posts", "drafts"]);
+    await db.auth.signIn({ collections: ["posts", "drafts"] });
   }),
 );
 $("logout").addEventListener("click", () =>

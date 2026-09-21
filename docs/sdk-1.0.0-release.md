@@ -20,11 +20,11 @@ URL encoding, and crypto. API responses and credentials are synthetic; it makes
 no production writes. Stop the server afterward.
 
 Tests cover site inference from the page address, CRUD request shape and cookie
-isolation, list query encoding, server error codes with native network and abort
+isolation, list query encoding, semantic errors with normalized network failures and native abort
 errors, cache bypass after a write (including a lost one), PKCE sign-in and
 callback completion, session restore and expiry, 401 handling, sign-out that
-never erases a newer session, batch encoding, direct-to-storage upload with
-image shrinking, and the media listing. The browser fixture repeats the storage,
+never erases a newer session, atomic-write encoding, and direct-to-storage upload with
+image shrinking. The browser fixture repeats the storage,
 fetch and 401 checks natively and shrinks a real 4096 px PNG on a real canvas.
 The blog tests exercise public browsing/guestbook and admin draft/publishing flows.
 
@@ -42,13 +42,12 @@ The blog tests exercise public browsing/guestbook and admin draft/publishing flo
   non-snapshot pagination, and no automatic write retries.
 - Confirm the frozen shapes one last time, since a new versioned directory is
   the only way to change them afterwards. The surface is deliberately minimal:
-  `collection()` with `get`, `list`, `add`, `set` and `delete`; `signIn()`;
-  `ownerSession()` returning `expiresAt`, `collection()`, `batch()`,
-  `files.upload / list / delete` and `signOut()`; and `NaruDataError`. Server
+  the runtime exports `createNaru` and `NaruError`; a client has `collection()`
+  and `auth`; an owner has `collection()`, `atomic()`, `files.upload()` and
+  `signOut()`. Server
   metadata is camelCase (`createdAt`/`updatedAt`), `add` and `set` return
-  `{ id, version, createdAt, updatedAt }`, `orderBy` is always a list of
-  `[field, direction]` pairs, and `files.list()` returns a
-  `{ files, nextPageToken }` page. Anything added later is added to the server
+  `{ id, revision, createdAt, updatedAt }`, `orderBy` is always a list of
+  `[field, direction]` pairs, and pagination uses opaque cursors. Anything added later is added to the server
   contract too, so add it only when a site needs it.
 - Obtain the owner's instruction to freeze 1.0.0. Then remove its development
   notice, record release notes and checksums, and tag the exact verified commit.
@@ -82,8 +81,7 @@ to an ephemeral loopback port.
 The published SDK sends real HTTP requests to the actual data/auth route handlers
 and PostgreSQL. No service or response mocks are used. Coverage includes JSON and
 server metadata, conditional writes, filtered cursor pagination and counts, owner
-batch results and rollback, optional read parsing, media listing/paging
-filtering and patching, and token revocation. Browser
+atomic results and rollback, the minimal upload-only media surface, and token revocation. Browser
 Origin and sessionStorage are supplied by a small shim, and owner credentials are
 issued through the real authorization service during setup. This is a contract
 test, not an end-to-end browser login or object-storage upload test.

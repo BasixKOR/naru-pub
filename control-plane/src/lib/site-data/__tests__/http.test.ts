@@ -36,6 +36,7 @@ test("public requests ignore even valid owner cookies", async () => {
   expect(response.headers.get("access-control-allow-origin")).toBe("*");
   expect(response.headers.get("access-control-allow-credentials")).toBeNull();
   expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(response.headers.get("naru-data-protocol")).toBe("1");
 });
 test.each(["https://alice.naru.pub", "https://evil.test", "null", null])(
   "admin writes reject origin %s before auth",

@@ -47,7 +47,14 @@ async function page(name, db, storage = new Map(), query = "") {
     new SyntheticModule(
       ["connect"],
       function () {
-        this.setExport("connect", async () => db);
+        this.setExport("connect", async () => ({
+          ...db,
+          auth: {
+            session: () => db.auth?.session?.() ?? db.ownerSession?.(),
+            signIn: ({ collections }) =>
+              db.auth?.signIn?.({ collections }) ?? db.signIn?.(collections),
+          },
+        }));
       },
       { context },
     ),
@@ -101,9 +108,9 @@ test("post list paginates and renders hostile input as text", async () => {
                     },
                   },
                 ],
-                nextPageToken: "a",
+                nextCursor: "a",
               }
-            : { documents: [{ id: "b", data: null }], nextPageToken: null };
+            : { documents: [{ id: "b", data: null }], nextCursor: null };
         },
       };
     },
@@ -112,10 +119,10 @@ test("post list paginates and renders hostile input as text", async () => {
   assert.match(app.$("entries").textContent, /<img/);
   assert.equal(app.$("more").hidden, false);
   await app.fire("more", "click");
-  assert.equal(requests[1].pageToken, "a");
+  assert.equal(requests[1].cursor, "a");
   assert.ok(
     requests.every(
-      (r) => r.orderBy[0][0] === "createdAt" && r.orderBy[0][1] === "desc",
+      (r) => r.orderBy[0][0] === "$createdAt" && r.orderBy[0][1] === "desc",
     ),
   );
   assert.equal(app.$("entries").children.length, 2);
@@ -144,7 +151,7 @@ test("guestbook submits via add only and resets after success", async () => {
     collection(name) {
       assert.equal(name, "guestbook");
       return {
-        list: async () => ({ documents: [], nextPageToken: null }),
+        list: async () => ({ documents: [], nextCursor: null }),
         add: async (data) => {
           writes.push(data);
           return { id: "generated" };
@@ -176,7 +183,7 @@ test("admin preserves draft across login, retries same ID, fails closed on expir
   const writes = [];
   let failure = new Error("response lost");
   const owner = fakeOwner({
-    async batch(operations) {
+    async atomic(operations) {
       const operation = operations[0];
       writes.push({ id: operation.id, data: operation.data });
       if (failure) throw failure;
@@ -200,7 +207,7 @@ test("admin preserves draft across login, retries same ID, fails closed on expir
   after.$("body").value = "내용";
   failure = Object.assign(new Error("expired"), {
     status: 401,
-    code: "OWNER_SESSION_EXPIRED",
+    code: "AUTH_REQUIRED",
   });
   await after.fire("post-form", "submit");
   assert.equal(after.$("publish").disabled, true);
@@ -228,7 +235,7 @@ test("guestbook distinguishes successful save from failed list refresh", async (
     collection: () => ({
       list: async () => {
         if (++reads > 1) throw new Error("offline");
-        return { documents: [], nextPageToken: null };
+        return { documents: [], nextCursor: null };
       },
       add: async () => ({ id: "saved" }),
     }),
@@ -270,7 +277,7 @@ test("category changes reset the cursor and preserve filters on subsequent pages
               data: { title: "제목", category: "일상" },
             },
           ],
-          nextPageToken: "v1.next",
+          nextCursor: "v1.next",
         };
       },
     }),
@@ -278,20 +285,20 @@ test("category changes reset the cursor and preserve filters on subsequent pages
   await app.fire("more", "click");
   app.$("filter-category").value = "일상";
   await app.fire("filter-form", "submit");
-  assert.equal(calls[2].pageToken, undefined);
+  assert.equal(calls[2].cursor, undefined);
   assert.equal(calls[2].where.category, "일상");
   assert.equal(app.$("entries").children.length, 1);
   await app.fire("more", "click");
-  assert.equal(calls[3].pageToken, "v1.next");
+  assert.equal(calls[3].cursor, "v1.next");
   assert.equal(calls[3].where.category, "일상");
   app.$("filter-category").value = "";
   await app.fire("filter-form", "submit");
   assert.equal(Object.keys(calls[4].where).length, 0);
-  assert.equal(calls[4].pageToken, undefined);
+  assert.equal(calls[4].cursor, undefined);
 });
 // Stands in for the SDK's owner client.
 function fakeOwner(methods = {}) {
-  return { expiresAt: Date.now() + 600000, ...methods };
+  return { ...methods };
 }
 function editorBackend() {
   const rows = { posts: new Map(), drafts: new Map() },
@@ -304,7 +311,7 @@ function editorBackend() {
       failure = fn;
     },
     owner: fakeOwner({
-      async batch(operations) {
+      async atomic(operations) {
         for (const operation of operations) {
           const error = failure?.(operation.type, operation.collection);
           if (error) throw error;
@@ -346,7 +353,7 @@ function editorBackend() {
                 id,
                 data: structuredClone(data),
               })),
-              nextPageToken: null,
+              nextCursor: null,
             };
           },
         };

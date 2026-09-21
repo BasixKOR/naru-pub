@@ -1,12 +1,27 @@
 /** @jest-environment node */
-import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
+import {
+  afterAll,
+  beforeAll,
+  describe,
+  expect,
+  jest,
+  test,
+} from "@jest/globals";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { sql } from "kysely";
+
+let mockOrigin = "";
+const mockObjects = new Map<
+  string,
+  { contentLength: number; contentType: string }
+>();
+
 import { db } from "@/lib/database";
 import { GET as dataRoute } from "@/app/(main)/api/data/[site]/[[...path]]/route";
 import { POST as authRoute } from "@/app/(main)/api/data-auth/[action]/route";
 import { executeData } from "../service";
+import { mediaStorage } from "../media";
 import {
   approveAuthorization,
   authorizationInput,
@@ -48,6 +63,21 @@ integration("SDK and data API contract", () => {
       try {
         const chunks: Buffer[] = [];
         for await (const chunk of incoming) chunks.push(Buffer.from(chunk));
+        if (
+          incoming.url?.startsWith("/__contract_upload/") &&
+          incoming.method === "PUT"
+        ) {
+          const key = decodeURIComponent(
+            incoming.url.slice("/__contract_upload/".length),
+          );
+          mockObjects.set(key, {
+            contentLength: Buffer.concat(chunks).byteLength,
+            contentType: incoming.headers["content-type"] || "",
+          });
+          outgoing.writeHead(200);
+          outgoing.end();
+          return;
+        }
         const headers = new Headers();
         for (const [name, value] of Object.entries(incoming.headers))
           if (value !== undefined)
@@ -83,6 +113,24 @@ integration("SDK and data API contract", () => {
       server!.listen(0, "127.0.0.1", resolve);
     });
     origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    mockOrigin = origin;
+    // Object storage is the sole external boundary in this suite.
+    // Authorization, media rows, owner scope, HTTP, and finalization stay real.
+    jest
+      .spyOn(mediaStorage, "authorizeUpload")
+      .mockImplementation(
+        async (key) =>
+          `${mockOrigin}/__contract_upload/${encodeURIComponent(key)}`,
+      );
+    jest.spyOn(mediaStorage, "headObject").mockImplementation(async (key) => {
+      const object = mockObjects.get(key);
+      if (!object) throw new Error("Object does not exist.");
+      return {
+        ContentLength: object.contentLength,
+        ContentType: object.contentType,
+        $metadata: {},
+      };
+    });
     // Node fetch does not add a browser Origin header. Everything else, including
     // HTTP errors, JSON serialization and response bodies, crosses the socket.
     globalThis.fetch = (input, init) => {
@@ -173,6 +221,9 @@ integration("SDK and data API contract", () => {
   }, 30000);
 
   afterAll(async () => {
+    jest.restoreAllMocks();
+    mockObjects.clear();
+    mockOrigin = "";
     globalThis.fetch = nativeFetch;
     browserGlobals.forEach((name, index) => {
       const old = oldGlobals[index];
@@ -352,6 +403,37 @@ integration("SDK and data API contract", () => {
 
   test("the website media surface contains only upload", () => {
     expect(Object.keys(owner.media)).toEqual(["upload"]);
+  });
+
+  test("owner upload authorizes, transfers, and finalizes a real media row", async () => {
+    const source = new File(["contract bytes"], "contract.txt", {
+      type: "text/plain",
+    });
+    const file = await owner.media.upload(source);
+
+    expect(file).toMatchObject({
+      id: expect.any(String),
+      name: "contract.txt",
+      contentType: "text/plain",
+      size: source.size,
+      url: expect.stringMatching(/^https:\/\/media\.naru\.pub\//),
+      createdAt: expect.any(String),
+      updatedAt: expect.any(String),
+    });
+    const row = await db
+      .selectFrom("site_data_files")
+      .select(["id", "object_key", "status", "size_bytes", "content_type"])
+      .where("id", "=", file.id)
+      .executeTakeFirstOrThrow();
+    expect(row).toMatchObject({
+      status: "ready",
+      size_bytes: source.size,
+      content_type: "text/plain",
+    });
+    expect(mockObjects.get(row.object_key)).toEqual({
+      contentLength: source.size,
+      contentType: "text/plain",
+    });
   });
 
   // Public reads are the request a site makes most, and letting a shared cache

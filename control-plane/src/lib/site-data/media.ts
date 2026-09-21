@@ -44,6 +44,27 @@ const allowedTypes = new Set([
   "text/plain",
 ]);
 
+/** The external object-store boundary, kept narrow so API contracts can run locally. */
+export const mediaStorage = {
+  authorizeUpload(objectKey: string, contentType: string) {
+    return getSignedUrl(
+      // Smithy package versions differ between the S3 client and presigner.
+      s3Client as never,
+      new PutObjectCommand({
+        Bucket: mediaBucket(),
+        Key: objectKey,
+        ContentType: contentType,
+      }) as never,
+      { expiresIn: 10 * 60 },
+    );
+  },
+  headObject(objectKey: string) {
+    return s3Client.send(
+      new HeadObjectCommand({ Bucket: mediaBucket(), Key: objectKey }),
+    );
+  },
+};
+
 type MediaCommand = {
   site: string;
   path: string[];
@@ -254,15 +275,9 @@ export async function executeMedia(command: MediaCommand) {
         .executeTakeFirstOrThrow();
     });
     try {
-      const uploadUrl = await getSignedUrl(
-        // Smithy package versions differ between the S3 client and presigner.
-        s3Client as never,
-        new PutObjectCommand({
-          Bucket: mediaBucket(),
-          Key: objectKey,
-          ContentType: input.contentType,
-        }) as never,
-        { expiresIn: 10 * 60 },
+      const uploadUrl = await mediaStorage.authorizeUpload(
+        objectKey,
+        input.contentType,
       );
       // PUT the bytes to uploadUrl with these headers, then finalize by id.
       return {
@@ -283,9 +298,7 @@ export async function executeMedia(command: MediaCommand) {
     if (!file) throw new DataError(404, "File not found.");
     let head;
     try {
-      head = await s3Client.send(
-        new HeadObjectCommand({ Bucket: mediaBucket(), Key: file.object_key }),
-      );
+      head = await mediaStorage.headObject(file.object_key);
     } catch {
       throw new DataError(409, "Upload has not completed.");
     }

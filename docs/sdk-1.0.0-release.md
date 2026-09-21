@@ -63,6 +63,10 @@ may be copied by the browser when a tab is duplicated. It is not an XSS defense.
 
 ## SDK/API integration checks
 
+The stable client behavior covered here is defined in the [Naru Data SDK v1 API
+reference](sdk-v1-api.md). The transport table in [database.md](database.md) is
+internal and may change without changing that public contract.
+
 From `control-plane`, with PostgreSQL tools (`initdb`, `pg_ctl`, `createdb`)
 installed locally:
 
@@ -81,10 +85,12 @@ to an ephemeral loopback port.
 The published SDK sends real HTTP requests to the actual data/auth route handlers
 and PostgreSQL. No service or response mocks are used. Coverage includes JSON and
 server metadata, conditional writes, filtered cursor pagination and counts, owner
-atomic results and rollback, the minimal upload-only media surface, and token revocation. Browser
+atomic results and rollback, media upload authorization and finalization, and token revocation. Browser
 Origin and sessionStorage are supplied by a small shim, and owner credentials are
-issued through the real authorization service during setup. This is a contract
-test, not an end-to-end browser login or object-storage upload test.
+issued through the real authorization service during setup. Object storage itself
+is simulated at the external boundary; the SDK's byte transfer and the real media
+route/database lifecycle are exercised. This is a contract test, not an
+end-to-end browser login or R2 availability test.
 
 To run all data suites against the same disposable cluster instead:
 

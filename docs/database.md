@@ -2,6 +2,10 @@
 
 Naru Data stores per-site collections of JSON documents in the control plane's existing PostgreSQL database. Static sites use a dependency-free browser ES module; owners manage data and collection permissions at `/database` in the control plane. No Rust proxy changes or separate database hostname are required.
 
+The concise public contract is documented in the [Naru Data SDK v1 API
+reference](sdk-v1-api.md). This document covers setup, server operation, limits,
+and the private HTTP protocol behind that interface.
+
 ## Setup
 
 From `control-plane`, install dependencies and run `pnpm migrate` against your intended development database before starting the app. For production, run the migration as part of the normal deployment procedure before serving the new API. The migrations add document storage, website registrations, authorization-code/token hashes, and rate-limit counters; they do not modify hosted files. The owner-auth migration preserves existing permissions. Reverting just that migration removes website authorization and converts `create` permissions to `admin` (fail closed). Back up PostgreSQL before production migrations. Do not roll back the migration unless you intend to delete all site databases.
@@ -147,23 +151,23 @@ SDK surface remains stable.
 
 Public/website-token root: `/api/data/:site`. Control-plane root: `/api/account/database` (site derived from the session). Collection management is restricted to the control-plane root.
 
-| Method | Path relative to root                   | Body / result                                                       |
-| ------ | --------------------------------------- | ------------------------------------------------------------------- |
-| GET    | `/`                                     | Admin only: `{ collections }`                                       |
-| POST   | `/`                                     | Admin only: `{ name, read?, write? }` creates collection            |
-| PATCH  | `/:collection`                          | Control panel only: `{ read, write }` replaces permissions          |
-| DELETE | `/:collection`                          | Admin only: deletes collection and its documents                    |
-| GET    | `/:collection?limit=50&pageToken=token` | `{ documents, nextPageToken, total? }`; accepts sorting and filters |
-| POST   | `/:collection`                          | `{ data }` creates document; returns the write result               |
-| GET    | `/:collection/:id`                      | `{ document }`                                                      |
-| PUT    | `/:collection/:id?ifRevision=&ifAbsent=` | `{ data }` replaces document; returns the write result             |
-| DELETE | `/:collection/:id?ifRevision=`          | `{ success: true }`                                                 |
-| POST   | `/_batch`                               | Owner-only atomic `{ operations }`; returns `{ results }`           |
-| GET    | `/_files?limit=50&pageToken=&where=`    | Owner-only `{ files, nextPageToken }`, newest first                 |
-| GET    | `/_files?usage=1`                       | Control panel only: `{ usage }`                                     |
-| POST   | `/_files`                               | Owner-only upload authorization                                     |
-| PUT    | `/_files/:id`                           | Owner-only finalize; verifies the stored bytes                      |
-| DELETE | `/_files/:id`                           | `{ success: true }`                                                 |
+| Method | Path relative to root                    | Body / result                                                       |
+| ------ | ---------------------------------------- | ------------------------------------------------------------------- |
+| GET    | `/`                                      | Admin only: `{ collections }`                                       |
+| POST   | `/`                                      | Admin only: `{ name, read?, write? }` creates collection            |
+| PATCH  | `/:collection`                           | Control panel only: `{ read, write }` replaces permissions          |
+| DELETE | `/:collection`                           | Admin only: deletes collection and its documents                    |
+| GET    | `/:collection?limit=50&pageToken=token`  | `{ documents, nextPageToken, total? }`; accepts sorting and filters |
+| POST   | `/:collection`                           | `{ data }` creates document; returns the write result               |
+| GET    | `/:collection/:id`                       | `{ document }`                                                      |
+| PUT    | `/:collection/:id?ifRevision=&ifAbsent=` | `{ data }` replaces document; returns the write result              |
+| DELETE | `/:collection/:id?ifRevision=`           | `{ success: true }`                                                 |
+| POST   | `/_batch`                                | Owner-only atomic `{ operations }`; returns `{ results }`           |
+| GET    | `/_files?limit=50&pageToken=&where=`     | Owner-only `{ files, nextPageToken }`, newest first                 |
+| GET    | `/_files?usage=1`                        | Control panel only: `{ usage }`                                     |
+| POST   | `/_files`                                | Owner-only upload authorization                                     |
+| PUT    | `/_files/:id`                            | Owner-only finalize; verifies the stored bytes                      |
+| DELETE | `/_files/:id`                            | `{ success: true }`                                                 |
 
 A public write result is `{ id, revision, createdAt, updatedAt }`; `_batch` accepts the SDK's semantic set/delete writes and returns an ignored internal result payload. A list accepts private transport parameters `where`, `orderBy`, `limit`, `pageToken` and `includeTotal=1`. An upload authorization takes `{ name, contentType, size }` and returns `{ id, uploadUrl, headers }`: PUT the bytes to `uploadUrl` with those headers, then finalize with `PUT /_files/:id`. A file is `{ id, name, contentType, size, url, createdAt, updatedAt }`. The public route does not accept `PATCH`.
 
@@ -310,8 +314,14 @@ const query = {
   ],
   page: { size: 20 },
 };
-const first = await posts.list({ ...query, page: { ...query.page, includeTotal: true } });
-const next = await posts.list({ ...query, page: { ...query.page, after: first.nextCursor } });
+const first = await posts.list({
+  ...query,
+  page: { ...query.page, includeTotal: true },
+});
+const next = await posts.list({
+  ...query,
+  page: { ...query.page, after: first.nextCursor },
+});
 ```
 
 `sort` is always a list of one or two `[field, direction]` pairs. User fields are named directly; metadata uses `{ metadata: "id" | "createdAt" | "updatedAt" }`. `direction` is `asc` or `desc`. The document ID is appended automatically as the final tie-breaker. Without `sort`, a list reads in ID order.

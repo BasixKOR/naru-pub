@@ -382,7 +382,8 @@ await owner
               <p>
                 글 목록·상세·방명록·관리자 편집·비공개 초안을 갖춘 정적
                 사이트입니다. <a href="/docs/database/blog.zip">ZIP 내려받기</a>{" "}
-                · <a href="/examples/database-blog/index.html">미리보기</a>
+                ·{" "}
+                <a href="https://example.naru.pub/blog/">실제 사이트 보기 ↗</a>
               </p>
               <ol className="list-decimal space-y-3 pl-6">
                 <li>

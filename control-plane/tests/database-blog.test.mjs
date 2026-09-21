@@ -224,7 +224,7 @@ test("admin clears local authorization when server revocation fails", async () =
   await app.fire("logout", "click");
   assert.equal(app.$("publish").disabled, true);
   assert.equal(app.$("login").hidden, false);
-  assert.match(app.$("status").textContent, /서버 해제에 실패/);
+  assert.match(app.$("status").textContent, /나루에 알리지 못했습니다/);
 });
 
 test("guestbook distinguishes successful save from failed list refresh", async () => {
@@ -259,7 +259,7 @@ test("malformed draft does not prevent owner callback completion", async () => {
   );
   assert.equal(completed, true);
   assert.equal(app.$("publish").disabled, false);
-  assert.match(app.$("status").textContent, /초안을 읽을 수 없습니다/);
+  assert.match(app.$("status").textContent, /되살리지 못했습니다/);
 });
 
 test("category changes reset the cursor and preserve filters on subsequent pages", async () => {
@@ -385,7 +385,7 @@ test("server drafts survive publication failure; retry publishes same ID before 
     ["set", "posts", id],
     ["delete", "drafts", id],
   ]);
-  assert.match(app.$("editing").textContent, /공개 글 편집/);
+  assert.match(app.$("editing").textContent, /공개한 글 고치는 중/);
 });
 test("batch cleanup failure rolls publication back and can be retried", async () => {
   const db = editorBackend(),

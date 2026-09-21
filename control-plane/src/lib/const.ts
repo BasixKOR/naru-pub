@@ -2,6 +2,7 @@ export const LOGIN_NAME_REGEX = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 export const RESERVED_LOGIN_NAMES = new Set([
   "proxy",
   "custom-domains",
+  "customers",
   // Naru Data is served from db.naru.pub; a user owning this login name would
   // shadow it.
   "db",

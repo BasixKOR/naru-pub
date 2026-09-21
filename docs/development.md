@@ -42,7 +42,7 @@ AWS_SECRET_ACCESS_KEY=your-secret-key
 # 기타
 NEXT_PUBLIC_DOMAIN=naru.pub
 FEATURE_ACCESS_MODE=preview
-CUSTOM_DOMAIN_CNAME_TARGET=custom-domains.naru.pub
+CUSTOM_DOMAIN_CNAME_TARGET=customers.naru.pub
 CLOUDFLARE_ZONE_ID=your-cloudflare-zone-id
 CLOUDFLARE_USER_API_TOKEN=your-cloudflare-api-token
 

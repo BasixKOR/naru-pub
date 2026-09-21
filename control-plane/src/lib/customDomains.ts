@@ -52,7 +52,7 @@ export function getPlatformDomain() {
 export function getCustomDomainTarget() {
   return (
     process.env.CUSTOM_DOMAIN_CNAME_TARGET ??
-    `custom-domains.${getPlatformDomain()}`
+    `customers.${getPlatformDomain()}`
   )
     .toLowerCase()
     .replace(/\.$/, "");

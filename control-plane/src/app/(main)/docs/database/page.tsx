@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Code from "../Code";
+import DocsNav from "../DocsNav";
 
 export const metadata: Metadata = {
   title: "데이터베이스 사용 안내 | 나루",
@@ -36,6 +37,7 @@ export default function DatabaseDocs() {
   return (
     <div className="min-h-screen">
       <div className="mx-auto max-w-6xl px-5 py-12 md:px-8">
+        <DocsNav current="database" />
         <header className="mb-12 max-w-3xl space-y-5">
           <p className="text-sm text-muted-foreground">
             NARU / DOCS / DATABASE / SDK 1.0.0
@@ -50,6 +52,7 @@ export default function DatabaseDocs() {
           <div className="flex flex-wrap gap-5 text-sm underline underline-offset-4">
             <a href="/database">데이터베이스 제어판 열기 →</a>
             <a href="/docs/database/blog.zip">예제 블로그 ZIP 내려받기 ↓</a>
+            <a href="/docs/sdk/1.0.0">SDK 레퍼런스 →</a>
           </div>
         </header>
         <div className="grid gap-10 lg:grid-cols-[230px_minmax(0,1fr)]">
@@ -105,7 +108,7 @@ export default function DatabaseDocs() {
                     id: "recipe-drafts",
                     title: "초안을 저장한 뒤 공개하기",
                     collection: "drafts · 관리자 읽기 / 관리자 쓰기",
-                    body: "초안은 비공개로 두고, 공개할 때 posts 저장과 drafts 삭제를 한 batch로 묶습니다.",
+                    body: "초안은 비공개로 두고, 공개할 때 posts 저장과 drafts 삭제를 한 트랜잭션으로 묶습니다.",
                     code: 'owner.transaction([{ collection: "posts", set: post }, { collection: "drafts", delete: draft }])',
                   },
                   {
@@ -292,7 +295,7 @@ export default function DatabaseDocs() {
                       ],
                       [
                         "list({ filter, sort, page })",
-                        "{ documents, nextCursor, totalCount? }. 기본 50개, 최대 100개. count이면 조건에 맞는 전체 개수도 함께",
+                        "{ documents, nextCursor, totalCount? }. 기본 50개, 최대 100개. page.includeTotal이면 조건에 맞는 전체 개수도 함께",
                       ],
                       [
                         "add(data)",
@@ -414,24 +417,24 @@ const mine = await naru.public.collection("posts").list({
                 사용자 필드로 정렬하면 값이 없는 문서는 JSON null과 같은 자리에
                 놓이고, null·문자열·숫자 순으로 정렬합니다. 값이 같은 문서는
                 같은 방향의 ID 순서로 정렬합니다. 다음 페이지에는 응답의{" "}
-                <code>nextCursor</code>를 그대로 <code>cursor</code>로 보내고,
-                같은 컬렉션·정렬·필터를 유지하세요. 커서를 직접 해석하거나
-                만들지 마세요. 다른 질의에 사용하면 400 오류가 발생합니다.
-                정렬이나 필터를 바꾸려면 토큰과 기존 목록을 비우고 첫 페이지부터
-                다시 불러오세요.
+                <code>nextCursor</code>를 그대로 <code>page.after</code>로
+                보내고, 같은 컬렉션·정렬·필터를 유지하세요. 커서를 직접
+                해석하거나 만들지 마세요. 다른 질의에 사용하면 400 오류가
+                발생합니다. 정렬이나 필터를 바꾸려면 토큰과 기존 목록을 비우고
+                첫 페이지부터 다시 불러오세요.
               </p>
               <p>
                 <code>nextCursor</code>가 <code>null</code>이면 마지막
-                페이지입니다. <code>cursor</code>에 <code>null</code>을 넘기면
-                첫 페이지를 읽으므로, 받은 값을 가르지 않고 그대로 다시 넘기면
-                됩니다. <code>filter: {"{}"}</code>도 필터가 없다는 뜻입니다.
-                이전 페이지는 페이지 내용이나 시작 커서를 저장해 구현할 수
-                있습니다. 페이지 번호와 offset은 제공하지 않습니다. 목록과
-                개수가 함께 필요하면 <code>page.includeTotal: true</code>를
-                넘기고, 개수만 필요하면 <code>page.size: 1</code>과 함께 쓰세요.
-                페이지 이동은 하나의 스냅샷이 아니므로, 새 문서는 새로고침해야
-                보일 수 있고 정렬 기준 값이 바뀐 문서는 이동 중 빠지거나 다시
-                나타날 수 있습니다.
+                페이지입니다. <code>page.after</code>에 <code>null</code>을
+                넘기면 첫 페이지를 읽으므로, 받은 값을 가르지 않고 그대로 다시
+                넘기면 됩니다. <code>filter: {"{}"}</code>도 필터가 없다는
+                뜻입니다. 이전 페이지는 페이지 내용이나 시작 커서를 저장해
+                구현할 수 있습니다. 페이지 번호와 offset은 제공하지 않습니다.
+                목록과 개수가 함께 필요하면 <code>page.includeTotal: true</code>
+                를 넘기고, 개수만 필요하면 <code>page.size: 1</code>과 함께
+                쓰세요. 페이지 이동은 하나의 스냅샷이 아니므로, 새 문서는
+                새로고침해야 보일 수 있고 정렬 기준 값이 바뀐 문서는 이동 중
+                빠지거나 다시 나타날 수 있습니다.
               </p>
               <p>
                 <code>createdAt</code>은 처음 저장할 때 서버가 정하고
@@ -666,7 +669,7 @@ await owner.collection("posts").set("hello", {
                 작성 중인 내용은 로그인 이동을 위해 이 탭의 sessionStorage에
                 임시 저장됩니다. ‘비공개 초안 저장’은 drafts에 서버 저장하며,
                 같은 ID의 공개 글은 바꾸지 않습니다. ‘글 공개하기’는 posts에
-                저장하면서 해당 초안을 삭제합니다. 두 작업은 하나의 batch로
+                저장하면서 해당 초안을 삭제합니다. 두 작업은 하나의 트랜잭션으로
                 처리되어 둘 다 반영되거나 둘 다 취소됩니다.
               </p>
               <p>

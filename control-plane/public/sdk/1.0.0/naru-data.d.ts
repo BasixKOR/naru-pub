@@ -8,6 +8,7 @@ export type Json =
   | Json[]
   | { [key: string]: Json };
 
+/** @internal */
 declare const revisionBrand: unique symbol;
 /** An opaque concurrency token. Store and return it unchanged. */
 export type Revision = string & { readonly [revisionBrand]: true };

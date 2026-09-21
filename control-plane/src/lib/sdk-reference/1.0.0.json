@@ -663,13 +663,6 @@
       "summary": [],
       "throws": [],
       "signature": "type WriteCondition = { revision: Revision } | { absent: true }"
-    },
-    {
-      "name": "revisionBrand",
-      "kind": "variable",
-      "summary": [],
-      "throws": [],
-      "signature": "const revisionBrand: unique symbol"
     }
   ]
 }

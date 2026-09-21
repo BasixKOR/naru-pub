@@ -358,6 +358,7 @@ async function build(version) {
     entryPoints: [entryPoint],
     tsconfig: join(root, "scripts", "tsconfig.sdk-reference.json"),
     excludeExternals: true,
+    excludeInternal: true,
     excludePrivate: true,
     skipErrorChecking: false,
     logLevel: "Warn",

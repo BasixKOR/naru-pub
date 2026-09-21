@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import DocsNav from "./DocsNav";
 
 export const metadata: Metadata = {
   title: "길잡이 | 나루",
@@ -39,6 +40,7 @@ export default function DocsIndex() {
   return (
     <div className="min-h-screen">
       <div className="mx-auto max-w-6xl px-5 py-12 md:px-8">
+        <DocsNav current="home" />
         <header className="mb-12 max-w-3xl space-y-5">
           <p className="text-sm text-muted-foreground">NARU / DOCS</p>
           <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
@@ -49,6 +51,41 @@ export default function DocsIndex() {
             없이 나루 제어판과 웹 SDK만으로 만들 수 있습니다.
           </p>
         </header>
+
+        <section className="mb-10 rounded-xl border bg-muted/30 p-6 md:p-8">
+          <p className="text-sm font-bold text-muted-foreground">처음이라면</p>
+          <ol className="mt-4 grid gap-5 md:grid-cols-3">
+            {[
+              [
+                "1",
+                "컬렉션 만들기",
+                "데이터베이스 제어판에서 문서를 담을 컬렉션과 공개 범위를 정합니다.",
+              ],
+              [
+                "2",
+                "SDK 연결하기",
+                "버전이 고정된 모듈을 불러와 공개 읽기나 관리자 쓰기를 연결합니다.",
+              ],
+              [
+                "3",
+                "실제 권한으로 확인하기",
+                "로그아웃 상태의 공개 화면과 로그인한 관리자 화면을 각각 시험합니다.",
+              ],
+            ].map(([number, title, body]) => (
+              <li key={number} className="flex gap-4">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-sm font-bold text-background">
+                  {number}
+                </span>
+                <div>
+                  <h2 className="font-bold">{title}</h2>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                    {body}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
 
         <div className="grid gap-6 md:grid-cols-2">
           {guides.map((guide) => (

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Code from "../Code";
+import DocsNav from "../DocsNav";
 
 export const metadata: Metadata = {
   title: "미디어 사용 안내 | 나루",
@@ -36,6 +37,7 @@ export default function MediaDocs() {
   return (
     <div className="min-h-screen">
       <div className="mx-auto max-w-6xl px-5 py-12 md:px-8">
+        <DocsNav current="media" />
         <header className="mb-12 max-w-3xl space-y-5">
           <p className="text-sm text-muted-foreground">
             NARU / DOCS / MEDIA / SDK 1.0.0
@@ -50,6 +52,7 @@ export default function MediaDocs() {
           <div className="flex flex-wrap gap-5 text-sm underline underline-offset-4">
             <a href="/media">미디어 라이브러리 열기 →</a>
             <a href="/docs/database">데이터베이스 사용 안내 →</a>
+            <a href="/docs/sdk/1.0.0#Media">Media API →</a>
           </div>
         </header>
 

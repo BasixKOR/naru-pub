@@ -78,6 +78,10 @@ Expression (list every hostname that is not a hosted site):
 | Browser TTL                            | Respect origin TTL                                       |
 | Serve stale content while revalidating | Off                                                      |
 
+Keep this rule after the zone's `Exclude CSS/ICO/JS from being cached` rules.
+Later rules win, so hosted-site JS gets the fallback (the `max-age=0` header
+keeps it fresh) while the exclusions still apply to `naru.pub` and R2.
+
 **Always Online** (Caching → Configuration) must stay off, because Cloudflare
 ignores `stale-if-error` while it is on.
 

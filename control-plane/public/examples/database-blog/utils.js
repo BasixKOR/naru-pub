@@ -4,13 +4,15 @@ export function message(text) {
 }
 export function errorMessage(error) {
   const hints = {
-    401: "관리자 권한이 만료되었거나 유효하지 않습니다. 다시 로그인하세요.",
-    403: "컬렉션 권한과 웹사이트 등록 범위를 확인하세요.",
-    404: "글이 없거나 컬렉션이 아직 만들어지지 않았습니다.",
-    409: "저장 용량 또는 문서 개수 한도를 확인하세요.",
-    429: "요청이 많습니다. 잠시 후 다시 시도하세요.",
+    AUTH_REQUIRED: "관리자 권한이 만료되었습니다. 다시 로그인하세요.",
+    ACCESS_DENIED: "컬렉션 공개 범위와 관리자 로그인 등록을 확인하세요.",
+    NOT_FOUND: "글이 없거나 컬렉션이 아직 만들어지지 않았습니다.",
+    CONFLICT: "다른 곳에서 먼저 바뀌었습니다. 새로고침 후 다시 시도하세요.",
+    RATE_LIMITED: "요청이 많습니다. 잠시 후 다시 시도하세요.",
+    REDIRECT_NOT_REGISTERED:
+      "이 페이지 주소를 제어판의 ‘웹사이트 관리자 로그인’에 등록하세요.",
   };
-  return hints[error.status] || error.message || "요청에 실패했습니다.";
+  return hints[error.code] || error.message || "요청에 실패했습니다.";
 }
 export function text(value, fallback = "") {
   return typeof value === "string" ? value : fallback;

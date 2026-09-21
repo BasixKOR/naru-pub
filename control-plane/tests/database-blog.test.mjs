@@ -47,8 +47,8 @@ async function page(name, db, storage = new Map(), query = "") {
     new SyntheticModule(
       ["connect"],
       function () {
+        // Only what NaruClient exposes, so pages cannot rely on anything else.
         this.setExport("connect", async () => ({
-          ...db,
           public: { collection: (name) => db.collection(name) },
           auth: {
             session: () => db.auth?.session?.() ?? db.ownerSession?.(),
@@ -206,10 +206,7 @@ test("admin preserves draft across login, retries same ID, fails closed on expir
   await after.fire("new-post", "click");
   after.$("title").value = "다음 글";
   after.$("body").value = "내용";
-  failure = Object.assign(new Error("expired"), {
-    status: 401,
-    code: "AUTH_REQUIRED",
-  });
+  failure = Object.assign(new Error("expired"), { code: "AUTH_REQUIRED" });
   await after.fire("post-form", "submit");
   assert.equal(after.$("publish").disabled, true);
   assert.equal(after.$("login").hidden, false);

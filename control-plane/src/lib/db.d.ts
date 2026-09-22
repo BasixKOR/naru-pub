@@ -304,7 +304,6 @@ export interface SupporterFeatureUses {
 }
 
 export interface DB {
-  site_data_site_clients: { user_id: number; id: string };
   site_data_clients: SiteDataClients;
   site_data_access_tokens: SiteDataAccessTokens;
   site_data_auth_codes: SiteDataAuthCodes;

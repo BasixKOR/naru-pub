@@ -6,6 +6,10 @@ import {
   up,
   down,
 } from "@/migrations/1788206726527_stable_site_clients_and_owner_sessions";
+import {
+  up as dropSiteClients,
+  down as restoreSiteClients,
+} from "@/migrations/1790078516190_drop_site_data_site_clients";
 import { setupTestDatabase, teardownTestDatabase } from "./test-database";
 import {
   approveAuthorization,
@@ -27,6 +31,8 @@ integration("stable client and owner session migration", () => {
     await db.destroy();
   });
   test("preserves registered callbacks but invalidates old grants; rollback revokes sessions", async () => {
+    // Step back past the later drop of the table this migration created.
+    await restoreSiteClients(db);
     await down(db);
     const owner = (
       await sql<{
@@ -100,5 +106,19 @@ integration("stable client and owner session migration", () => {
       await db.selectFrom("site_data_clients").selectAll().execute(),
     ).toHaveLength(2);
     await up(db);
+    await dropSiteClients(db);
+  });
+  test("the site client table drops and comes back empty", async () => {
+    const exists = async () =>
+      (
+        await sql<{
+          name: string | null;
+        }>`select to_regclass('site_data_site_clients') as name`.execute(db)
+      ).rows[0].name !== null;
+    expect(await exists()).toBe(false);
+    await restoreSiteClients(db);
+    expect(await exists()).toBe(true);
+    await dropSiteClients(db);
+    expect(await exists()).toBe(false);
   });
 });

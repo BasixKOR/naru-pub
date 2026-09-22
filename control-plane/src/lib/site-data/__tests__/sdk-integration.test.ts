@@ -257,13 +257,13 @@ integration("SDK and data API contract", () => {
       id: expect.any(String),
       revision: "r1.1",
       createdAt: expect.any(String),
+      updatedAt: expect.any(String),
     });
     // A write reports the very stamps the read comes back with, so a caller
     // rendering what it just saved never has to invent one.
     const first = await posts.get(added.id);
     expect(first).toEqual({
       ...added,
-      updatedAt: added.createdAt,
       data: {
         title: "한글",
         nested: { value: null },
@@ -281,6 +281,7 @@ integration("SDK and data API contract", () => {
       id: added.id,
       revision: "r1.2",
       createdAt: first.createdAt,
+      updatedAt: expect.any(String),
     });
     const replaced = await posts.get(added.id);
     expect(replaced.createdAt).toBe(first.createdAt);
@@ -304,6 +305,20 @@ integration("SDK and data API contract", () => {
       code: "NOT_FOUND",
     });
     await posts.delete(added.id);
+    // "Delete only if absent" could only ever do nothing, alone or batched.
+    await expect(
+      posts.delete(added.id, {
+        condition: { absent: true } as never,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    await expect(
+      owner.transaction([
+        {
+          collection: "crud",
+          delete: { id: added.id, condition: { absent: true } as never },
+        },
+      ]),
+    ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
     // Partial updates are not part of the contract.
     const patch = await nativeFetch(`${origin}/api/data/v1/alice/crud/new`, {
       method: "PATCH",
@@ -415,6 +430,9 @@ integration("SDK and data API contract", () => {
 
     expect(file).toEqual({
       url: expect.stringMatching(/^https:\/\/media\.naru\.pub\//),
+      name: "contract.txt",
+      contentType: "text/plain",
+      size: source.size,
     });
     const row = await db
       .selectFrom("site_data_files")

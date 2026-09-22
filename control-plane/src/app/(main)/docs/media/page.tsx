@@ -84,7 +84,7 @@ export default function MediaDocs() {
               <Code>{`const owner = await naru.auth.session();
 
 const image = await owner.media.upload(fileInput.files[0]);
-// → { url }
+// → { url, name, contentType, size }
 
 await owner.collection("posts").set("hello", {
   title: "안녕하세요",

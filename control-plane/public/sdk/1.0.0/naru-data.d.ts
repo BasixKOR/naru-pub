@@ -1,8 +1,8 @@
 /** Browser SDK for data owned by one Naru site. @packageDocumentation */
 
-// Only the names an application writes itself are exported: every exported
-// name is one v1 can never rename. The rest are spelled out where they are
-// used, so the reference shows them in place.
+// Only the names an application writes itself, including in helpers that pass
+// options along, are exported: every exported name is one v1 can never rename.
+// The rest are spelled out where they are used.
 
 export type Json =
   | null
@@ -54,52 +54,66 @@ export class NaruError extends Error {
   readonly retryable: boolean;
 }
 
+/** Top-level user fields, combined with AND. */
+export type Filter = Record<
+  string,
+  | string
+  | number
+  | boolean
+  | null
+  | {
+      gt?: string | number;
+      gte?: string | number;
+      lt?: string | number;
+      lte?: string | number;
+    }
+>;
+
+/** One or two keys: a user field by name, or document metadata. */
+export type Sort =
+  | readonly [
+      readonly [
+        string | { metadata: "id" | "createdAt" | "updatedAt" },
+        "asc" | "desc",
+      ],
+    ]
+  | readonly [
+      readonly [
+        string | { metadata: "id" | "createdAt" | "updatedAt" },
+        "asc" | "desc",
+      ],
+      readonly [
+        string | { metadata: "id" | "createdAt" | "updatedAt" },
+        "asc" | "desc",
+      ],
+    ];
+
+export interface ListOptions {
+  filter?: Filter;
+  sort?: Sort;
+  /** Default 50; maximum 100. */
+  size?: number;
+  /** Opaque cursor returned by the preceding page. */
+  after?: string | null;
+  includeTotal?: boolean;
+  signal?: AbortSignal;
+}
+
+/** Write only at this revision, or only if the document does not exist yet. */
+export type WriteCondition = { revision: Revision } | { absent: true };
+
 export interface PublicCollection<T = Json> {
   get(id: string, options?: { signal?: AbortSignal }): Promise<Document<T>>;
-  list(options?: {
-    /** Top-level user fields, combined with AND. */
-    filter?: Record<
-      string,
-      | string
-      | number
-      | boolean
-      | null
-      | {
-          gt?: string | number;
-          gte?: string | number;
-          lt?: string | number;
-          lte?: string | number;
-        }
-    >;
-    /** One or two keys: a user field by name, or a timestamp as metadata. */
-    sort?:
-      | readonly [
-          readonly [
-            string | { metadata: "createdAt" | "updatedAt" },
-            "asc" | "desc",
-          ],
-        ]
-      | readonly [
-          readonly [
-            string | { metadata: "createdAt" | "updatedAt" },
-            "asc" | "desc",
-          ],
-          readonly [
-            string | { metadata: "createdAt" | "updatedAt" },
-            "asc" | "desc",
-          ],
-        ];
-    /** Default 50; maximum 100. */
-    size?: number;
-    /** Opaque cursor returned by the preceding page. */
-    after?: string | null;
-    includeTotal?: boolean;
-    signal?: AbortSignal;
-  }): Promise<Page<T>>;
+  list(options?: ListOptions): Promise<Page<T>>;
   add(
     data: T,
     options?: { signal?: AbortSignal },
-  ): Promise<{ id: string; revision: Revision; createdAt: string }>;
+  ): Promise<{
+    id: string;
+    revision: Revision;
+    createdAt: string;
+    updatedAt: string;
+  }>;
 }
 
 export interface OwnerCollection<T = Json> extends PublicCollection<T> {
@@ -107,18 +121,17 @@ export interface OwnerCollection<T = Json> extends PublicCollection<T> {
   set(
     id: string,
     data: T,
-    options?: {
-      condition?: { revision: Revision } | { absent: true };
-      signal?: AbortSignal;
-    },
-  ): Promise<{ id: string; revision: Revision; createdAt: string }>;
+    options?: { condition?: WriteCondition; signal?: AbortSignal },
+  ): Promise<{
+    id: string;
+    revision: Revision;
+    createdAt: string;
+    updatedAt: string;
+  }>;
   /** Deleting a missing document succeeds unless a condition was supplied. */
   delete(
     id: string,
-    options?: {
-      condition?: { revision: Revision } | { absent: true };
-      signal?: AbortSignal;
-    },
+    options?: { condition?: { revision: Revision }; signal?: AbortSignal },
   ): Promise<void>;
 }
 
@@ -129,18 +142,11 @@ export interface Owner {
     writes: readonly (
       | {
           collection: string;
-          set: {
-            id: string;
-            data: Json;
-            condition?: { revision: Revision } | { absent: true };
-          };
+          set: { id: string; data: Json; condition?: WriteCondition };
         }
       | {
           collection: string;
-          delete: {
-            id: string;
-            condition?: { revision: Revision } | { absent: true };
-          };
+          delete: { id: string; condition?: { revision: Revision } };
         }
     )[],
     options?: { signal?: AbortSignal },
@@ -150,7 +156,12 @@ export interface Owner {
     upload(
       file: File | Blob,
       options?: { signal?: AbortSignal },
-    ): Promise<{ url: string }>;
+    ): Promise<{
+      url: string;
+      name: string;
+      contentType: string;
+      size: number;
+    }>;
   };
   signOut(): Promise<void>;
 }

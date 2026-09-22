@@ -1,7 +1,9 @@
 import {
   createNaru,
   type Document,
+  type Filter,
   type Json,
+  type ListOptions,
   NaruError,
   type NaruErrorCode,
   type Owner,
@@ -9,6 +11,8 @@ import {
   type Page,
   type PublicCollection,
   type Revision,
+  type Sort,
+  type WriteCondition,
 } from "../public/sdk/1.0.0/naru-data.js";
 // Only names an application writes itself are exported.
 // @ts-expect-error Spelled out in place rather than exported.
@@ -53,8 +57,13 @@ async function page() {
 posts.list({ sort: "createdAt" });
 // @ts-expect-error Arrays are not filter values.
 posts.list({ filter: { tags: ["x"] } });
-// @ts-expect-error The id is the default order, not a sort key.
-posts.list({ sort: [[{ metadata: "id" }, "asc"]] });
+posts.list({ sort: [[{ metadata: "id" }, "desc"]] });
+// Helpers that pass options along can name them.
+const recent: Sort = [[{ metadata: "createdAt" }, "desc"]];
+const published: Filter = { published: true };
+const everything = (options: ListOptions) =>
+  posts.list({ ...options, size: 100 });
+void everything({ sort: recent, filter: published });
 // @ts-expect-error Merge patches are not part of the API.
 posts.update("one", { title: "x" });
 
@@ -69,8 +78,12 @@ async function owner(admin: Owner) {
   );
   const next: Revision = written.revision;
   const created: string = written.createdAt;
-  // @ts-expect-error A write reports when the document was created, not more.
-  void written.updatedAt;
+  const saved: string = written.updatedAt;
+  const expected: WriteCondition = next ? { revision: next } : { absent: true };
+  // @ts-expect-error "Delete only if absent" could only ever do nothing.
+  await drafts.delete("one", { condition: { absent: true } });
+  await drafts.delete("one", { condition: { revision: next } });
+  void [created, saved, expected];
   await admin.transaction([
     {
       collection: "posts",
@@ -82,8 +95,14 @@ async function owner(admin: Owner) {
     signal,
   });
   const url: string = file.url;
-  // @ts-expect-error An upload reports only where the file is served.
-  void file.name;
+  const stored: [string, string, number] = [
+    file.name,
+    file.contentType,
+    file.size,
+  ];
+  // @ts-expect-error The website SDK does not manage the library by id.
+  void file.id;
+  void stored;
   // @ts-expect-error The site SDK deliberately has no media manager.
   admin.media.list();
   await admin.signOut();

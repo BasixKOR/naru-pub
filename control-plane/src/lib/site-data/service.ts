@@ -59,8 +59,13 @@ const TIMESTAMPS = [
   sql<Date>`updated_at`.as("updatedAt"),
 ];
 /** Every accepted write reports the version a later conditional write quotes
- * and the creation stamp a caller renders, so it never guesses a timestamp. */
-const WRITTEN = ["version", "created_at"] as const;
+ * and the stamps a caller renders, so it never guesses a timestamp. */
+const WRITTEN = ["version", "created_at", "updated_at"] as const;
+/** "Delete only if absent" could only ever do nothing, so it is refused. */
+function deletable(expected: number | undefined) {
+  if (expected === 0)
+    throw new DataError(400, "A delete can only be conditional on a revision.");
+}
 
 /** `0` asserts the document does not exist yet, so a create cannot clobber. */
 function expectedVersion(value: unknown) {
@@ -421,6 +426,7 @@ export async function executeData(command: DataCommand) {
         .select(["size_bytes", "version"])
         .executeTakeFirst();
     if (method === "DELETE" && path.length === 2) {
+      deletable(expected);
       if (expected !== undefined)
         // The owner row is locked, so nothing can write between check and delete.
         matchVersion(expected, (await current(path[1]))?.version);
@@ -498,6 +504,7 @@ export async function executeData(command: DataCommand) {
       id,
       version: row.version,
       createdAt: row.created_at,
+      updatedAt: row.updated_at,
     };
   });
 }
@@ -563,6 +570,7 @@ export async function executeBatch(command: DataCommand) {
         );
       authorize(collection.write_access, true);
       const expected = expectedVersion(operation.ifVersion);
+      if (operation.type === "delete") deletable(expected);
       // The batch holds the owner lock, so a read here cannot go stale before
       // the write that follows it.
       if (expected !== undefined)

@@ -72,6 +72,78 @@
       ]
     },
     {
+      "name": "ListOptions",
+      "kind": "interface",
+      "summary": [],
+      "throws": [],
+      "signature": "interface ListOptions",
+      "extends": [],
+      "members": [
+        {
+          "name": "after",
+          "optional": true,
+          "signature": "after?: string | null",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Opaque cursor returned by the preceding page."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "filter",
+          "optional": true,
+          "signature": "filter?: Filter",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "includeTotal",
+          "optional": true,
+          "signature": "includeTotal?: boolean",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "signal",
+          "optional": true,
+          "signature": "signal?: AbortSignal",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "size",
+          "optional": true,
+          "signature": "size?: number",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Default 50; maximum 100."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "sort",
+          "optional": true,
+          "signature": "sort?: Sort",
+          "summary": [],
+          "throws": []
+        }
+      ]
+    },
+    {
       "name": "NaruClient",
       "kind": "interface",
       "summary": [],
@@ -116,7 +188,7 @@
         {
           "name": "media",
           "optional": false,
-          "signature": "media: {\n  upload(\n    file: Blob | File,\n    options?: { signal?: AbortSignal },\n  ): Promise<{ url: string }>;\n}",
+          "signature": "media: {\n  upload(\n    file: Blob | File,\n    options?: { signal?: AbortSignal },\n  ): Promise<{\n    contentType: string;\n    name: string;\n    size: number;\n    url: string;\n  }>;\n}",
           "summary": [],
           "throws": []
         },
@@ -137,7 +209,7 @@
         {
           "name": "transaction",
           "optional": false,
-          "signature": "transaction(\n  writes: readonly (\n    | {\n        collection: string;\n        set: {\n          condition?: { revision: Revision } | { absent: true };\n          data: Json;\n          id: string;\n        };\n      }\n    | {\n        collection: string;\n        delete: {\n          condition?: { revision: Revision } | { absent: true };\n          id: string;\n        };\n      }\n  )[],\n  options?: { signal?: AbortSignal },\n): Promise<void>",
+          "signature": "transaction(\n  writes: readonly (\n    | {\n        collection: string;\n        set: { condition?: WriteCondition; data: Json; id: string };\n      }\n    | {\n        collection: string;\n        delete: { condition?: { revision: Revision }; id: string };\n      }\n  )[],\n  options?: { signal?: AbortSignal },\n): Promise<void>",
           "summary": [
             {
               "type": "paragraph",
@@ -166,7 +238,7 @@
         {
           "name": "delete",
           "optional": false,
-          "signature": "delete(\n  id: string,\n  options?: {\n    condition?: { revision: Revision } | { absent: true };\n    signal?: AbortSignal;\n  },\n): Promise<void>",
+          "signature": "delete(\n  id: string,\n  options?: { condition?: { revision: Revision }; signal?: AbortSignal },\n): Promise<void>",
           "summary": [
             {
               "type": "paragraph",
@@ -183,7 +255,7 @@
         {
           "name": "set",
           "optional": false,
-          "signature": "set(\n  id: string,\n  data: T,\n  options?: {\n    condition?: { revision: Revision } | { absent: true };\n    signal?: AbortSignal;\n  },\n): Promise<{ createdAt: string; id: string; revision: Revision }>",
+          "signature": "set(\n  id: string,\n  data: T,\n  options?: { condition?: WriteCondition; signal?: AbortSignal },\n): Promise<{\n  createdAt: string;\n  id: string;\n  revision: Revision;\n  updatedAt: string;\n}>",
           "summary": [
             {
               "type": "paragraph",
@@ -241,7 +313,7 @@
         {
           "name": "add",
           "optional": false,
-          "signature": "add(\n  data: T,\n  options?: { signal?: AbortSignal },\n): Promise<{ createdAt: string; id: string; revision: Revision }>",
+          "signature": "add(\n  data: T,\n  options?: { signal?: AbortSignal },\n): Promise<{\n  createdAt: string;\n  id: string;\n  revision: Revision;\n  updatedAt: string;\n}>",
           "summary": [],
           "throws": []
         },
@@ -255,7 +327,7 @@
         {
           "name": "list",
           "optional": false,
-          "signature": "list(options?: {\n  after?: string | null;\n  filter?: Record<\n    string,\n    | string\n    | number\n    | boolean\n    | {\n        gt?: string | number;\n        gte?: string | number;\n        lt?: string | number;\n        lte?: string | number;\n      }\n    | null\n  >;\n  includeTotal?: boolean;\n  signal?: AbortSignal;\n  size?: number;\n  sort?:\n    | readonly [\n        readonly [\n          string | { metadata: \"createdAt\" | \"updatedAt\" },\n          \"desc\" | \"asc\",\n        ],\n      ]\n    | readonly [\n        readonly [\n          string | { metadata: \"createdAt\" | \"updatedAt\" },\n          \"desc\" | \"asc\",\n        ],\n        readonly [\n          string | { metadata: \"createdAt\" | \"updatedAt\" },\n          \"desc\" | \"asc\",\n        ],\n      ];\n}): Promise<Page<T>>",
+          "signature": "list(options?: ListOptions): Promise<Page<T>>",
           "summary": [],
           "throws": []
         }
@@ -332,6 +404,23 @@
       ]
     },
     {
+      "name": "Filter",
+      "kind": "type",
+      "summary": [
+        {
+          "type": "paragraph",
+          "spans": [
+            {
+              "type": "text",
+              "value": "Top-level user fields, combined with AND."
+            }
+          ]
+        }
+      ],
+      "throws": [],
+      "signature": "type Filter = Record<\n  string,\n  | string\n  | number\n  | boolean\n  | null\n  | {\n      gt?: string | number;\n      gte?: string | number;\n      lt?: string | number;\n      lte?: string | number;\n    }\n>"
+    },
+    {
       "name": "Json",
       "kind": "type",
       "summary": [],
@@ -371,6 +460,40 @@
       ],
       "throws": [],
       "signature": "type Revision = string & { [revisionBrand]: true }"
+    },
+    {
+      "name": "Sort",
+      "kind": "type",
+      "summary": [
+        {
+          "type": "paragraph",
+          "spans": [
+            {
+              "type": "text",
+              "value": "One or two keys: a user field by name, or document metadata."
+            }
+          ]
+        }
+      ],
+      "throws": [],
+      "signature": "type Sort =\n  | readonly [\n      readonly [\n        string | { metadata: \"id\" | \"createdAt\" | \"updatedAt\" },\n        \"asc\" | \"desc\",\n      ],\n    ]\n  | readonly [\n      readonly [\n        string | { metadata: \"id\" | \"createdAt\" | \"updatedAt\" },\n        \"asc\" | \"desc\",\n      ],\n      readonly [\n        string | { metadata: \"id\" | \"createdAt\" | \"updatedAt\" },\n        \"asc\" | \"desc\",\n      ],\n    ]"
+    },
+    {
+      "name": "WriteCondition",
+      "kind": "type",
+      "summary": [
+        {
+          "type": "paragraph",
+          "spans": [
+            {
+              "type": "text",
+              "value": "Write only at this revision, or only if the document does not exist yet."
+            }
+          ]
+        }
+      ],
+      "throws": [],
+      "signature": "type WriteCondition = { revision: Revision } | { absent: true }"
     }
   ]
 }

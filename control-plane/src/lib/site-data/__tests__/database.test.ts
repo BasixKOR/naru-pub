@@ -7,10 +7,6 @@ import { jsonBody, MAX_DOCUMENT_BYTES } from "../validation";
 import { setupTestDatabase, teardownTestDatabase } from "./test-database";
 
 /** Every accepted write reports its version and the stamps it produced. */
-const writeStamps = (version: number) => ({
-  version,
-  createdAt: expect.any(Date),
-});
 // Opt in against a dedicated disposable database, never the developer's app DB.
 const integration =
   process.env.NARU_DATA_TEST === "1" ? describe : describe.skip;

@@ -621,7 +621,17 @@ async function upload(file, images) {
             uploadUrl: "https://upload.example/signed",
             headers: { "Content-Type": "image/webp" },
           });
-        return Response.json({ file: { id: "f1", url: "https://media" } });
+        return Response.json({
+          file: {
+            id: "f1",
+            name: "photo.webp",
+            contentType: "image/webp",
+            size: 3,
+            url: "https://media",
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        });
       });
       stored = await owner.media.upload(file);
     });
@@ -634,8 +644,13 @@ async function upload(file, images) {
 test("upload authorizes, sends the bytes straight to storage, then finalizes", async () => {
   const file = new File(["hello"], "note.txt", { type: "text/plain" });
   const { calls, stored, declared } = await upload(file);
-  // Only where the file is served; the rest is the media library's.
-  assert.deepEqual(stored, { url: "https://media" });
+  // What was stored; managing it by id is the media library's.
+  assert.deepEqual(stored, {
+    url: "https://media",
+    name: "photo.webp",
+    contentType: "image/webp",
+    size: 3,
+  });
   assert.deepEqual(
     calls.map(({ method, url }) => [method, url.href]),
     [

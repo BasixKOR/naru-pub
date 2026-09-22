@@ -354,7 +354,9 @@ function owner(context, token, expiresAt) {
           `${root}/_files/${segment(authorization.id)}`,
           { method: "PUT", body: {}, signal, touches: [] },
         );
-        return { url: finished.file.url };
+        // What was stored, which shrinking may have renamed and re-encoded.
+        const { url, name, contentType, size } = finished.file;
+        return { url, name, contentType, size };
       },
     }),
     /** Forgets the session here first, then asks Naru to revoke it. */

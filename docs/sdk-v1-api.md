@@ -98,9 +98,9 @@ interface Page<T> {
 
 Filters are ANDed predicates on top-level user fields. A value is either scalar
 equality or a range with `gt`, `gte`, `lt`, and/or `lte`. Sorting accepts one or
-two `[field, "asc" | "desc"]` entries. User fields are strings; the timestamps
-are `{ metadata: "createdAt" }` or `{ metadata: "updatedAt" }`. Without `sort`,
-and after the last key, documents are in ID order. `size` is 1–100
+two `[field, "asc" | "desc"]` entries. User fields are strings; metadata is
+`{ metadata: "id" | "createdAt" | "updatedAt" }`, where the ID may only be the
+sole key. Without `sort`, and after the last key, documents are in ID order. `size` is 1–100
 and defaults to 50. `totalCount` is returned only when `includeTotal` was
 requested.
 
@@ -112,7 +112,8 @@ separate requests, so concurrent writes can change later pages.
 
 Revisions are opaque concurrency tokens. Store and return them unchanged; their
 text has no public format. `{ revision }` performs optimistic concurrency, while
-`{ absent: true }` permits creation only when the ID is unused.
+`{ absent: true }` permits creation only when the ID is unused; a delete takes
+only `{ revision }`, since deleting only when absent could never do anything.
 
 `owner.transaction(writes)` atomically commits ID-addressed replacements and
 deletions across authorized collections:
@@ -145,7 +146,8 @@ await owner.signOut();
 owner = null;
 ```
 
-`upload` returns `{ url }`, the file's public address.
+`upload` returns `{ url, name, contentType, size }` as stored: shrinking may
+have renamed and re-encoded the file (HEIC becomes WebP, for instance).
 The SDK may resize supported images before upload. The website SDK deliberately
 does not list or delete media; owners do that in Naru's media library. Sign-out
 forgets the tab's session before requesting remote revocation.
@@ -177,8 +179,9 @@ rejects with the platform's native `AbortError`, not `NaruError`.
 
 The declarations export only what an application names itself: `createNaru`,
 `NaruError`, `NaruErrorCode`, `NaruClient`, `Owner`, `PublicCollection`,
-`OwnerCollection`, `Document`, `Page`, `Revision` and `Json`. Option and result
-shapes are written out in place.
+`OwnerCollection`, `Document`, `Page`, `ListOptions`, `Filter`, `Sort`,
+`WriteCondition`, `Revision` and `Json`. Other option and result shapes are
+written out in place.
 
 Naru v1 guarantees the public TypeScript shapes and behavior described here:
 

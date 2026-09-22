@@ -14,12 +14,9 @@ import { setupTestDatabase, teardownTestDatabase } from "./test-database";
 import { down, up } from "@/migrations/1788180032055_add_site_data_created_at";
 
 // The wire form of one sort key.
-// Tests name keys the way cursors do; the wire names timestamps explicitly
-// and has no id key, since ascending id is what no sort at all reads.
+// Tests name keys the way cursors do; the wire names metadata explicitly.
 const order = (field: string, direction = "asc") =>
-  field === "id" && direction === "asc"
-    ? undefined
-    : JSON.stringify([[sortField(field), direction]]);
+  JSON.stringify([[sortField(field), direction]]);
 function sortField(field: string) {
   if (["id", "createdAt", "updatedAt"].includes(field))
     return { metadata: field };
@@ -71,7 +68,7 @@ integration("sorted database pagination", () => {
   test.each(["id", "createdAt", "updatedAt"])(
     "%s traversal handles ties and submillisecond precision in both directions",
     async (orderBy) => {
-      for (const direction of orderBy === "id" ? ["asc"] : ["asc", "desc"]) {
+      for (const direction of ["asc", "desc"]) {
         const ids: string[] = [];
         let pageToken: string | undefined;
         do {
@@ -166,9 +163,6 @@ integration("sorted database pagination", () => {
       // User fields are bare names; the old data.-prefixed form is refused.
       { sort: JSON.stringify([["data.title", "asc"]]) },
       { sort: JSON.stringify([[{ metadata: "version" }, "asc"]]) },
-      // The id is the default order and every sort's tie-breaker, not a key.
-      { sort: JSON.stringify([[{ metadata: "id" }, "asc"]]) },
-      { sort: order("id", "desc") },
       { sort: JSON.stringify([[{ metadata: "id", field: "x" }, "asc"]]) },
       { sort: JSON.stringify([[null, "asc"]]) },
       {

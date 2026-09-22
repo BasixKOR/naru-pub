@@ -27,7 +27,7 @@ export async function GET() {
     "index.html",
     "post.html",
     "guestbook.html",
-    "admin.html",
+    "admin/index.html",
     "list.js",
     "post.js",
     "admin.js",

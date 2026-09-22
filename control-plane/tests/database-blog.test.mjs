@@ -10,8 +10,11 @@ const { JSDOM } = createRequire(require.resolve("jest-environment-jsdom"))(
 );
 const root = new URL("../public/examples/database-blog/", import.meta.url);
 async function page(name, db, storage = new Map(), query = "") {
-  const dom = new JSDOM(await readFile(new URL(`${name}.html`, root), "utf8"), {
-    url: `https://example.naru.pub/blog/${name}.html${query}`,
+  // The admin page lives in its own directory so it is served at /blog/admin/.
+  const file = name === "admin" ? "admin/index.html" : `${name}.html`;
+  const url = `https://example.naru.pub/blog/${name === "admin" ? "admin/" : file}`;
+  const dom = new JSDOM(await readFile(new URL(file, root), "utf8"), {
+    url: `${url}${query}`,
     runScripts: "outside-only",
   });
   const { window } = dom;
@@ -70,10 +73,11 @@ async function page(name, db, storage = new Map(), query = "") {
     await mod.link((specifier) => load(specifier.replace(/^\.\//, "")));
     return mod;
   }
-  const script = window.document
-    .querySelector('script[type="module"]')
-    .getAttribute("src")
-    .slice(2);
+  // Resolve the page's script the way the browser would, relative to the page.
+  const script = new URL(
+    window.document.querySelector('script[type="module"]').getAttribute("src"),
+    url,
+  ).href.slice("https://example.naru.pub/blog/".length);
   await (await load(script)).evaluate();
   return {
     setConfirm: (answer) => {
@@ -202,6 +206,10 @@ test("admin preserves draft across login, retries same ID, fails closed on expir
   await after.fire("post-form", "submit");
   assert.equal(writes[0].id, writes[1].id);
   assert.equal(after.$("view-post").hidden, false);
+  assert.match(
+    after.$("view-post").href,
+    /^https:\/\/example\.naru\.pub\/blog\/post\.html\?id=/,
+  );
   assert.equal(after.storage().size, 1);
   await after.fire("new-post", "click");
   after.$("title").value = "다음 글";
@@ -255,7 +263,7 @@ test("malformed draft does not prevent owner callback completion", async () => {
         return fakeOwner();
       },
     },
-    new Map([["naru:blog-draft:example:/blog/admin.html", "invalid JSON"]]),
+    new Map([["naru:blog-draft:example:/blog/admin/", "invalid JSON"]]),
   );
   assert.equal(completed, true);
   assert.equal(app.$("publish").disabled, false);

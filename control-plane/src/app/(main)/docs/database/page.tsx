@@ -391,7 +391,7 @@ await owner
                   <code>drafts</code> 컬렉션을 위 설정대로 만듭니다.
                 </li>
                 <li>
-                  ‘웹사이트 관리자 로그인’에 올릴 위치의 <code>admin.html</code>{" "}
+                  ‘웹사이트 관리자 로그인’에 올릴 위치의 <code>admin/</code>{" "}
                   주소와 <code>posts</code>·<code>drafts</code>를 등록합니다.
                 </li>
                 <li>

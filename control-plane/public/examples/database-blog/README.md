@@ -10,8 +10,8 @@ SDK 1.0.0을 쓰며 빌드나 설치가 필요 없습니다.
    - posts: 읽기 누구나, 쓰기 관리자만
    - guestbook: 읽기 누구나, 쓰기 누구나 생성만
    - drafts: 읽기 관리자만, 쓰기 관리자만
-2. '웹사이트 관리자 로그인'에 올릴 위치의 admin.html 주소를 등록하고 posts와 drafts를 고르세요.
-   예: https://내사이트.naru.pub/admin.html 또는 https://내사이트.naru.pub/blog/admin.html
+2. '웹사이트 관리자 로그인'에 올릴 위치의 admin/ 주소를 등록하고 posts와 drafts를 고르세요.
+   예: https://내사이트.naru.pub/admin/ 또는 https://내사이트.naru.pub/blog/admin/
 3. 연결한 도메인에 올린다면 config.js의 site에 나루 로그인 이름을 적으세요.
    내사이트.naru.pub에서는 그대로 두면 됩니다.
 4. 모든 파일을 같은 폴더에 올리고 호스팅된 index.html을 여세요. file://로는 동작하지 않습니다.
@@ -29,7 +29,7 @@ SDK 1.0.0을 쓰며 빌드나 설치가 필요 없습니다.
 - config.js / client.js: 사이트 설정과 SDK 연결
 - index.html / guestbook.html / list.js: 글 목록과 방명록
 - post.html / post.js: 글 상세
-- admin.html / admin.js / editor.js: 로그인, 편집, 초안, 공개, 삭제
+- admin/index.html / admin.js / editor.js: 로그인, 편집, 초안, 공개, 삭제
 - utils.js / style.css: 공통 UI
 
 방문자 입력은 textContent로만 표시합니다. 관리자 페이지에는 신뢰하는 스크립트만 넣고,

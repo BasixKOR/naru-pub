@@ -3,7 +3,6 @@ import { beforeEach, expect, jest, test } from "@jest/globals";
 jest.mock("@/lib/auth", () => ({ validateRequest: jest.fn() }));
 jest.mock("../owner-auth", () => ({
   exchangeCode: jest.fn(),
-  siteClientId: jest.fn(),
   updateClient: jest.fn(),
   approveAuthorization: jest.fn(),
   authorizationInput: jest.fn((x: unknown) => x),
@@ -158,10 +157,14 @@ test("website calls answer only under v1, and the consent approval only outside 
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: "Not found." });
   }
-  const response = await post(v1, "authorize");
-  expect(response.status).toBe(404);
-  expect(await response.json()).toEqual({
-    error: { code: "NOT_FOUND", message: "Not found." },
-  });
+  // Sign-in no longer discovers anything; the consent page identifies the
+  // registration by site and exact callback.
+  for (const action of ["authorize", "discover"]) {
+    const response = await post(v1, action);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: { code: "NOT_FOUND", message: "Not found." },
+    });
+  }
   expect(owner.approveAuthorization).not.toHaveBeenCalled();
 });

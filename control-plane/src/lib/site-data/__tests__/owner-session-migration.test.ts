@@ -12,7 +12,6 @@ import {
   authorizationInput,
   digest,
   exchangeCode,
-  siteClientId,
 } from "../owner-auth";
 
 const integration =
@@ -63,14 +62,6 @@ integration("stable client and owner session migration", () => {
       db,
     );
     await up(db);
-    const stable = await siteClientId(owner);
-    expect(
-      await db
-        .selectFrom("site_data_site_clients")
-        .selectAll()
-        .where("user_id", "=", owner)
-        .execute(),
-    ).toHaveLength(1);
     expect(
       await db.selectFrom("site_data_clients").selectAll().execute(),
     ).toHaveLength(2);
@@ -86,7 +77,6 @@ integration("stable client and owner session migration", () => {
       "parent",
       authorizationInput({
         site: "migrate",
-        clientId: stable,
         redirectUri,
         collections: ["posts"],
         challenge: digest(verifier),
@@ -97,7 +87,6 @@ integration("stable client and owner session migration", () => {
       {
         code: new URL(response.redirect).searchParams.get("code"),
         verifier,
-        clientId: stable,
         redirectUri,
       },
       "http://localhost",

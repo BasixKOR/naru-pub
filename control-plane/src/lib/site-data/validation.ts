@@ -17,7 +17,6 @@ export const ERROR_CODES = [
   "NOT_FOUND",
   "RATE_LIMITED",
   "INVALID_REQUEST",
-  "REDIRECT_NOT_REGISTERED",
   "UNAVAILABLE",
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

@@ -175,15 +175,14 @@ All JSON request bodies require `Content-Type: application/json`. Website errors
 
 Owner authorization endpoints:
 
-| Endpoint                         | Purpose                                                                                                                     |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `GET /database/authorize`        | Login/consent UI; never issues a code on GET.                                                                               |
-| `GET /api/data-auth/v1/discover` | Transitional: answers SDK copies loaded before sign-in dropped it. Removed in the next deploy.                              |
-| `POST /api/data-auth/authorize`  | Same-origin owner approval with `site`, `redirectUri`, `challenge`, `state`, `collections`; returns validated redirect URL. |
-| `POST /api/data-auth/v1/token`   | Exchange JSON `{ code, verifier, redirectUri }` from the registered Origin; returns `{ accessToken, expiresAt }`.           |
-| `POST /api/data-auth/v1/revoke`  | Revoke the bearer token supplied in Authorization; requires its registered Origin.                                          |
+| Endpoint                        | Purpose                                                                                                                     |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `GET /database/authorize`       | Login/consent UI; never issues a code on GET.                                                                               |
+| `POST /api/data-auth/authorize` | Same-origin owner approval with `site`, `redirectUri`, `challenge`, `state`, `collections`; returns validated redirect URL. |
+| `POST /api/data-auth/v1/token`  | Exchange JSON `{ code, verifier, redirectUri }` from the registered Origin; returns `{ accessToken, expiresAt }`.           |
+| `POST /api/data-auth/v1/revoke` | Revoke the bearer token supplied in Authorization; requires its registered Origin.                                          |
 
-A `clientId` sent by an older SDK copy, in the consent query or the token exchange, is ignored: the code is bound to one registration, and consent looks the registration up by the signed-in owner, `site` and exact callback. The `v1/` endpoints are what websites call and answer with the coded error body. `POST /api/data-auth/authorize` is the consent screen's own same-origin call. Released SDKs also fix the consent page's query (`site`, `redirectUri`, `challenge`, `state`, `collections`) and the `code`, `state` and `error` it returns to the callback, so those change only compatibly too.
+There is no discovery request. A `clientId` sent by an SDK copy from before it was dropped, in the consent query or the token exchange, is ignored: the code is bound to one registration, and consent looks the registration up by the signed-in owner, `site` and exact callback. The `v1/` endpoints are what websites call and answer with the coded error body. `POST /api/data-auth/authorize` is the consent screen's own same-origin call. Released SDKs also fix the consent page's query (`site`, `redirectUri`, `challenge`, `state`, `collections`) and the `code`, `state` and `error` it returns to the callback, so those change only compatibly too.
 | `GET/POST /api/account/database-clients` | Same-origin owner registration listing/creation (`{ redirectUri, collections }`). |
 | `PATCH/DELETE /api/account/database-clients` | Same-origin owner revoke-all/remove registration (`{ id }`). |
 

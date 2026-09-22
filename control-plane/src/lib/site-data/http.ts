@@ -22,6 +22,13 @@ import { executeMedia } from "./media";
 // just changed from `world` to `admin` can still be served from a cache nothing
 // here can purge. Ten seconds of that is worth the traffic it collapses; a
 // minute of it would not be.
+//
+// This number is half of a contract. Each SDK file bypasses the shared cache
+// for its own copy of it after a write (`PUBLIC_CACHE_MS`), and a test fails if
+// the two drift apart. Once 1.x is frozen, that copy lives in every cached and
+// bundled SDK a site holds, which nothing here can reach: raising `s-maxage`
+// above what they bypass would let them read a cached page that predates their
+// own write. Lowering it is always safe; raising it needs a new SDK major.
 const PUBLIC_READ_CACHE = "public, max-age=0, s-maxage=10";
 
 // Sent on an owner request the server accepted, as epoch milliseconds. An SDK

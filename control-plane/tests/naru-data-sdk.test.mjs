@@ -524,6 +524,43 @@ test("the owner client sends its token and forgets it when the session ends", as
   });
 });
 
+test("a renewed token keeps working past the expiry the session was stored with", async () => {
+  await browser(async ({ respond, storage }) => {
+    const renewed = Date.now() + 7200000;
+    saveSession(storage);
+    const owner = await ownerSession();
+    respond(() =>
+      Response.json(written(), { headers: { "Naru-Owner-Expires": renewed } }),
+    );
+    await owner.collection("posts").set("one", { title: "x" });
+    assert.equal(JSON.parse(storage.get(SESSION)).expiresAt, renewed);
+    // The renewal survives a reload, and the client itself now runs that long.
+    const restored = await ownerSession();
+    assert.ok(restored);
+    respond(() => Response.json(written()));
+    await restored.collection("posts").set("two", { title: "y" });
+    assert.equal(JSON.parse(storage.get(SESSION)).expiresAt, renewed);
+
+    // A session stored by a newer sign-in is left alone, and an expiry that
+    // does not move the deadline forward is ignored.
+    saveSession(storage, renewed);
+    storage.set(
+      SESSION,
+      JSON.stringify({ accessToken: "n".repeat(43), expiresAt: renewed }),
+    );
+    respond(() =>
+      Response.json(written(), {
+        headers: { "Naru-Owner-Expires": Date.now() + 10800000 },
+      }),
+    );
+    await owner.collection("posts").set("three", { title: "z" });
+    assert.deepEqual(JSON.parse(storage.get(SESSION)), {
+      accessToken: "n".repeat(43),
+      expiresAt: renewed,
+    });
+  });
+});
+
 test("signing out forgets the session before revoking, and never erases a newer one", async () => {
   await browser(async ({ calls, respond, storage }) => {
     saveSession(storage);

@@ -57,6 +57,10 @@ import {
   down as dropSiteClientsDown,
 } from "@/migrations/1790078516190_drop_site_data_site_clients";
 import {
+  up as slideTokensUp,
+  down as slideTokensDown,
+} from "@/migrations/1790110700000_slide_site_data_access_tokens";
+import {
   up as featureUseUp,
   down as featureUseDown,
 } from "@/migrations/1788473207664_add_supporter_feature_uses";
@@ -90,8 +94,10 @@ export async function setupTestDatabase() {
   await dropFileVersionUp(db);
   await featureUseUp(db);
   await dropSiteClientsUp(db);
+  await slideTokensUp(db);
 }
 export async function teardownTestDatabase() {
+  await slideTokensDown(db);
   await dropSiteClientsDown(db);
   await featureUseDown(db);
   await dropFileVersionDown(db);

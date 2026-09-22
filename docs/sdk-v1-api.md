@@ -52,6 +52,14 @@ if (!owner) {
 control panel first; if it is not registered, Naru's consent page says so and
 links to the fix, so the site never sees that error.
 
+The browser leaves the page during `signIn`, and a page that holds unsaved
+input should put it somewhere that survives, such as `sessionStorage`, before
+calling it, and restore it after the redirect back. The same applies when a
+request fails with `AUTH_REQUIRED`, which is the other moment an editor asks
+its owner to sign in again. A session lasts as long as the owner keeps using
+it, so this is uncommon rather than routine, but unsaved work should not depend
+on that.
+
 An owner collection adds replacement and deletion:
 
 ```js

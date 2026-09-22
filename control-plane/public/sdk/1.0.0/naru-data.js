@@ -71,7 +71,10 @@ function segment(value) {
 // cache and shows the write. Keyed by collection URL, which names the site.
 const writtenUntil = new Map();
 
-async function request(url, { method = "GET", body, token, signal, touches }) {
+async function request(
+  url,
+  { method = "GET", body, token, signal, touches, renew },
+) {
   const fresh =
     token ||
     method !== "GET" ||
@@ -99,6 +102,10 @@ async function request(url, { method = "GET", body, token, signal, touches }) {
       for (const path of touches)
         writtenUntil.set(path, Date.now() + PUBLIC_CACHE_MS);
   }
+  // A token's lifetime is an idle window the server pushes forward as the
+  // token is used, and this is the expiry it now has.
+  const renewed = Number(response.headers.get("Naru-Owner-Expires"));
+  if (renew && Number.isFinite(renewed)) renew(renewed);
   const result = await response.json().catch(() => null);
   if (!response.ok)
     throw new NaruError(
@@ -254,26 +261,45 @@ async function shrink(file) {
 const sessionKey = ({ origin, site }) =>
   `naru:owner:${origin}:${site}:${location.origin}${location.pathname}`;
 
-// An older client must not erase a newer sign-in made on the same page.
-function forget(key, token) {
+// An older client must not erase or outlive a newer sign-in made on the same
+// page, so both of these only touch a stored session that is still this one.
+function mine(key, token) {
   try {
-    if (JSON.parse(sessionStorage.getItem(key))?.accessToken !== token) return;
+    return JSON.parse(sessionStorage.getItem(key))?.accessToken === token;
   } catch {
-    /* unreadable, so not a newer sign-in */
+    return false; /* unreadable, so not this session */
   }
-  sessionStorage.removeItem(key);
+}
+
+function forget(key, token) {
+  if (mine(key, token)) sessionStorage.removeItem(key);
+}
+
+function remember(key, token, expiresAt) {
+  if (mine(key, token))
+    sessionStorage.setItem(
+      key,
+      JSON.stringify({ accessToken: token, expiresAt }),
+    );
 }
 
 function owner(context, token, expiresAt) {
   const { origin, root } = context;
   const key = sessionKey(context);
+  // The server renews the token as it is used; a tab left open while its owner
+  // keeps working is not signed out mid-edit.
+  const renew = (at) => {
+    if (!(at > expiresAt)) return;
+    expiresAt = at;
+    remember(key, token, at);
+  };
   const send = async (url, init) => {
     if (Date.now() >= expiresAt) {
       forget(key, token);
       throw new NaruError("Sign in again.", "AUTH_REQUIRED");
     }
     try {
-      return await request(url, { ...init, token });
+      return await request(url, { ...init, token, renew });
     } catch (error) {
       if (error.code === "AUTH_REQUIRED") forget(key, token);
       throw error;

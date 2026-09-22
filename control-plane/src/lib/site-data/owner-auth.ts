@@ -20,6 +20,9 @@ export function tokenLifetime(value: unknown): number {
   return value;
 }
 const CODE_SECONDS = 60;
+// However long a token's idle window is, it is never renewed past this much
+// time after it was issued: a stolen token cannot be kept alive indefinitely.
+export const TOKEN_CAP_SECONDS = 7 * 24 * 60 * 60;
 export const digest = (value: string) =>
   createHash("sha256").update(value).digest("base64url");
 const secret = () => randomBytes(32).toString("base64url");
@@ -476,14 +479,13 @@ export async function exchangeCode(
       .select("expires_at")
       .where("id", "=", grant.session_id)
       .executeTakeFirstOrThrow();
+    const lifetime = Math.min(
+      TOKEN_SECONDS,
+      current.token_lifetime_seconds,
+      grant.token_lifetime_seconds,
+    );
     const expiresAt = Math.min(
-      Date.now() +
-        Math.min(
-          TOKEN_SECONDS,
-          current.token_lifetime_seconds,
-          grant.token_lifetime_seconds,
-        ) *
-          1000,
+      Date.now() + lifetime * 1000,
       new Date(parent.expires_at).getTime(),
     );
     const expiresIn = Math.floor((expiresAt - Date.now()) / 1000);
@@ -496,6 +498,7 @@ export async function exchangeCode(
         client_id: client.id,
         session_id: grant.session_id,
         collection_ids: grant.collection_ids,
+        lifetime_seconds: lifetime,
         expires_at: new Date(expiresAt),
       })
       .execute();
@@ -503,13 +506,43 @@ export async function exchangeCode(
   });
 }
 
-// Called inside executeData's owner transaction, before checking document rules.
+/**
+ * A token's lifetime is an idle window, so using it renews it. Renewal stops at
+ * whichever comes first: the cap on the token's whole life, the owner's Naru
+ * login, or a lifetime the registration has since lowered. Like a Naru login,
+ * it is only rewritten past the halfway mark, so a working tab costs one extra
+ * write per half-window rather than one per request.
+ */
+function renewal(grant: {
+  issued_at: Date;
+  expires_at: Date;
+  lifetime_seconds: number;
+  client_lifetime_seconds: number;
+  session_expires_at: Date;
+}) {
+  const expiresAt = new Date(grant.expires_at).getTime();
+  const lifetime =
+    Math.min(grant.lifetime_seconds, grant.client_lifetime_seconds) * 1000;
+  if (Date.now() < expiresAt - lifetime / 2) return expiresAt;
+  const renewed = Math.min(
+    Date.now() + lifetime,
+    new Date(grant.issued_at).getTime() + TOKEN_CAP_SECONDS * 1000,
+    new Date(grant.session_expires_at).getTime(),
+  );
+  return Math.max(expiresAt, renewed);
+}
+
+/**
+ * Called inside executeData's owner transaction, before checking document
+ * rules. Renews the token as a side effect and reports the expiry it now has,
+ * so the SDK holding it can keep its own copy current.
+ */
 export async function tokenScope(
   tx: Kysely<DB>,
   userId: number,
-  token: string,
-  origin: string | null,
+  bearer: { token: string; origin: string | null; expiresAt?: number },
 ) {
+  const { token, origin } = bearer;
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw denied();
   const grant = await tx
     .selectFrom("site_data_access_tokens as t")
@@ -517,8 +550,13 @@ export async function tokenScope(
     .innerJoin("sessions as s", "s.id", "t.session_id")
     .select([
       "t.collection_ids",
+      "t.issued_at",
+      "t.expires_at",
+      "t.lifetime_seconds",
       "c.collection_ids as registered_ids",
       "c.redirect_uri",
+      "c.token_lifetime_seconds as client_lifetime_seconds",
+      "s.expires_at as session_expires_at",
     ])
     .where("t.hash", "=", digest(token))
     .where("c.user_id", "=", userId)
@@ -529,6 +567,14 @@ export async function tokenScope(
   if (!grant || !origin || origin !== new URL(grant.redirect_uri).origin)
     throw denied();
   await assertSiteOrigin(tx, userId, grant.redirect_uri);
+  const expiresAt = renewal(grant);
+  if (expiresAt !== new Date(grant.expires_at).getTime())
+    await tx
+      .updateTable("site_data_access_tokens")
+      .set({ expires_at: new Date(expiresAt) })
+      .where("hash", "=", digest(token))
+      .execute();
+  bearer.expiresAt = expiresAt;
   return grant.collection_ids.filter((id) => grant.registered_ids.includes(id));
 }
 export async function revokeToken(token: string, origin: string | null) {

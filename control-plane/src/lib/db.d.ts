@@ -274,7 +274,10 @@ export interface SiteDataGrant {
   collection_ids: number[];
   expires_at: Timestamp;
 }
-export interface SiteDataAccessTokens extends SiteDataGrant {}
+export interface SiteDataAccessTokens extends SiteDataGrant {
+  issued_at: Generated<Timestamp>;
+  lifetime_seconds: number;
+}
 export interface SiteDataAuthCodes extends SiteDataGrant {
   token_lifetime_seconds: Generated<number>;
   challenge: string;

@@ -34,7 +34,8 @@ export type DataCommand = {
   path: string[];
   method: string;
   adminUserId?: number;
-  bearer?: { token: string; origin: string | null };
+  // Mutable: tokenScope reports the expiry the renewed token now has.
+  bearer?: { token: string; origin: string | null; expiresAt?: number };
   clientIp?: string;
   body?: Record<string, unknown>;
   /** Opaque cursor from the preceding page's nextCursor. */
@@ -152,12 +153,7 @@ export async function executeData(command: DataCommand) {
       noteSupporterFeatureUse(owner.id, "database");
     };
     const allowedIds = command.bearer
-      ? await tokenScope(
-          tx,
-          owner.id,
-          command.bearer.token,
-          command.bearer.origin,
-        )
+      ? await tokenScope(tx, owner.id, command.bearer)
       : undefined;
     const admin = adminUserId === owner.id || allowedIds !== undefined;
     if (adminUserId !== undefined && !admin)
@@ -535,12 +531,7 @@ export async function executeBatch(command: DataCommand) {
     if (!(preview ?? (await userHasFeature(owner.id, "database", tx))))
       throw new DataError(403, "Database access is not enabled for this site.");
     const allowedIds = command.bearer
-      ? await tokenScope(
-          tx,
-          owner.id,
-          command.bearer.token,
-          command.bearer.origin,
-        )
+      ? await tokenScope(tx, owner.id, command.bearer)
       : undefined;
     if (allowedIds === undefined && command.adminUserId !== owner.id)
       throw new DataError(403, "Owner access required.");

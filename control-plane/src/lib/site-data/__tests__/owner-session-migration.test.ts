@@ -61,7 +61,9 @@ integration("stable client and owner session migration", () => {
         db,
       );
     }
-    await sql`insert into site_data_access_tokens(hash,client_id,session_id,collection_ids,expires_at) values ('legacy-token','legacy-a','parent',${[collection.id]},now()+interval '10 minutes')`.execute(
+    // lifetime_seconds is newer than the migration under test; a token from
+    // before it exists only to be invalidated here.
+    await sql`insert into site_data_access_tokens(hash,client_id,session_id,collection_ids,expires_at,lifetime_seconds) values ('legacy-token','legacy-a','parent',${[collection.id]},now()+interval '10 minutes',600)`.execute(
       db,
     );
     await sql`insert into site_data_auth_codes(hash,client_id,session_id,collection_ids,expires_at,challenge) values ('legacy-code','legacy-b','parent',${[collection.id]},now()+interval '1 minute','challenge')`.execute(

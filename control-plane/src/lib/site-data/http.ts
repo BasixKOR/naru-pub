@@ -24,10 +24,17 @@ import { executeMedia } from "./media";
 // minute of it would not be.
 const PUBLIC_READ_CACHE = "public, max-age=0, s-maxage=10";
 
+// Sent on an owner request the server accepted, as epoch milliseconds. An SDK
+// that never reads it is not harmed: it holds an expiry no later than the true
+// one and signs in again, which is what it would have done regardless.
+const OWNER_EXPIRES = "Naru-Owner-Expires";
+
 const publicHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  // A token renews as it is used, so the SDK is told the expiry it now has.
+  "Access-Control-Expose-Headers": OWNER_EXPIRES,
   "Access-Control-Max-Age": "600",
 };
 
@@ -126,7 +133,10 @@ export async function dataRequest(
     }
     const url = new URL(request.url);
     const authorization = request.headers.get("authorization");
-    let bearer;
+    // The service fills in expiresAt when it renews the token behind it.
+    let bearer:
+      | { token: string; origin: string | null; expiresAt?: number }
+      | undefined;
     if (!admin && authorization !== null) {
       const match = /^Bearer ([A-Za-z0-9_-]{43})$/i.exec(authorization);
       if (!match) throw new DataError(401, "Invalid owner token.");
@@ -183,6 +193,9 @@ export async function dataRequest(
     return Response.json(admin ? result : publicResult(result), {
       headers: {
         ...headers,
+        ...(bearer?.expiresAt
+          ? { [OWNER_EXPIRES]: String(bearer.expiresAt) }
+          : {}),
         // Only a read the service itself vouched for as public. Anything else
         // keeps the default no-store, including every error path below.
         ...(cacheability.public ? { "Cache-Control": PUBLIC_READ_CACHE } : {}),

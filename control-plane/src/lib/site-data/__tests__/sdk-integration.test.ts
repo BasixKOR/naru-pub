@@ -45,6 +45,7 @@ integration("SDK and data API contract", () => {
   let server: Server | undefined;
   let origin: string;
   let accessToken: string;
+  let sessionKey: string;
   let owner: Owner;
   let naru: NaruClient;
   const storage = new Map<string, string>();
@@ -202,7 +203,7 @@ integration("SDK and data API contract", () => {
         configurable: true,
         value: values[name],
       });
-    const sessionKey = `naru:owner:https://naru.pub:alice:${redirectUri}`;
+    sessionKey = `naru:owner:https://naru.pub:alice:${redirectUri}`;
     storage.set(
       `${sessionKey}:pending`,
       JSON.stringify({
@@ -522,6 +523,34 @@ integration("SDK and data API contract", () => {
     await missing.arrayBuffer();
     expect(missing.status).toBe(404);
     expect(missing.headers.get("cache-control")).toBe("no-store");
+  });
+
+  test("an owner request past halfway renews the session the SDK holds", async () => {
+    const stored = () => JSON.parse(storage.get(sessionKey)!).expiresAt;
+    const issued = stored();
+    await owner.collection("crud").list();
+    // A token in the first half of its window is left where it is.
+    expect(stored()).toBe(issued);
+    await db
+      .updateTable("site_data_access_tokens")
+      .set({ expires_at: new Date(Date.now() + 60000) })
+      .where("hash", "=", digest(accessToken))
+      .execute();
+    await owner.collection("crud").list();
+    const renewed = stored();
+    expect(renewed).toBeGreaterThan(Date.now() + 3500000);
+    expect(
+      (
+        await db
+          .selectFrom("site_data_access_tokens")
+          .select("expires_at")
+          .where("hash", "=", digest(accessToken))
+          .executeTakeFirstOrThrow()
+      ).expires_at.getTime(),
+    ).toBe(renewed);
+    // An anonymous read carries no session to renew.
+    await naru.public.collection("crud").list();
+    expect(stored()).toBe(renewed);
   });
 
   test("SDK signout revokes the real owner token", async () => {

@@ -461,6 +461,89 @@ integration("website owner authorization", () => {
     ).rejects.toThrow();
     await removeClient(owner, page.id);
   });
+  test("using a token renews it, bounded by the cap, the login and the page's lifetime", async () => {
+    const uri = "https://alice.example/renewed.html";
+    const page = await registerClient(owner, {
+      redirectUri: uri,
+      collections: ["posts"],
+      tokenLifetimeSeconds: 120,
+    });
+    await db
+      .updateTable("sessions")
+      .set({ expires_at: new Date(Date.now() + 8 * 24 * 3600000) })
+      .where("id", "=", "alice-session")
+      .execute();
+    const grant = await exchange(
+      new URL(
+        (
+          await approveAuthorization(
+            owner,
+            "alice-session",
+            authInput({ redirectUri: uri }),
+          )
+        ).redirect,
+      ).searchParams.get("code")!,
+      { redirectUri: uri },
+      origin,
+    );
+    const hash = digest(grant.accessToken);
+    const expiry = async () =>
+      (
+        await db
+          .selectFrom("site_data_access_tokens")
+          .select("expires_at")
+          .where("hash", "=", hash)
+          .executeTakeFirstOrThrow()
+      ).expires_at.getTime();
+    const backdate = (expiresIn: number, issuedAgo = 0) =>
+      db
+        .updateTable("site_data_access_tokens")
+        .set({
+          expires_at: new Date(Date.now() + expiresIn),
+          issued_at: new Date(Date.now() - issuedAgo),
+        })
+        .where("hash", "=", hash)
+        .execute();
+    // A token still in the first half of its window is not rewritten.
+    await expect(data(grant.accessToken, ["posts"])).resolves.toBeDefined();
+    expect(await expiry()).toBe(grant.expiresAt);
+    // Past halfway, the idle window starts again from this request.
+    await backdate(30000);
+    await expect(data(grant.accessToken, ["posts"])).resolves.toBeDefined();
+    expect(await expiry()).toBeGreaterThan(Date.now() + 115000);
+    expect(await expiry()).toBeLessThanOrEqual(Date.now() + 120000);
+    // Never past seven days after the token was issued.
+    await backdate(30000, 7 * 24 * 3600000 - 45000);
+    await expect(data(grant.accessToken, ["posts"])).resolves.toBeDefined();
+    expect(await expiry()).toBeLessThanOrEqual(Date.now() + 45000);
+    expect(await expiry()).toBeGreaterThan(Date.now() + 30000);
+    // Never past the Naru login the token hangs from.
+    await backdate(30000);
+    await db
+      .updateTable("sessions")
+      .set({ expires_at: new Date(Date.now() + 50000) })
+      .where("id", "=", "alice-session")
+      .execute();
+    await expect(data(grant.accessToken, ["posts"])).resolves.toBeDefined();
+    expect(await expiry()).toBeLessThanOrEqual(Date.now() + 50000);
+    expect(await expiry()).toBeGreaterThan(Date.now() + 30000);
+    // A bound that falls behind the expiry the token already has never
+    // shortens it; only revocation and the deadline itself end a session.
+    const before = await expiry();
+    await db
+      .updateTable("sessions")
+      .set({ expires_at: new Date(Date.now() + 40000) })
+      .where("id", "=", "alice-session")
+      .execute();
+    await expect(data(grant.accessToken, ["posts"])).resolves.toBeDefined();
+    expect(await expiry()).toBe(before);
+    await removeClient(owner, page.id);
+    await db
+      .updateTable("sessions")
+      .set({ expires_at: new Date(Date.now() + 3600000) })
+      .where("id", "=", "alice-session")
+      .execute();
+  });
   test("lost domain verification, deleted sessions and removed registrations invalidate access", async () => {
     const access = await token();
     await sql`update custom_domains set verified_at = null`.execute(db);

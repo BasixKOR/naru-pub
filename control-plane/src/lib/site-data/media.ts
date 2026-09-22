@@ -70,7 +70,8 @@ type MediaCommand = {
   path: string[];
   method: string;
   adminUserId?: number;
-  bearer?: { token: string; origin: string | null };
+  // Mutable: tokenScope reports the expiry the renewed token now has.
+  bearer?: { token: string; origin: string | null; expiresAt?: number };
   body?: Record<string, unknown>;
   after?: string;
   size?: number;
@@ -137,14 +138,7 @@ export async function executeMedia(command: MediaCommand) {
   const allowedIds = command.bearer
     ? await db
         .transaction()
-        .execute((tx) =>
-          tokenScope(
-            tx,
-            owner.id,
-            command.bearer!.token,
-            command.bearer!.origin,
-          ),
-        )
+        .execute((tx) => tokenScope(tx, owner.id, command.bearer!))
     : undefined;
   const admin = command.adminUserId === owner.id || allowedIds !== undefined;
   if (!admin) throw new DataError(403, "Owner access required.");

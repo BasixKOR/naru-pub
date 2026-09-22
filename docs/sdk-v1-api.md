@@ -48,6 +48,10 @@ if (!owner) {
 }
 ```
 
+`signIn` makes no request of its own. Register the page's exact URL in the
+control panel first; if it is not registered, Naru's consent page says so and
+links to the fix, so the site never sees that error.
+
 An owner collection adds replacement and deletion:
 
 ```js
@@ -157,17 +161,16 @@ forgets the tab's session before requesting remote revocation.
 SDK failures are `NaruError` instances. Application logic should use the stable
 `code`, not HTTP status or message:
 
-| Code                      | Meaning                                                       |
-| ------------------------- | ------------------------------------------------------------- |
-| `CONFLICT`                | A revision or absence condition failed.                       |
-| `QUOTA_EXCEEDED`          | The site's database or media storage is full.                 |
-| `AUTH_REQUIRED`           | Owner authorization is missing, expired, or revoked.          |
-| `ACCESS_DENIED`           | The collection policy or owner scope denies the operation.    |
-| `NOT_FOUND`               | The requested site, collection, document, or media is absent. |
-| `RATE_LIMITED`            | The caller must wait before retrying.                         |
-| `INVALID_REQUEST`         | Input is malformed or outside documented limits.              |
-| `REDIRECT_NOT_REGISTERED` | The current owner callback was not registered.                |
-| `UNAVAILABLE`             | The service, network, or response is temporarily unusable.    |
+| Code              | Meaning                                                       |
+| ----------------- | ------------------------------------------------------------- |
+| `CONFLICT`        | A revision or absence condition failed.                       |
+| `QUOTA_EXCEEDED`  | The site's database or media storage is full.                 |
+| `AUTH_REQUIRED`   | Owner authorization is missing, expired, or revoked.          |
+| `ACCESS_DENIED`   | The collection policy or owner scope denies the operation.    |
+| `NOT_FOUND`       | The requested site, collection, document, or media is absent. |
+| `RATE_LIMITED`    | The caller must wait before retrying.                         |
+| `INVALID_REQUEST` | Input is malformed or outside documented limits.              |
+| `UNAVAILABLE`     | The service, network, or response is temporarily unusable.    |
 
 `error.retryable` is the SDK's retry hint: true for `RATE_LIMITED` and
 `UNAVAILABLE`. `error.message` is diagnostic and may change; a network

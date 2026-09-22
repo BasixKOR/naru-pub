@@ -37,10 +37,7 @@ async function page(name, db, storage = new Map(), query = "") {
     new SyntheticModule(
       ["config"],
       function () {
-        this.setExport("config", {
-          site: "example",
-          clientId: "example-client",
-        });
+        this.setExport("config", { site: "example" });
       },
       { context },
     ),

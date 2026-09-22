@@ -10,9 +10,6 @@ export function errorMessage(error) {
     CONFLICT: "다른 곳에서 먼저 고쳤습니다. 새로고침하세요.",
     QUOTA_EXCEEDED: "저장 공간이 가득 찼습니다.",
     RATE_LIMITED: "잠시 후 다시 시도하세요.",
-    // Seen only by the site owner while setting the example up.
-    REDIRECT_NOT_REGISTERED:
-      "나루 제어판의 ‘웹사이트 관리자 로그인’에 이 페이지를 등록하세요.",
   };
   if (hints[error.code]) return hints[error.code];
   // SDK errors carry a code; plain errors are this site's own messages.

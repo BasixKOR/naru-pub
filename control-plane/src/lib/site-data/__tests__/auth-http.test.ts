@@ -71,7 +71,6 @@ test("token exchange ignores ambient cookies and forwards origin to grant verifi
   const body = {
     code: "code",
     verifier: "verifier",
-    clientId: "client",
     redirectUri: "https://alice.example/admin",
   };
   const response = await ownerAuthRequest(

@@ -50,7 +50,7 @@ The blog tests exercise public browsing/guestbook and admin draft/publishing flo
   `{ url, name, contentType, size }`, only the names an application writes
   itself (including option types its helpers pass along) are exported, `sort` is always a list of
   `[field, direction]` pairs, `list` takes flat `size`/`after`/`includeTotal`,
-  and pagination uses opaque cursors. Errors carry one of nine closed v1 codes,
+  and pagination uses opaque cursors. Errors carry one of eight closed v1 codes,
   set by the server. Anything added later is added to the server contract too,
   so add it only when a site needs it.
 - Obtain the owner's instruction to freeze 1.0.0. Then remove its development

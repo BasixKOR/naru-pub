@@ -22,7 +22,6 @@ const CODES = new Set([
   "NOT_FOUND",
   "RATE_LIMITED",
   "INVALID_REQUEST",
-  "REDIRECT_NOT_REGISTERED",
   "UNAVAILABLE",
 ]);
 const errorCode = (status, code) => {
@@ -382,15 +381,10 @@ const callback = () => location.origin + location.pathname;
 /**
  * Leaves for Naru, where the owner approves access to `collections`, and comes
  * back to this page. Register this page's URL as an administrator callback in
- * the control panel first.
+ * the control panel first; Naru says so on its own page if it is not.
  */
 async function signIn(context, collections) {
   const { site, origin } = context;
-  const discovery = new URL("/api/data-auth/v1/discover", origin);
-  discovery.search = String(
-    new URLSearchParams({ site, redirectUri: callback() }),
-  );
-  const { clientId } = await request(discovery.href, { touches: [] });
   const verifier = random();
   const state = random();
   const challenge = base64url(
@@ -399,13 +393,12 @@ async function signIn(context, collections) {
   // The PKCE transaction has to survive the round trip through Naru.
   sessionStorage.setItem(
     `${sessionKey(context)}:pending`,
-    JSON.stringify({ clientId, verifier, state, startedAt: Date.now() }),
+    JSON.stringify({ verifier, state, startedAt: Date.now() }),
   );
   const approval = new URL("/database/authorize", origin);
   approval.search = String(
     new URLSearchParams({
       site,
-      clientId,
       redirectUri: callback(),
       challenge,
       state,
@@ -463,7 +456,6 @@ async function ownerSession(context) {
     body: {
       code,
       verifier: pending.verifier,
-      clientId: pending.clientId,
       redirectUri: callback(),
     },
     touches: [],

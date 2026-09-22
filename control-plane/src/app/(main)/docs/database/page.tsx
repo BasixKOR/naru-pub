@@ -445,10 +445,6 @@ await owner
                     "INVALID_REQUEST",
                     "이름, 필터, 크기 등 요청 형식이 잘못되었습니다.",
                   ],
-                  [
-                    "REDIRECT_NOT_REGISTERED",
-                    "이 페이지 주소가 관리자 로그인에 등록되지 않았습니다.",
-                  ],
                   ["UNAVAILABLE", "일시적인 오류입니다."],
                 ].map(([code, meaning]) => [
                   <code key="c">{code}</code>,

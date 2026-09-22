@@ -43,7 +43,6 @@ export type NaruErrorCode =
   | "NOT_FOUND"
   | "RATE_LIMITED"
   | "INVALID_REQUEST"
-  | "REDIRECT_NOT_REGISTERED"
   | "UNAVAILABLE";
 
 /** A Naru operation that could not be completed. Check it with `instanceof`. */

@@ -8,7 +8,6 @@ import {
   authorizationInput,
   digest,
   exchangeCode,
-  siteClientId,
   updateClient,
   tokenLifetime,
   registerClient,
@@ -24,14 +23,12 @@ integration("website owner authorization", () => {
   let ready = false,
     owner: number,
     bob: number,
-    clientId: string,
     registrationId: string;
   const redirectUri = "https://alice.example/admin.html",
     origin = "https://alice.example";
   const verifier = "v".repeat(43);
   const authInput = (extra = {}) =>
     authorizationInput({
-      clientId,
       site: "alice",
       redirectUri,
       state: "s".repeat(43),
@@ -48,10 +45,7 @@ integration("website owner authorization", () => {
     return new URL(response.redirect).searchParams.get("code")!;
   };
   const exchange = (code: string, extra = {}, requestOrigin = origin) =>
-    exchangeCode(
-      { code, verifier, clientId, redirectUri, ...extra },
-      requestOrigin,
-    );
+    exchangeCode({ code, verifier, redirectUri, ...extra }, requestOrigin);
   const token = async () => (await exchange(await issue())).accessToken;
   const data = (
     accessToken: string,
@@ -103,7 +97,6 @@ integration("website owner authorization", () => {
         collections: ["posts", "recreated"],
       })
     ).id;
-    clientId = await siteClientId(owner);
   });
   afterAll(async () => {
     if (ready) await teardownTestDatabase();
@@ -279,62 +272,40 @@ integration("website owner authorization", () => {
       .where("id", "=", "alice-session")
       .execute();
   });
-  test("one stable website ID supports exact callbacks, edits revoke grants, and old callback IDs are rejected", async () => {
-    const stable = await siteClientId(owner);
+  test("the site and exact callback identify a registration; edits revoke grants", async () => {
+    // An SDK released before sign-in dropped clientId still sends one. Any
+    // value is ignored, a stale or foreign one included.
+    const legacy = await approveAuthorization(
+      owner,
+      "alice-session",
+      authInput({ clientId: "anything" }),
+    );
+    const legacyCode = new URL(legacy.redirect).searchParams.get("code")!;
     await expect(
-      approveAuthorization(
-        owner,
-        "alice-session",
-        authInput({ clientId: registrationId }),
-      ),
-    ).rejects.toMatchObject({ status: 403 });
-    const pending = await issue();
-    await expect(
-      exchange(pending, { clientId: registrationId }),
-    ).rejects.toMatchObject({ status: 401 });
-    await expect(exchange(pending)).resolves.toHaveProperty("accessToken");
+      exchange(legacyCode, { clientId: "anything" }),
+    ).resolves.toHaveProperty("accessToken");
     const callback2 = "https://alice.example/second.html";
     const second = await registerClient(owner, {
       redirectUri: callback2,
       collections: ["private"],
     });
-    expect(await siteClientId(owner)).toBe(stable);
+    // Scope comes from the callback's own registration.
     await expect(
       approveAuthorization(
         owner,
         "alice-session",
-        authInput({
-          clientId: registrationId,
-          redirectUri: callback2,
-          collections: ["private"],
-        }),
-      ),
-    ).rejects.toMatchObject({ status: 403 });
-    await expect(
-      approveAuthorization(
-        owner,
-        "alice-session",
-        authInput({
-          clientId: stable,
-          redirectUri: callback2,
-          collections: ["posts"],
-        }),
+        authInput({ redirectUri: callback2, collections: ["posts"] }),
       ),
     ).rejects.toMatchObject({ status: 403 });
     const response = await approveAuthorization(
       owner,
       "alice-session",
-      authInput({
-        clientId: stable,
-        redirectUri: callback2,
-        collections: ["private"],
-      }),
+      authInput({ redirectUri: callback2, collections: ["private"] }),
     );
     const code = new URL(response.redirect).searchParams.get("code")!;
-    const grant = await exchange(code, {
-      clientId: stable,
-      redirectUri: callback2,
-    });
+    // A code names its registration: the other callback cannot redeem it.
+    await expect(exchange(code)).rejects.toMatchObject({ status: 401 });
+    const grant = await exchange(code, { redirectUri: callback2 });
     expect(grant).toHaveProperty("accessToken");
     await expect(data(grant.accessToken, ["private"])).resolves.toBeDefined();
     await expect(
@@ -347,15 +318,32 @@ integration("website owner authorization", () => {
       redirectUri: callback2,
       collections: ["posts"],
     });
-    expect(await siteClientId(owner)).toBe(stable);
     await expect(data(grant.accessToken, ["private"])).rejects.toMatchObject({
       status: 401,
     });
     await removeClient(owner, second.id);
-    expect(await siteClientId(owner)).toBe(stable);
     await expect(exchange(await issue())).resolves.toHaveProperty(
       "accessToken",
     );
+  });
+  test("consent explains an unregistered page and a wrong account on Naru", async () => {
+    const unregistered = "https://alice.example/unknown.html";
+    await expect(
+      approveAuthorization(
+        owner,
+        "alice-session",
+        authInput({ redirectUri: unregistered }),
+      ),
+    ).rejects.toMatchObject({
+      status: 403,
+      message: expect.stringContaining(unregistered),
+    });
+    await expect(
+      approveAuthorization(owner, "alice-session", authInput({ site: "bob" })),
+    ).rejects.toMatchObject({
+      status: 403,
+      message: expect.stringContaining("bob 사이트"),
+    });
   });
   test("one opaque token lasts at most 24 hours, is stored hashed and is capped by the parent session", async () => {
     await db

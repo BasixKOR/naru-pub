@@ -305,8 +305,9 @@ export function authorizationInput(body: Record<string, unknown>) {
     !/^[A-Za-z0-9_-]{43,128}$/.test(state)
   )
     throw new DataError(400, "S256 PKCE challenge and random state required.");
+  // A clientId from an SDK released before sign-in dropped it is ignored: the
+  // site and exact callback identify the registration on their own.
   return {
-    clientId: text(body.clientId, 64),
     site: name(body.site),
     redirectUri: text(body.redirectUri),
     challenge,
@@ -322,29 +323,29 @@ async function authorizationDetails(
   userId: number,
   input: AuthorizationInput,
 ) {
-  const client = await tx
-    .selectFrom("site_data_clients as c")
-    .innerJoin("users as u", "u.id", "c.user_id")
-    .innerJoin("site_data_site_clients as w", "w.user_id", "c.user_id")
-    .select([
-      "c.id",
-      "c.redirect_uri",
-      "c.collection_ids",
-      "c.token_lifetime_seconds",
-      "u.login_name",
-    ])
-    .where("w.id", "=", input.clientId)
-    .where("c.redirect_uri", "=", input.redirectUri)
-    .where("c.user_id", "=", userId)
+  const owner = await tx
+    .selectFrom("users")
+    .select("login_name")
+    .where("id", "=", userId)
     .executeTakeFirst();
-  if (
-    !client ||
-    client.login_name !== input.site ||
-    client.redirect_uri !== input.redirectUri
-  )
+  if (owner?.login_name !== input.site)
     throw new DataError(
       403,
-      "This request does not match your website registration.",
+      `이 요청은 ${input.site} 사이트의 관리자 로그인입니다. 그 사이트의 나루 계정으로 로그인해 주세요.`,
+    );
+  const client = await tx
+    .selectFrom("site_data_clients")
+    .select(["id", "redirect_uri", "collection_ids", "token_lifetime_seconds"])
+    .where("redirect_uri", "=", input.redirectUri)
+    .where("user_id", "=", userId)
+    .executeTakeFirst();
+  // Reported here, on Naru, rather than on the site: this is where it is fixed.
+  // The address is shown as text only, never linked or redirected to, since
+  // anyone can craft this request.
+  if (!client)
+    throw new DataError(
+      403,
+      `관리자 로그인에 등록되지 않은 페이지입니다: ${input.redirectUri} — 제어판의 ‘웹사이트 관리자 로그인’에서 이 주소를 등록한 뒤 웹사이트에서 다시 로그인해 주세요.`,
     );
   await assertSiteOrigin(tx, userId, client.redirect_uri);
   const collections = await scope(tx, userId, input.collections);
@@ -431,15 +432,16 @@ export async function exchangeCode(
   const code = text(body.code, 128),
     verifier = text(body.verifier, 128);
   if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) throw denied();
-  const clientId = text(body.clientId, 64),
-    redirectUri = text(body.redirectUri);
+  // Any clientId an older SDK still sends is ignored. The code is a secret bound
+  // to one registration, so it names the registration by itself.
+  const redirectUri = text(body.redirectUri);
   return db.transaction().execute(async (tx) => {
     // Lock owner first, matching data operations and revocation; never invert locks.
     const client = await tx
-      .selectFrom("site_data_clients as c")
-      .innerJoin("site_data_site_clients as w", "w.user_id", "c.user_id")
-      .selectAll("c")
-      .where("w.id", "=", clientId)
+      .selectFrom("site_data_auth_codes as g")
+      .innerJoin("site_data_clients as c", "c.id", "g.client_id")
+      .select(["c.id", "c.user_id"])
+      .where("g.hash", "=", digest(code))
       .where("c.redirect_uri", "=", redirectUri)
       .executeTakeFirst();
     if (!client) throw denied();

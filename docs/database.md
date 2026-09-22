@@ -70,7 +70,7 @@ SDK declarations are available alongside the module at `/sdk/1/naru-data.d.ts`. 
 
 1. Open `/database` directly in the control plane (it is intentionally absent from the header).
 2. Under website administrator login, register an exact callback URL such as `https://your-login-name.naru.pub/admin.html` and select the collections it may access. The callback must be on your Naru subdomain or an active, verified custom domain; no query, fragment, credentials, wildcard or arbitrary external origin. Development mode also permits loopback callbacks.
-3. The SDK discovers the site's stable public Client ID from the exact registered callback URL. Applications no longer need to copy it into configuration. Each callback keeps independent collection permissions.
+3. Nothing else needs configuring: the site name and the exact callback URL identify the registration. Each callback keeps independent collection permissions. If the page is not registered, Naru's consent page says so and links to the control panel.
 4. Call `naru.auth.signIn({ collections })` from a button. Naru authenticates the owner and asks for explicit consent. The website resumes at the registered callback, where `naru.auth.session()` returns a separate authenticated client.
 
 Minimal editor-page wiring:
@@ -118,7 +118,7 @@ Minimal editor-page wiring:
 </script>
 ```
 
-The SDK discovers the site's public Client ID from the exact registered callback URL. The requested collections must be a subset of the registration. Handles from `naru.public.collection()` never use owner credentials; only `owner.collection()` uses owner authority. Tokens permit reading, creating, replacing and deleting documents in those collections, including private documents. They are tied to collection IDs so deleting and recreating a collection does not transfer old grants.
+The site name and the exact callback URL identify the registration; there is no client ID. The requested collections must be a subset of the registration. Handles from `naru.public.collection()` never use owner credentials; only `owner.collection()` uses owner authority. Tokens permit reading, creating, replacing and deleting documents in those collections, including private documents. They are tied to collection IDs so deleting and recreating a collection does not transfer old grants.
 
 Authentication uses random state and mandatory S256 PKCE. The verifier and state live in tab-scoped sessionStorage for at most ten minutes; authorization codes expire after 60 seconds and are single-use, including concurrent exchanges. The server stores only code/token hashes. Each registered admin page has a control-plane token lifetime of 1-1440 whole minutes (default 1440). Each sign-in issues one opaque admin token capped by this setting, the duration displayed at consent, and the approving Naru session. The platform maximum remains 24 hours. Session storage, restoration, and expiry are SDK implementation details so the public interface can later adopt safer renewal without exposing token deadlines.
 
@@ -175,15 +175,15 @@ All JSON request bodies require `Content-Type: application/json`. Website errors
 
 Owner authorization endpoints:
 
-| Endpoint                         | Purpose                                                                                                                                 |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /database/authorize`        | Login/consent UI; never issues a code on GET.                                                                                           |
-| `GET /api/data-auth/v1/discover` | Discovers the public site Client ID for an exact registered callback and matching Origin.                                               |
-| `POST /api/data-auth/authorize`  | Same-origin owner approval with `clientId`, `site`, `redirectUri`, `challenge`, `state`, `collections`; returns validated redirect URL. |
-| `POST /api/data-auth/v1/token`   | Exchange JSON `{ code, verifier, clientId, redirectUri }` from the registered Origin; returns `{ accessToken, expiresAt }`.             |
-| `POST /api/data-auth/v1/revoke`  | Revoke the bearer token supplied in Authorization; requires its registered Origin.                                                      |
+| Endpoint                         | Purpose                                                                                                                     |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `GET /database/authorize`        | Login/consent UI; never issues a code on GET.                                                                               |
+| `GET /api/data-auth/v1/discover` | Transitional: answers SDK copies loaded before sign-in dropped it. Removed in the next deploy.                              |
+| `POST /api/data-auth/authorize`  | Same-origin owner approval with `site`, `redirectUri`, `challenge`, `state`, `collections`; returns validated redirect URL. |
+| `POST /api/data-auth/v1/token`   | Exchange JSON `{ code, verifier, redirectUri }` from the registered Origin; returns `{ accessToken, expiresAt }`.           |
+| `POST /api/data-auth/v1/revoke`  | Revoke the bearer token supplied in Authorization; requires its registered Origin.                                          |
 
-The `v1/` endpoints are what websites call and answer with the coded error body. `POST /api/data-auth/authorize` is the consent screen's own same-origin call. Released SDKs also fix the consent page's query (`site`, `clientId`, `redirectUri`, `challenge`, `state`, `collections`) and the `code`, `state` and `error` it returns to the callback, so those change only compatibly too.
+A `clientId` sent by an older SDK copy, in the consent query or the token exchange, is ignored: the code is bound to one registration, and consent looks the registration up by the signed-in owner, `site` and exact callback. The `v1/` endpoints are what websites call and answer with the coded error body. `POST /api/data-auth/authorize` is the consent screen's own same-origin call. Released SDKs also fix the consent page's query (`site`, `redirectUri`, `challenge`, `state`, `collections`) and the `code`, `state` and `error` it returns to the callback, so those change only compatibly too.
 | `GET/POST /api/account/database-clients` | Same-origin owner registration listing/creation (`{ redirectUri, collections }`). |
 | `PATCH/DELETE /api/account/database-clients` | Same-origin owner revoke-all/remove registration (`{ id }`). |
 
@@ -363,7 +363,7 @@ Draft and public copies share an ID. Saving a private draft does not unpublish o
 
 ### Website identity and admin tokens
 
-`site_data_site_clients` stores one persistent ID per owner, independently of callback rows. Migration preserves callback rows as internal registration IDs, but invalidates all existing authorization codes and website access tokens. Old callback IDs are not accepted as public Client IDs. Each registered page retains its exact callback and collection IDs. Changing a callback URL or its collection permissions revokes all of its codes and access tokens, including when widening scope. Reducing its token lifetime also revokes them. Increasing only the lifetime preserves existing tokens with their original deadlines; pending codes retain the duration already approved. Saving an unchanged registration does not revoke access. Removing a callback cascades the same revocation; the website ID survives even when the last callback is removed.
+Sign-in no longer uses a client ID; `site_data_site_clients`, which held one per owner, is unused and will be dropped. Each registered page retains its exact callback and collection IDs. Changing a callback URL or its collection permissions revokes all of its codes and access tokens, including when widening scope. Reducing its token lifetime also revokes them. Increasing only the lifetime preserves existing tokens with their original deadlines; pending codes retain the duration already approved. Saving an unchanged registration does not revoke access. Removing a callback cascades the same revocation.
 
 Every `/api/data-auth/v1/token` exchange returns `{ accessToken, expiresAt }`; the token is sent as `Authorization: Bearer <accessToken>`. `expiresAt` is the fixed expiry in Unix milliseconds; the token lasts no longer than the configured page lifetime, consented duration, platform maximum, or approving Naru session, whichever ends first. `POST /api/data-auth/v1/revoke` takes the bearer token and revokes it idempotently. The unpublished renewal tables and `/refresh` and `/end-session` endpoints have been removed; the existing access-token table is sufficient. Requests use explicit credentials and never ambient cookies.
 

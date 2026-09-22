@@ -442,7 +442,7 @@
         }
       ],
       "throws": [],
-      "signature": "type NaruErrorCode =\n  | \"CONFLICT\"\n  | \"QUOTA_EXCEEDED\"\n  | \"AUTH_REQUIRED\"\n  | \"ACCESS_DENIED\"\n  | \"NOT_FOUND\"\n  | \"RATE_LIMITED\"\n  | \"INVALID_REQUEST\"\n  | \"REDIRECT_NOT_REGISTERED\"\n  | \"UNAVAILABLE\""
+      "signature": "type NaruErrorCode =\n  | \"CONFLICT\"\n  | \"QUOTA_EXCEEDED\"\n  | \"AUTH_REQUIRED\"\n  | \"ACCESS_DENIED\"\n  | \"NOT_FOUND\"\n  | \"RATE_LIMITED\"\n  | \"INVALID_REQUEST\"\n  | \"UNAVAILABLE\""
     },
     {
       "name": "Revision",

@@ -338,23 +338,37 @@ test("a collection this browser wrote is read past the shared cache for ten seco
   }
 });
 
-test("signIn discovers the client and leaves for approval with a PKCE challenge", async () => {
+test("signIn leaves for approval with a PKCE challenge and no request", async () => {
   await browser(async ({ calls, respond, storage, location }) => {
-    respond(() => Response.json({ clientId: "client-1" }));
+    respond(() => {
+      throw new TypeError("offline");
+    });
     await signIn({ collections: ["posts", "drafts"] });
-    assert.equal(calls[0].url.pathname, "/api/data-auth/v1/discover");
-    assert.equal(
-      calls[0].url.searchParams.get("redirectUri"),
-      "https://alice.naru.pub/admin.html",
-    );
+    // Naru's consent page, not the site, reports an unregistered callback.
+    assert.equal(calls.length, 0);
     const approval = new URL(location.href);
     assert.equal(
       approval.origin + approval.pathname,
       "https://naru.pub/database/authorize",
     );
+    assert.deepEqual([...approval.searchParams.keys()].sort(), [
+      "challenge",
+      "collections",
+      "redirectUri",
+      "site",
+      "state",
+    ]);
+    assert.equal(approval.searchParams.get("site"), "alice");
+    assert.equal(
+      approval.searchParams.get("redirectUri"),
+      "https://alice.naru.pub/admin.html",
+    );
     const pending = JSON.parse(storage.get(`${SESSION}:pending`));
-    assert.equal(pending.clientId, "client-1");
-    assert.equal(approval.searchParams.get("clientId"), "client-1");
+    assert.deepEqual(Object.keys(pending).sort(), [
+      "startedAt",
+      "state",
+      "verifier",
+    ]);
     assert.equal(approval.searchParams.get("state"), pending.state);
     assert.equal(approval.searchParams.get("collections"), "posts,drafts");
     const digest = await crypto.subtle.digest(
@@ -366,29 +380,14 @@ test("signIn discovers the client and leaves for approval with a PKCE challenge"
       Buffer.from(digest).toString("base64url"),
     );
   });
-  await browser(async ({ respond, location }) => {
-    respond(() =>
-      Response.json(
-        {
-          error: {
-            code: "REDIRECT_NOT_REGISTERED",
-            message: "Administrator callback is not registered.",
-          },
-        },
-        { status: 404 },
-      ),
-    );
-    await assert.rejects(signIn({ collections: ["posts"] }), {
-      code: "REDIRECT_NOT_REGISTERED",
-    });
-    assert.equal(location.href, "https://alice.naru.pub/admin.html");
-  });
 });
 
 test("ownerSession exchanges the returned code once and strips it from the address", async () => {
   await browser(async ({ calls, respond, storage, location }) => {
     storage.set(
       `${SESSION}:pending`,
+      // A sign-in an older SDK started still carries its clientId; it finishes
+      // without sending it.
       JSON.stringify({
         clientId: "client-1",
         verifier: "v".repeat(43),
@@ -406,7 +405,6 @@ test("ownerSession exchanges the returned code once and strips it from the addre
     assert.deepEqual(JSON.parse(calls[0].body), {
       code: "c1",
       verifier: "v".repeat(43),
-      clientId: "client-1",
       redirectUri: "https://alice.naru.pub/admin.html",
     });
     assert.equal(storage.has(`${SESSION}:pending`), false);

@@ -19,7 +19,6 @@ export default async function AuthorizePage({
   const query = new URLSearchParams();
   for (const key of [
     "site",
-    "clientId",
     "redirectUri",
     "challenge",
     "state",

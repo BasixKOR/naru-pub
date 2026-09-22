@@ -27,7 +27,6 @@ import {
   authorizationInput,
   digest,
   registerClient,
-  siteClientId,
 } from "../owner-auth";
 import { setupTestDatabase, teardownTestDatabase } from "./test-database";
 import {
@@ -165,14 +164,12 @@ integration("SDK and data API contract", () => {
       });
     const redirectUri = `${origin}/admin`;
     await registerClient(userId, { redirectUri, collections });
-    const clientId = await siteClientId(userId),
-      verifier = "v".repeat(43);
+    const verifier = "v".repeat(43);
     const approval = await approveAuthorization(
       userId,
       "sdk-session",
       authorizationInput({
         site: "alice",
-        clientId,
         redirectUri,
         collections,
         state: "s".repeat(43),
@@ -204,7 +201,6 @@ integration("SDK and data API contract", () => {
     storage.set(
       `${sessionKey}:pending`,
       JSON.stringify({
-        clientId,
         verifier,
         state: "s".repeat(43),
         startedAt: Date.now(),

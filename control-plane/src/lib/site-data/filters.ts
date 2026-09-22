@@ -14,14 +14,14 @@ export const COMPARISONS: Record<ComparisonOperator, string> = {
 export const MAX_FILTER_BYTES = 2048;
 export const MAX_FILTER_PREDICATES = 5;
 
-export function parseWhereQuery(raw: string | null): unknown {
+export function parseFilterQuery(raw: string | null): unknown {
   if (raw === null) return undefined;
   if (Buffer.byteLength(raw) > MAX_FILTER_BYTES)
     throw new DataError(400, "Filter exceeds 2048 bytes.");
   try {
     return JSON.parse(raw);
   } catch {
-    throw new DataError(400, "where must be a JSON object.");
+    throw new DataError(400, "filter must be a JSON object.");
   }
 }
 
@@ -52,11 +52,7 @@ function comparisons(field: string, input: Record<string, unknown>) {
   const parsed: [string, ComparisonOperator, RangeBound][] = [];
   for (const [operator, bound] of operators) {
     if (!Object.hasOwn(COMPARISONS, operator))
-      throw new DataError(
-        400,
-        "Use gt, gte, lt or lte for range comparisons.",
-        "UNSUPPORTED_FILTER",
-      );
+      throw new DataError(400, "Use gt, gte, lt or lte for range comparisons.");
     if (
       !(
         typeof bound === "string" ||
@@ -85,7 +81,7 @@ export function filters(input: unknown) {
   };
   if (input === undefined) return empty;
   if (!input || typeof input !== "object" || Array.isArray(input))
-    throw new DataError(400, "where must be a JSON object.");
+    throw new DataError(400, "filter must be a JSON object.");
   const fields = Object.entries(input).sort(([a], [b]) =>
     a < b ? -1 : a > b ? 1 : 0,
   );

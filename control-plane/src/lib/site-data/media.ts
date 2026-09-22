@@ -72,10 +72,10 @@ type MediaCommand = {
   adminUserId?: number;
   bearer?: { token: string; origin: string | null };
   body?: Record<string, unknown>;
-  pageToken?: string;
-  limit?: number;
+  after?: string;
+  size?: number;
   usage?: boolean;
-  where?: unknown;
+  filter?: unknown;
 };
 /** Newest first is what a media library is for, and the only order offered. */
 const MEDIA_SORT = sorting("createdAt", "desc");
@@ -179,15 +179,15 @@ export async function executeMedia(command: MediaCommand) {
       return { usage: await readUsage() };
     // Refused rather than ignored: a caller that still filters by what a file
     // belongs to would otherwise get the whole library back, and delete it.
-    if (command.where !== undefined)
+    if (command.filter !== undefined)
       throw new DataError(400, "Files cannot be filtered.");
-    const limit = command.limit ?? 50;
+    const limit = command.size ?? 50;
     if (!Number.isInteger(limit) || limit < 1 || limit > 100)
-      throw new DataError(400, "Limit must be 1–100.");
+      throw new DataError(400, "Page size must be 1–100.");
     // Files are not queried by what they belong to: a page records the URLs
     // it uses, and the library is only ever read newest first.
     const cursor = decodeCursor(
-      command.pageToken,
+      command.after,
       owner.id,
       MEDIA_SORT,
       undefined,
@@ -213,7 +213,7 @@ export async function executeMedia(command: MediaCommand) {
     const last = page.at(-1);
     return {
       files: page.map(output),
-      nextPageToken:
+      nextCursor:
         rows.length > limit && last
           ? encodeCursor(
               owner.id,
@@ -256,11 +256,19 @@ export async function executeMedia(command: MediaCommand) {
         ])
         .executeTakeFirstOrThrow();
       if (Number(usage.bytes) + input.size > MAX_MEDIA_SITE_BYTES)
-        throw new DataError(409, "Media storage quota exceeded.");
+        throw new DataError(
+          409,
+          "Media storage quota exceeded.",
+          "QUOTA_EXCEEDED",
+        );
       // Counted as well as measured: the byte quota does not bound rows, and an
       // authorization loop would otherwise mint them without limit.
       if (Number(usage.count) >= MAX_MEDIA_FILES)
-        throw new DataError(409, "Media file count limit reached.");
+        throw new DataError(
+          409,
+          "Media file count limit reached.",
+          "QUOTA_EXCEEDED",
+        );
       return tx
         .insertInto("site_data_files")
         .values({

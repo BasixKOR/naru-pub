@@ -57,20 +57,20 @@ export default function DatabaseManager({
     // The list is paged, so the collection's real size comes with the first
     // page rather than from however many rows happen to be on screen.
     const result = await api(
-      `/${collection}${after ? `?pageToken=${encodeURIComponent(after)}` : "?includeTotal=1"}`,
+      `/${collection}${after ? `?after=${encodeURIComponent(after)}` : "?includeTotal=1"}`,
     );
     setDocuments((previous) =>
       after ? [...previous, ...result.documents] : result.documents,
     );
-    setCursor(result.nextPageToken);
-    if (!after) setTotal(result.total);
+    setCursor(result.nextCursor);
+    if (!after) setTotal(result.totalCount);
   }
   useEffect(() => {
     setOrigin(window.location.origin);
     void run(refresh);
   }, []);
   // A page on the site's own subdomain needs no site option; custom domains do.
-  const snippet = `import { createNaru } from "${origin}/sdk/1.0.0/naru-data.js";\nconst naru = createNaru({ site: ${JSON.stringify(site)} });\nconst entries = naru.public.collection(${JSON.stringify(selected || "guestbook")});\nconst page = await entries.list();`;
+  const snippet = `import { createNaru } from "${origin}/sdk/1/naru-data.js";\nconst naru = createNaru({ site: ${JSON.stringify(site)} });\nconst entries = naru.public.collection(${JSON.stringify(selected || "guestbook")});\nconst page = await entries.list();`;
   return (
     <div className="mx-auto h-full w-full max-w-7xl overflow-auto p-4 space-y-6 sm:p-6 lg:p-8">
       <header className="flex flex-wrap items-start justify-between gap-4 border-b pb-6">

@@ -15,7 +15,13 @@ import { down, up } from "@/migrations/1788180032055_add_site_data_created_at";
 
 // The wire form of one sort key.
 const order = (field: string, direction = "asc") =>
-  JSON.stringify([[field, direction]]);
+  JSON.stringify([[sortField(field), direction]]);
+// Tests name keys the way cursors do; the wire names metadata explicitly.
+function sortField(field: string) {
+  if (["id", "createdAt", "updatedAt"].includes(field))
+    return { metadata: field };
+  return field.startsWith("data.") ? field.slice(5) : field;
+}
 const integration =
   process.env.NARU_DATA_TEST === "1" ? describe : describe.skip;
 integration("sorted database pagination", () => {
@@ -67,14 +73,14 @@ integration("sorted database pagination", () => {
         let pageToken: string | undefined;
         do {
           const page = await call("GET", ["posts"], {
-            orderBy: order(orderBy, direction),
-            limit: 1,
-            pageToken,
+            sort: order(orderBy, direction),
+            size: 1,
+            after: pageToken,
             adminUserId: undefined,
           });
           ids.push(...page.documents!.map((d) => d.id));
           expect(page.documents![0]).not.toHaveProperty("cursor_value");
-          pageToken = page.nextPageToken ?? undefined;
+          pageToken = page.nextCursor ?? undefined;
           expect(ids.length).toBeLessThanOrEqual(4);
         } while (pageToken);
         expect(ids).toEqual(
@@ -84,95 +90,100 @@ integration("sorted database pagination", () => {
     },
   );
   test("deleted cursor anchor and new documents before the cursor do not disturb traversal", async () => {
-    const sort = { orderBy: order("createdAt", "desc") };
-    const first = await call("GET", ["posts"], { ...sort, limit: 2 });
+    const sort = { sort: order("createdAt", "desc") };
+    const first = await call("GET", ["posts"], { ...sort, size: 2 });
     await call("DELETE", ["posts", "c"]);
     await call("PUT", ["posts", "new"], { body: { data: true } });
     const next = await call("GET", ["posts"], {
       ...sort,
-      pageToken: first.nextPageToken,
-      limit: 10,
+      after: first.nextCursor,
+      size: 10,
     });
     expect(next.documents!.map((d) => d.id)).toEqual(["b", "a"]);
-    expect(next.nextPageToken).toBeNull();
+    expect(next.nextCursor).toBeNull();
   });
   test("includeTotal counts the filtered result without changing the page", async () => {
     const page = await call("GET", ["posts"], {
-      limit: 2,
+      size: 2,
       includeTotal: true,
       adminUserId: undefined,
     });
     expect(page.documents).toHaveLength(2);
-    expect(page.nextPageToken).toEqual(expect.any(String));
-    expect(page.total).toBe(4);
+    expect(page.nextCursor).toEqual(expect.any(String));
+    expect(page.totalCount).toBe(4);
   });
   test("cursors reject mismatched order, collection, recreation and malformed input", async () => {
     const first = await call("GET", ["posts"], {
-      orderBy: order("createdAt", "desc"),
-      limit: 1,
+      sort: order("createdAt", "desc"),
+      size: 1,
     });
     await call("POST", [], { body: { name: "other", read: "world" } });
     for (const extra of [
-      { orderBy: order("updatedAt", "desc") },
-      { orderBy: order("createdAt", "asc") },
+      { sort: order("updatedAt", "desc") },
+      { sort: order("createdAt", "asc") },
       {},
     ])
       await expect(
-        call("GET", ["posts"], { ...extra, pageToken: first.nextPageToken }),
+        call("GET", ["posts"], { ...extra, after: first.nextCursor }),
       ).rejects.toMatchObject({ status: 400 });
     await expect(
       call("GET", ["other"], {
-        orderBy: order("createdAt", "desc"),
-        pageToken: first.nextPageToken,
+        sort: order("createdAt", "desc"),
+        after: first.nextCursor,
       }),
     ).rejects.toMatchObject({ status: 400 });
     for (const after of ["", "v1.bad", "x".repeat(2000), "a"])
       await expect(
         call("GET", ["posts"], {
-          orderBy: order("createdAt"),
-          pageToken: after,
+          sort: order("createdAt"),
+          after: after,
         }),
       ).rejects.toMatchObject({ status: 400 });
     await call("DELETE", ["posts"]);
     await call("POST", [], { body: { name: "posts" } });
     await expect(
       call("GET", ["posts"], {
-        orderBy: order("createdAt", "desc"),
-        pageToken: first.nextPageToken,
+        sort: order("createdAt", "desc"),
+        after: first.nextCursor,
       }),
     ).rejects.toMatchObject({ status: 400 });
   });
   test("sort inputs are allowlisted and raw ID page tokens are rejected", async () => {
     for (const extra of [
-      { orderBy: order("data.") },
-      { orderBy: order("data.nested.title") },
-      { orderBy: order("data.title; drop table users") },
-      { orderBy: order("data title") },
-      { orderBy: order("id; drop table users") },
-      { orderBy: order("createdAt", "sideways") },
-      { orderBy: "" },
+      { sort: order("data.") },
+      { sort: order("data.nested.title") },
+      { sort: order("data.title; drop table users") },
+      { sort: order("data title") },
+      { sort: order("id; drop table users") },
+      { sort: order("createdAt", "sideways") },
+      { sort: "" },
       // The one wire form is the JSON array; a bare field name is refused.
-      { orderBy: "createdAt" },
-      { orderBy: "[]" },
+      { sort: "createdAt" },
+      { sort: "[]" },
+      // User fields are bare names; the old data.-prefixed form is refused.
+      { sort: JSON.stringify([["data.title", "asc"]]) },
+      { sort: JSON.stringify([[{ metadata: "version" }, "asc"]]) },
+      { sort: JSON.stringify([[{ metadata: "id", field: "x" }, "asc"]]) },
+      { sort: JSON.stringify([[null, "asc"]]) },
       {
-        orderBy: JSON.stringify([
-          ["id", "asc"],
-          ["createdAt", "asc"],
+        sort: JSON.stringify([
+          [{ metadata: "id" }, "asc"],
+          [{ metadata: "createdAt" }, "asc"],
         ]),
       },
       {
-        orderBy: JSON.stringify([
-          ["createdAt", "asc"],
-          ["createdAt", "desc"],
+        sort: JSON.stringify([
+          [{ metadata: "createdAt" }, "asc"],
+          [{ metadata: "createdAt" }, "desc"],
         ]),
       },
     ])
       await expect(call("GET", ["posts"], extra)).rejects.toMatchObject({
         status: 400,
       });
-    await expect(
-      call("GET", ["posts"], { pageToken: "b" }),
-    ).rejects.toMatchObject({ status: 400 });
+    await expect(call("GET", ["posts"], { after: "b" })).rejects.toMatchObject({
+      status: 400,
+    });
   });
   test("replacement preserves server creation time, updates modification time, and rules still apply", async () => {
     await call("PUT", ["posts", "a"], {
@@ -188,20 +199,20 @@ integration("sorted database pagination", () => {
     expect(
       (
         await call("GET", ["posts"], {
-          orderBy: order("updatedAt", "desc"),
-          limit: 1,
+          sort: order("updatedAt", "desc"),
+          size: 1,
         })
       ).documents![0].id,
     ).toBe("a");
     const page = await call("GET", ["posts"], {
-      orderBy: order("createdAt"),
-      limit: 1,
+      sort: order("createdAt"),
+      size: 1,
     });
     await call("PATCH", ["posts"], { body: { read: "admin", write: "admin" } });
     await expect(
       call("GET", ["posts"], {
-        orderBy: order("createdAt"),
-        pageToken: page.nextPageToken,
+        sort: order("createdAt"),
+        after: page.nextCursor,
         adminUserId: undefined,
       }),
     ).rejects.toMatchObject({ status: 403 });
@@ -234,14 +245,14 @@ integration("sorted database pagination", () => {
       let pageToken: string | undefined;
       do {
         const page = await call("GET", ["notes"], {
-          orderBy: order("data.date", direction),
-          limit: 2,
-          pageToken,
+          sort: order("data.date", direction),
+          size: 2,
+          after: pageToken,
           adminUserId: undefined,
         });
         ids.push(...page.documents!.map((d) => d.id));
         expect(page.documents![0]).not.toHaveProperty("cursor_value");
-        pageToken = page.nextPageToken ?? undefined;
+        pageToken = page.nextCursor ?? undefined;
         expect(ids.length).toBeLessThanOrEqual(ascending.length);
       } while (pageToken);
       expect(ids).toEqual(
@@ -256,22 +267,22 @@ integration("sorted database pagination", () => {
         body: { data: { date: id, title: id } },
       });
     const first = await call("GET", ["notes"], {
-      orderBy: order("data.date"),
-      limit: 1,
+      sort: order("data.date"),
+      size: 1,
     });
-    expect(first.nextPageToken).toEqual(expect.any(String));
+    expect(first.nextCursor).toEqual(expect.any(String));
     for (const orderBy of ["data.title", "createdAt", "id"])
       await expect(
         call("GET", ["notes"], {
-          orderBy: order(orderBy),
-          pageToken: first.nextPageToken,
+          sort: order(orderBy),
+          after: first.nextCursor,
         }),
       ).rejects.toMatchObject({ status: 400 });
     expect(
       (
         await call("GET", ["notes"], {
-          orderBy: order("data.date"),
-          pageToken: first.nextPageToken,
+          sort: order("data.date"),
+          after: first.nextCursor,
         })
       ).documents!.map((d) => d.id),
     ).toEqual(["two"]);
@@ -309,20 +320,20 @@ integration("sorted database pagination", () => {
       db,
     );
     const orderBy = JSON.stringify([
-      ["data.day", "desc"],
-      ["createdAt", "desc"],
+      ["day", "desc"],
+      [{ metadata: "createdAt" }, "desc"],
     ]);
     const ids: string[] = [];
     let pageToken: string | undefined;
     do {
       const page = await call("GET", ["posts"], {
-        orderBy,
-        pageToken,
-        limit: 1,
+        sort: orderBy,
+        after: pageToken,
+        size: 1,
         adminUserId: undefined,
       });
       ids.push(page.documents![0].id);
-      pageToken = page.nextPageToken ?? undefined;
+      pageToken = page.nextCursor ?? undefined;
     } while (pageToken);
     expect(ids.slice(0, 3)).toEqual(["c", "b", "a"]);
   });

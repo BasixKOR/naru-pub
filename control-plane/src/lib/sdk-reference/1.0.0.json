@@ -82,6 +82,23 @@
       ],
       "members": [
         {
+          "name": "after",
+          "optional": true,
+          "signature": "after?: string | null",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Opaque cursor returned by the preceding page."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
           "name": "filter",
           "optional": true,
           "signature": "filter?: Filter",
@@ -89,10 +106,27 @@
           "throws": []
         },
         {
-          "name": "page",
+          "name": "includeTotal",
           "optional": true,
-          "signature": "page?: PageOptions",
+          "signature": "includeTotal?: boolean",
           "summary": [],
+          "throws": []
+        },
+        {
+          "name": "size",
+          "optional": true,
+          "signature": "size?: number",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Default 50; maximum 100."
+                }
+              ]
+            }
+          ],
           "throws": []
         },
         {
@@ -318,57 +352,6 @@
           "optional": true,
           "signature": "totalCount?: number",
           "summary": [],
-          "throws": []
-        }
-      ]
-    },
-    {
-      "name": "PageOptions",
-      "kind": "interface",
-      "summary": [],
-      "throws": [],
-      "signature": "interface PageOptions",
-      "extends": [],
-      "members": [
-        {
-          "name": "after",
-          "optional": true,
-          "signature": "after?: string | null",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "Opaque cursor returned by the preceding page."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
-          "name": "includeTotal",
-          "optional": true,
-          "signature": "includeTotal?: boolean",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "size",
-          "optional": true,
-          "signature": "size?: number",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "Default 50; maximum 100."
-                }
-              ]
-            }
-          ],
           "throws": []
         }
       ]
@@ -615,9 +598,19 @@
     {
       "name": "NaruErrorCode",
       "kind": "type",
-      "summary": [],
+      "summary": [
+        {
+          "type": "paragraph",
+          "spans": [
+            {
+              "type": "text",
+              "value": "Why an operation failed. The list is closed for v1: a code a later server adds reaches this version as the nearest code here."
+            }
+          ]
+        }
+      ],
       "throws": [],
-      "signature": "type NaruErrorCode =\n  | \"CONFLICT\"\n  | \"AUTH_REQUIRED\"\n  | \"ACCESS_DENIED\"\n  | \"NOT_FOUND\"\n  | \"RATE_LIMITED\"\n  | \"INVALID_REQUEST\"\n  | \"REDIRECT_NOT_REGISTERED\"\n  | \"UNAVAILABLE\""
+      "signature": "type NaruErrorCode =\n  | \"CONFLICT\"\n  | \"QUOTA_EXCEEDED\"\n  | \"AUTH_REQUIRED\"\n  | \"ACCESS_DENIED\"\n  | \"NOT_FOUND\"\n  | \"RATE_LIMITED\"\n  | \"INVALID_REQUEST\"\n  | \"REDIRECT_NOT_REGISTERED\"\n  | \"UNAVAILABLE\""
     },
     {
       "name": "Revision",

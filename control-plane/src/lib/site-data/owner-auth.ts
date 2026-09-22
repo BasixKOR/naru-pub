@@ -27,7 +27,7 @@ const denied = () =>
   new DataError(
     401,
     "Owner authorization is invalid, expired or revoked.",
-    "OWNER_SESSION_EXPIRED",
+    "AUTH_REQUIRED",
   );
 
 function text(value: unknown, max = 2048): string {

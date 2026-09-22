@@ -32,7 +32,9 @@ async function page() {
         ["title", "asc"],
         [{ metadata: "createdAt" }, "desc"],
       ],
-      page: { size: 20, after: cursor, includeTotal: true },
+      size: 20,
+      after: cursor,
+      includeTotal: true,
       signal,
     });
     const title: string = result.documents[0].data.title;

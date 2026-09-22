@@ -139,7 +139,7 @@ Check it with GET requests; `curl -I` sends HEAD, which the expression does not
 match and which always reports `DYNAMIC`:
 
 ```bash
-curl -s -o /dev/null -D - "https://naru.pub/api/data/eyecntct/posts?limit=1" | grep -i cf-cache-status
+curl -s -o /dev/null -D - "https://naru.pub/api/data/v1/eyecntct/posts?size=1" | grep -i cf-cache-status
 ```
 
 Within 10 seconds a repeat is `HIT`, after that `EXPIRED`; with an

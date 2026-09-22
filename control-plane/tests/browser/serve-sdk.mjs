@@ -17,7 +17,7 @@ createServer(async (req, res) => {
           .writeHead(200, {
             "Content-Type": "application/json",
           })
-          .end(JSON.stringify({ documents: [], nextPageToken: null })),
+          .end(JSON.stringify({ documents: [], nextCursor: null })),
       100,
     );
     res.on("close", () => clearTimeout(timer));

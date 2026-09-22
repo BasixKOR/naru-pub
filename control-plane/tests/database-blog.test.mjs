@@ -124,7 +124,7 @@ test("post list paginates and renders hostile input as text", async () => {
   assert.match(app.$("entries").textContent, /<img/);
   assert.equal(app.$("more").hidden, false);
   await app.fire("more", "click");
-  assert.equal(requests[1].page.after, "a");
+  assert.equal(requests[1].after, "a");
   assert.ok(
     requests.every(
       (r) => r.sort[0][0].metadata === "createdAt" && r.sort[0][1] === "desc",
@@ -291,16 +291,16 @@ test("category changes reset the cursor and preserve filters on subsequent pages
   await app.fire("more", "click");
   app.$("filter-category").value = "일상";
   await app.fire("filter-form", "submit");
-  assert.equal(calls[2].page.after, undefined);
+  assert.equal(calls[2].after, undefined);
   assert.equal(calls[2].filter.category, "일상");
   assert.equal(app.$("entries").children.length, 1);
   await app.fire("more", "click");
-  assert.equal(calls[3].page.after, "v1.next");
+  assert.equal(calls[3].after, "v1.next");
   assert.equal(calls[3].filter.category, "일상");
   app.$("filter-category").value = "";
   await app.fire("filter-form", "submit");
   assert.equal(Object.keys(calls[4].filter).length, 0);
-  assert.equal(calls[4].page.after, undefined);
+  assert.equal(calls[4].after, undefined);
 });
 // Stands in for the SDK's owner client.
 function fakeOwner(methods = {}) {

@@ -47,11 +47,16 @@ The blog tests exercise public browsing/guestbook and admin draft/publishing flo
   `signOut()`. Server
   metadata is camelCase (`createdAt`/`updatedAt`), `add` and `set` return
   `{ id, revision, createdAt, updatedAt }`, `sort` is always a list of
-  `[field, direction]` pairs, and pagination uses opaque cursors. Anything added later is added to the server
-  contract too, so add it only when a site needs it.
+  `[field, direction]` pairs, `list` takes flat `size`/`after`/`includeTotal`,
+  and pagination uses opaque cursors. Errors carry one of nine closed v1 codes,
+  set by the server. Anything added later is added to the server contract too,
+  so add it only when a site needs it.
 - Obtain the owner's instruction to freeze 1.0.0. Then remove its development
   notice, record release notes and checksums, and tag the exact verified commit.
-  Future SDK changes must use a new versioned directory after that freeze.
+  Future SDK changes must use a new versioned directory after that freeze:
+  compatible ones as 1.0.1 or 1.1.0, with the `/sdk/1/` rewrite in
+  `next.config.mjs` moved to it; breaking ones as `/sdk/2/` with a new
+  `/api/data/v2/` wire version beside v1.
 
 ## Operational limitations
 
@@ -64,8 +69,9 @@ may be copied by the browser when a tab is duplicated. It is not an XSS defense.
 ## SDK/API integration checks
 
 The stable client behavior covered here is defined in the [Naru Data SDK v1 API
-reference](sdk-v1-api.md). The transport table in [database.md](database.md) is
-internal and may change without changing that public contract.
+reference](sdk-v1-api.md). The v1 wire table in [database.md](database.md) is
+not for applications, but released SDK files call it, so it changes only
+compatibly.
 
 From `control-plane`, with PostgreSQL tools (`initdb`, `pg_ctl`, `createdb`)
 installed locally:

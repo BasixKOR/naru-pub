@@ -10,7 +10,7 @@ import {
 import { sql } from "kysely";
 import { db } from "@/lib/database";
 import { executeData } from "../service";
-import { filters, parseWhereQuery } from "../filters";
+import { filters, parseFilterQuery } from "../filters";
 import { setupTestDatabase, teardownTestDatabase } from "./test-database";
 import {
   down,
@@ -72,13 +72,19 @@ describe("filter validation", () => {
       filters({ a: "1" }).fingerprint,
     );
     expect(filters({}).fingerprint).toBeUndefined();
-    expect(() => parseWhereQuery("{")).toThrow();
-    expect(() => parseWhereQuery(" ".repeat(2049))).toThrow();
+    expect(() => parseFilterQuery("{")).toThrow();
+    expect(() => parseFilterQuery(" ".repeat(2049))).toThrow();
   });
 });
 // The wire form of one sort key.
 const order = (field: string, direction = "asc") =>
-  JSON.stringify([[field, direction]]);
+  JSON.stringify([[sortField(field), direction]]);
+// Tests name keys the way cursors do; the wire names metadata explicitly.
+function sortField(field: string) {
+  if (["id", "createdAt", "updatedAt"].includes(field))
+    return { metadata: field };
+  return field.startsWith("data.") ? field.slice(5) : field;
+}
 const integration =
   process.env.NARU_DATA_TEST === "1" ? describe : describe.skip;
 integration("indexed filtered queries", () => {
@@ -153,7 +159,7 @@ integration("indexed filtered queries", () => {
       [{ category: "없음" }, []],
     ] as const) {
       const result = await call("GET", ["posts"], {
-        where,
+        filter: where,
         adminUserId: undefined,
       });
       expect(result.documents!.map((d) => d.id)).toEqual(ids);
@@ -196,40 +202,49 @@ integration("indexed filtered queries", () => {
       [{ date: { gte: "2027-01-01" } }, []],
     ] as const) {
       const result = await call("GET", ["notes"], {
-        where,
-        orderBy: order("id"),
+        filter: where,
+        sort: order("id"),
         adminUserId: undefined,
       });
       expect(result.documents!.map((d) => d.id)).toEqual(ids);
       expect(
-        (await call("GET", ["notes"], { where, includeTotal: true, limit: 1 }))
-          .total,
+        (
+          await call("GET", ["notes"], {
+            filter: where,
+            includeTotal: true,
+            size: 1,
+          })
+        ).totalCount,
       ).toBe(ids.length);
     }
   });
   test("totals respect filters and read permissions, not the page size", async () => {
     const total = async (extra = {}) =>
-      (await call("GET", ["posts"], { includeTotal: true, limit: 1, ...extra }))
-        .total;
+      (await call("GET", ["posts"], { includeTotal: true, size: 1, ...extra }))
+        .totalCount;
     expect(await total()).toBe(8);
-    expect(await total({ where: { category: "일상" } })).toBe(2);
-    expect(await total({ where: {} })).toBe(8);
+    expect(await total({ filter: { category: "일상" } })).toBe(2);
+    expect(await total({ filter: {} })).toBe(8);
     await call("PATCH", ["posts"], { body: { read: "admin", write: "admin" } });
     await expect(total({ adminUserId: undefined })).rejects.toMatchObject({
       status: 403,
     });
   });
   test("range filters page with a cursor bound to their bounds", async () => {
-    const sort = { orderBy: order("createdAt", "asc") };
+    const sort = { sort: order("createdAt", "asc") };
     const where = { count: { gte: 1, lte: 2 } };
-    const first = await call("GET", ["posts"], { ...sort, where, limit: 1 });
+    const first = await call("GET", ["posts"], {
+      ...sort,
+      filter: where,
+      size: 1,
+    });
     expect(first.documents!.map((d) => d.id)).toEqual(["a"]);
     expect(
       (
         await call("GET", ["posts"], {
           ...sort,
-          where: { count: { lte: 2, gte: 1 } },
-          pageToken: first.nextPageToken,
+          filter: { count: { lte: 2, gte: 1 } },
+          after: first.nextCursor,
         })
       ).documents!.map((d) => d.id),
     ).toEqual(["c"]);
@@ -237,26 +252,26 @@ integration("indexed filtered queries", () => {
       await expect(
         call("GET", ["posts"], {
           ...sort,
-          where: other,
-          pageToken: first.nextPageToken,
+          filter: other,
+          after: first.nextCursor,
         }),
       ).rejects.toMatchObject({ status: 400 });
   });
   test("filtered pagination binds query fingerprint and accepts reordered equivalent filters", async () => {
-    const sort = { orderBy: order("createdAt", "desc") };
+    const sort = { sort: order("createdAt", "desc") };
     const first = await call("GET", ["posts"], {
       ...sort,
-      where: { category: "일상", active: true },
-      limit: 1,
+      filter: { category: "일상", active: true },
+      size: 1,
     });
     expect(first.documents![0].id).toBe("c");
     const next = await call("GET", ["posts"], {
       ...sort,
-      where: { active: true, category: "일상" },
-      pageToken: first.nextPageToken,
+      filter: { active: true, category: "일상" },
+      after: first.nextCursor,
     });
     expect(next.documents!.map((d) => d.id)).toEqual(["a"]);
-    expect(next.nextPageToken).toBeNull();
+    expect(next.nextCursor).toBeNull();
     for (const where of [
       undefined,
       {},
@@ -266,18 +281,18 @@ integration("indexed filtered queries", () => {
       await expect(
         call("GET", ["posts"], {
           ...sort,
-          where,
-          pageToken: first.nextPageToken,
+          filter: where,
+          after: first.nextCursor,
         }),
       ).rejects.toMatchObject({ status: 400 });
     await expect(
-      call("GET", ["posts"], { where: { category: "일상" }, pageToken: "a" }),
+      call("GET", ["posts"], { filter: { category: "일상" }, after: "a" }),
     ).rejects.toMatchObject({ status: 400 });
-    const plain = await call("GET", ["posts"], { limit: 1 });
+    const plain = await call("GET", ["posts"], { size: 1 });
     await expect(
       call("GET", ["posts"], {
-        where: { category: "일상" },
-        pageToken: plain.nextPageToken,
+        filter: { category: "일상" },
+        after: plain.nextCursor,
       }),
     ).rejects.toMatchObject({ status: 400 });
   });
@@ -285,17 +300,18 @@ integration("indexed filtered queries", () => {
     await call("PUT", ["posts", "a"], { body: { data: { category: "개발" } } });
     expect(
       (
-        await call("GET", ["posts"], { where: { category: "일상" } })
+        await call("GET", ["posts"], { filter: { category: "일상" } })
       ).documents!.map((d) => d.id),
     ).toEqual(["c"]);
     await call("DELETE", ["posts", "c"]);
     expect(
-      (await call("GET", ["posts"], { where: { category: "일상" } })).documents,
+      (await call("GET", ["posts"], { filter: { category: "일상" } }))
+        .documents,
     ).toEqual([]);
     await call("PATCH", ["posts"], { body: { read: "admin", write: "admin" } });
     await expect(
       call("GET", ["posts"], {
-        where: { category: "개발" },
+        filter: { category: "개발" },
         adminUserId: undefined,
       }),
     ).rejects.toMatchObject({ status: 403 });
@@ -311,7 +327,8 @@ integration("indexed filtered queries", () => {
     await down(db);
     await up(db);
     expect(
-      (await call("GET", ["posts"], { where: { category: "일상" } })).documents,
+      (await call("GET", ["posts"], { filter: { category: "일상" } }))
+        .documents,
     ).toHaveLength(2);
   });
 });

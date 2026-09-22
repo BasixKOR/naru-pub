@@ -6,12 +6,8 @@ async function handle(
   context: { params: Promise<{ action: string }> },
 ) {
   const { action } = await context.params;
-  // Client registrations are available only through the same-origin account route.
-  return ownerAuthRequest(
-    request,
-    ["discover", "authorize", "token", "revoke"].includes(action)
-      ? action
-      : "missing",
-  );
+  // The consent screen's approval. Website calls live under v1/, and client
+  // registrations only on the same-origin account route.
+  return ownerAuthRequest(request, action === "authorize" ? action : "missing");
 }
-export { handle as GET, handle as POST, handle as OPTIONS };
+export { handle as GET, handle as POST };

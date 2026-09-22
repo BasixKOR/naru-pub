@@ -1,6 +1,11 @@
 import { withSentryConfig } from "@sentry/nextjs";
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // /sdk/1/ follows the newest 1.x release, so a site that imports it gets
+  // compatible fixes; /sdk/<exact version>/ never changes once released.
+  async rewrites() {
+    return [{ source: "/sdk/1/:path*", destination: "/sdk/1.0.0/:path*" }];
+  },
   async headers() {
     return [
       {

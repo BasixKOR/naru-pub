@@ -4,13 +4,17 @@ Naru Data is a dependency-free browser ES module for JSON documents and media
 owned by one Naru site. Import the versioned module and create one client:
 
 ```js
-import { createNaru, NaruError } from "https://naru.pub/sdk/1.0.0/naru-data.js";
+import { createNaru, NaruError } from "https://naru.pub/sdk/1/naru-data.js";
 
 const naru = createNaru({ site: "alice" });
 ```
 
-`site` may be omitted on a `*.naru.pub` site. The module's matching TypeScript
-declarations are at `https://naru.pub/sdk/1.0.0/naru-data.d.ts`.
+`site` may be omitted (or empty) on a `*.naru.pub` site. The module's matching
+TypeScript declarations are at `https://naru.pub/sdk/1/naru-data.d.ts`.
+
+`/sdk/1/` is the newest 1.x release, so a site importing it gets compatible
+fixes automatically. To pin one exact release instead, import
+`/sdk/1.0.0/naru-data.js`; exact versions never change once released.
 
 ## Capabilities
 
@@ -25,7 +29,8 @@ const page = await posts.list({
     ["date", "desc"],
     [{ metadata: "createdAt" }, "desc"],
   ],
-  page: { size: 20, includeTotal: true },
+  size: 20,
+  includeTotal: true,
   signal,
 });
 const created = await posts.add({ title: "Hello" }, { signal });
@@ -94,12 +99,12 @@ interface Page<T> {
 Filters are ANDed predicates on top-level user fields. A value is either scalar
 equality or a range with `gt`, `gte`, `lt`, and/or `lte`. Sorting accepts one or
 two `[field, "asc" | "desc"]` entries. User fields are strings; metadata fields
-must be explicit objects such as `{ metadata: "createdAt" }`. A page size is
-1–100 and defaults to 50. `totalCount` is returned only when `includeTotal` was
+must be explicit objects such as `{ metadata: "createdAt" }`. `size` is 1–100
+and defaults to 50. `totalCount` is returned only when `includeTotal` was
 requested.
 
 `nextCursor` is opaque and bound to its original site, collection, filter, and
-sort. Pass it unchanged as `page.after`. Pagination is not a snapshot across
+sort. Pass it unchanged as `after`. Pagination is not a snapshot across
 separate requests, so concurrent writes can change later pages.
 
 ## Revisions and transactions
@@ -151,7 +156,8 @@ SDK failures are `NaruError` instances. Application logic should use the stable
 
 | Code                      | Meaning                                                       |
 | ------------------------- | ------------------------------------------------------------- |
-| `CONFLICT`                | A revision/absence condition or quota constraint failed.      |
+| `CONFLICT`                | A revision or absence condition failed.                       |
+| `QUOTA_EXCEEDED`          | The site's database or media storage is full.                 |
 | `AUTH_REQUIRED`           | Owner authorization is missing, expired, or revoked.          |
 | `ACCESS_DENIED`           | The collection policy or owner scope denies the operation.    |
 | `NOT_FOUND`               | The requested site, collection, document, or media is absent. |
@@ -160,7 +166,8 @@ SDK failures are `NaruError` instances. Application logic should use the stable
 | `REDIRECT_NOT_REGISTERED` | The current owner callback was not registered.                |
 | `UNAVAILABLE`             | The service, network, or response is temporarily unusable.    |
 
-`error.retryable` is the SDK's retry hint. `error.status` and `error.message` are
+`error.retryable` is the SDK's retry hint: true for `RATE_LIMITED` and
+`UNAVAILABLE`. `error.status` and `error.message` are
 diagnostic and may change. Passing an `AbortSignal` cancels the request and
 rejects with the platform's native `AbortError`, not `NaruError`.
 
@@ -173,9 +180,14 @@ Naru v1 guarantees the public TypeScript shapes and behavior described here:
 - transactions are all-or-nothing;
 - anonymous reads may be served from a short shared cache;
 - authenticated reads, writes, and errors are not shared-cacheable;
-- `NaruError.code` and `retryable` are the compatibility boundary for failures.
+- `NaruError.code` and `retryable` are the compatibility boundary for failures;
+  the code list above is closed for v1.
 
-Endpoint paths, query serialization, revision and cursor encoding, owner-token
-storage, upload choreography, database technology, cache implementation, and
-HTTP status values are private implementation details. Code that depends on
-them is outside the SDK contract.
+Collection names starting with `_` are reserved and cannot be created.
+
+The SDK talks to a versioned wire protocol (`/api/data/v1/…`), which Naru keeps
+compatible for every released 1.x SDK file. It is documented for Naru's own
+maintenance in [database.md](database.md#internal-http-protocol); applications
+should use the SDK. Revision and cursor encoding, owner-token storage, upload
+choreography, database technology, cache implementation, and HTTP status values
+are private and may change.

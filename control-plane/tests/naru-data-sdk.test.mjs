@@ -90,15 +90,18 @@ const saveSession = (storage, expiresAt = Date.now() + 3600000) =>
     SESSION,
     JSON.stringify({ accessToken: "t".repeat(43), expiresAt }),
   );
-const emptyPage = () => Response.json({ documents: [], nextPageToken: null });
+const emptyPage = () => Response.json({ documents: [], nextCursor: null });
 
 test("a page on <site>.naru.pub needs no site; anywhere else must name one", async () => {
   await browser(async ({ calls, respond }) => {
     respond(emptyPage);
     await collection("posts").list();
-    assert.equal(calls[0].url.href, "https://naru.pub/api/data/alice/posts");
+    assert.equal(calls[0].url.href, "https://naru.pub/api/data/v1/alice/posts");
     await collection("posts", { site: "bob" }).list();
-    assert.equal(calls[1].url.pathname, "/api/data/bob/posts");
+    assert.equal(calls[1].url.pathname, "/api/data/v1/bob/posts");
+    // An unfilled config's empty string means the same as leaving it out.
+    await collection("posts", { site: "" }).list();
+    assert.equal(calls[2].url.pathname, "/api/data/v1/alice/posts");
   });
   await browser(
     async () => {
@@ -161,10 +164,10 @@ test("documents are read and written with plain requests that carry no cookies",
     assert.deepEqual(
       calls.map(({ method, url }) => [method, url.pathname + url.search]),
       [
-        ["GET", "/api/data/alice/posts/one"],
-        ["POST", "/api/data/alice/posts"],
-        ["PUT", "/api/data/alice/posts/one?ifAbsent=1"],
-        ["DELETE", "/api/data/alice/posts/one?ifRevision=r1.3"],
+        ["GET", "/api/data/v1/alice/posts/one"],
+        ["POST", "/api/data/v1/alice/posts"],
+        ["PUT", "/api/data/v1/alice/posts/one?ifAbsent=1"],
+        ["DELETE", "/api/data/v1/alice/posts/one?ifRevision=r1.3"],
       ],
     );
     assert.deepEqual(JSON.parse(calls[1].body), { data: { title: "new" } });
@@ -177,7 +180,6 @@ test("documents are read and written with plain requests that carry no cookies",
         call.headers.Authorization,
         index === 2 || index === 3 ? `Bearer ${"t".repeat(43)}` : undefined,
       );
-      assert.equal(call.headers.Accept, "application/vnd.naru.data.v1+json");
     }
     // ".." would resolve to another path once inside a URL.
     assert.throws(() => owned.collection("posts").set("..", {}), TypeError);
@@ -188,10 +190,10 @@ test("documents are read and written with plain requests that carry no cookies",
 test("list sends only the query options that constrain something", async () => {
   await browser(async ({ calls, respond }) => {
     respond(() =>
-      Response.json({ documents: [], nextPageToken: "next", total: 3 }),
+      Response.json({ documents: [], nextCursor: "next", totalCount: 3 }),
     );
     const posts = collection("posts");
-    await posts.list({ filter: {}, page: { after: null } });
+    await posts.list({ filter: {}, after: null });
     assert.equal(calls[0].url.search, "");
     const page = await posts.list({
       filter: { category: "일상", date: { gte: "2026-09-01" } },
@@ -199,20 +201,23 @@ test("list sends only the query options that constrain something", async () => {
         ["date", "desc"],
         [{ metadata: "createdAt" }, "desc"],
       ],
-      page: { size: 8, after: "next", includeTotal: true },
+      size: 8,
+      after: "next",
+      includeTotal: true,
     });
     assert.equal(page.totalCount, 3);
+    assert.equal(page.nextCursor, "next");
     const search = calls[1].url.searchParams;
-    assert.deepEqual(JSON.parse(search.get("where")), {
+    assert.deepEqual(JSON.parse(search.get("filter")), {
       category: "일상",
       date: { gte: "2026-09-01" },
     });
-    assert.deepEqual(JSON.parse(search.get("orderBy")), [
-      ["data.date", "desc"],
-      ["createdAt", "desc"],
+    assert.deepEqual(JSON.parse(search.get("sort")), [
+      ["date", "desc"],
+      [{ metadata: "createdAt" }, "desc"],
     ]);
-    assert.equal(search.get("limit"), "8");
-    assert.equal(search.get("pageToken"), "next");
+    assert.equal(search.get("size"), "8");
+    assert.equal(search.get("after"), "next");
     assert.equal(search.get("includeTotal"), "1");
   });
 });
@@ -232,22 +237,31 @@ test("errors have semantic codes and transport details stay diagnostic", async (
   await browser(async ({ respond, storage }) => {
     saveSession(storage);
     const posts = (await ownerSession()).collection("posts");
-    respond(() =>
-      Response.json(
-        { error: "Document version does not match.", code: "VERSION_CONFLICT" },
-        { status: 409 },
-      ),
-    );
+    const failure = (status, code, message = "Failed.") =>
+      respond(() => Response.json({ error: { code, message } }, { status }));
+    failure(409, "CONFLICT", "Document version does not match.");
     await assert.rejects(
       posts.set("one", {}, { condition: { revision: revision(1) } }),
       (error) => {
         assert.ok(error instanceof NaruError);
         assert.equal(error.status, 409);
         assert.equal(error.code, "CONFLICT");
+        assert.equal(error.retryable, false);
         assert.equal(error.message, "Document version does not match.");
         return true;
       },
     );
+    // The same status can mean a different thing; the server's code decides.
+    failure(409, "QUOTA_EXCEEDED");
+    await assert.rejects(posts.set("one", {}), { code: "QUOTA_EXCEEDED" });
+    // A code from a later protocol falls back to what the status means here.
+    failure(429, "SOMETHING_NEW");
+    await assert.rejects(posts.set("one", {}), {
+      code: "RATE_LIMITED",
+      retryable: true,
+    });
+    failure(409, "SOMETHING_NEW");
+    await assert.rejects(posts.set("one", {}), { code: "INVALID_REQUEST" });
     // A challenge or proxy page can answer 200; it is not an empty result.
     respond(() => new Response("<html>checking your browser</html>"));
     await assert.rejects(posts.get("one"), {
@@ -321,7 +335,7 @@ test("signIn discovers the client and leaves for approval with a PKCE challenge"
   await browser(async ({ calls, respond, storage, location }) => {
     respond(() => Response.json({ clientId: "client-1" }));
     await signIn({ collections: ["posts", "drafts"] });
-    assert.equal(calls[0].url.pathname, "/api/data-auth/discover");
+    assert.equal(calls[0].url.pathname, "/api/data-auth/v1/discover");
     assert.equal(
       calls[0].url.searchParams.get("redirectUri"),
       "https://alice.naru.pub/admin.html",
@@ -349,8 +363,10 @@ test("signIn discovers the client and leaves for approval with a PKCE challenge"
     respond(() =>
       Response.json(
         {
-          error: "Administrator callback is not registered.",
-          code: "UNREGISTERED_REDIRECT_URI",
+          error: {
+            code: "REDIRECT_NOT_REGISTERED",
+            message: "Administrator callback is not registered.",
+          },
         },
         { status: 404 },
       ),
@@ -379,7 +395,7 @@ test("ownerSession exchanges the returned code once and strips it from the addre
     const owner = await ownerSession();
     assert.ok(owner);
     assert.equal(location.href, "https://alice.naru.pub/admin.html?tab=2");
-    assert.equal(calls[0].url.href, "https://naru.pub/api/data-auth/token");
+    assert.equal(calls[0].url.href, "https://naru.pub/api/data-auth/v1/token");
     assert.deepEqual(JSON.parse(calls[0].body), {
       code: "c1",
       verifier: "v".repeat(43),
@@ -451,7 +467,12 @@ test("the owner client sends its token and forgets it when the session ends", as
     assert.equal(calls[0].headers.Authorization, `Bearer ${"t".repeat(43)}`);
     assert.equal(calls[0].cache, "no-store");
 
-    respond(() => Response.json({ error: "Revoked." }, { status: 401 }));
+    respond(() =>
+      Response.json(
+        { error: { code: "AUTH_REQUIRED", message: "Revoked." } },
+        { status: 401 },
+      ),
+    );
     await assert.rejects(owner.collection("posts").get("one"), {
       code: "AUTH_REQUIRED",
     });
@@ -484,7 +505,7 @@ test("signing out forgets the session before revoking, and never erases a newer 
       throw new TypeError("offline");
     });
     await assert.rejects(owner.signOut(), { code: "UNAVAILABLE" });
-    assert.equal(calls[0].url.pathname, "/api/data-auth/revoke");
+    assert.equal(calls[0].url.pathname, "/api/data-auth/v1/revoke");
     assert.equal(calls[0].headers.Authorization, `Bearer ${"t".repeat(43)}`);
 
     saveSession(storage);
@@ -517,7 +538,7 @@ test("transaction sends semantic writes and returns no transport results", async
       { collection: "drafts", delete: { id: "hello" } },
     ];
     assert.equal(await owner.transaction(writes), undefined);
-    assert.equal(calls[0].url.pathname, "/api/data/alice/_batch");
+    assert.equal(calls[0].url.pathname, "/api/data/v1/alice/_batch");
     assert.deepEqual(JSON.parse(calls[0].body), {
       operations: [
         {
@@ -610,9 +631,9 @@ test("upload authorizes, sends the bytes straight to storage, then finalizes", a
   assert.deepEqual(
     calls.map(({ method, url }) => [method, url.href]),
     [
-      ["POST", "https://naru.pub/api/data/alice/_files"],
+      ["POST", "https://naru.pub/api/data/v1/alice/_files"],
       ["PUT", "https://upload.example/signed"],
-      ["PUT", "https://naru.pub/api/data/alice/_files/f1"],
+      ["PUT", "https://naru.pub/api/data/v1/alice/_files/f1"],
     ],
   );
   assert.deepEqual(declared, {

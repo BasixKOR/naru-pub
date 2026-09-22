@@ -22,7 +22,8 @@ async function load(reset = false) {
       .list({
         filter: category ? { category } : {},
         sort: [[{ metadata: "createdAt" }, "desc"]],
-        page: { size: 20, after: cursor },
+        size: 20,
+        after: cursor,
       });
     if (reset) $("entries").replaceChildren();
     for (const doc of page.documents) {

@@ -59,6 +59,11 @@ integration("site database integration", () => {
     await expect(
       call("POST", [], { name: "private" }, true),
     ).rejects.toMatchObject({ status: 409 });
+    // The protocol's own paths would shadow these.
+    for (const name of ["_batch", "_files", "_later"])
+      await expect(call("POST", [], { name }, true)).rejects.toMatchObject({
+        status: 400,
+      });
     await expect(call("GET", ["private"])).rejects.toMatchObject({
       status: 403,
     });
@@ -133,23 +138,23 @@ integration("site database integration", () => {
     await call("POST", [], { name: "pages", read: "world" }, true);
     for (const id of ["a", "b", "c"])
       await call("PUT", ["pages", id], { data: { id, old: true } }, true);
-    const first = await call("GET", ["pages"], undefined, false, { limit: 2 });
+    const first = await call("GET", ["pages"], undefined, false, { size: 2 });
     expect(first).toMatchObject({
       documents: [{ id: "a" }, { id: "b" }],
-      nextPageToken: expect.stringMatching(/^v1\./),
+      nextCursor: expect.stringMatching(/^v1\./),
     });
     expect(
       await call("GET", ["pages"], undefined, false, {
-        limit: 2,
-        pageToken: first.nextPageToken,
+        size: 2,
+        after: first.nextCursor,
       }),
-    ).toMatchObject({ documents: [{ id: "c" }], nextPageToken: null });
+    ).toMatchObject({ documents: [{ id: "c" }], nextCursor: null });
     await call("PUT", ["pages", "a"], { data: { replacement: true } }, true);
     expect(await call("GET", ["pages", "a"])).toMatchObject({
       document: { data: { replacement: true } },
     });
     await expect(
-      call("GET", ["pages"], undefined, false, { limit: 101 }),
+      call("GET", ["pages"], undefined, false, { size: 101 }),
     ).rejects.toMatchObject({ status: 400 });
     await call("DELETE", ["pages"], undefined, true);
     await expect(call("GET", ["pages", "a"])).rejects.toMatchObject({
@@ -181,7 +186,7 @@ integration("site database integration", () => {
       call("PUT", ["guarded", "one"], { data: { round: 2 } }, true, {
         ifVersion: 0,
       }),
-    ).rejects.toMatchObject({ status: 409, code: "VERSION_CONFLICT" });
+    ).rejects.toMatchObject({ status: 409, code: "CONFLICT" });
     expect(
       (
         await call("PUT", ["guarded", "one"], { data: { round: 2 } }, true, {
@@ -194,10 +199,10 @@ integration("site database integration", () => {
       call("PUT", ["guarded", "one"], { data: { round: 3 } }, true, {
         ifVersion: 1,
       }),
-    ).rejects.toMatchObject({ status: 409, code: "VERSION_CONFLICT" });
+    ).rejects.toMatchObject({ status: 409, code: "CONFLICT" });
     await expect(
       call("DELETE", ["guarded", "one"], undefined, true, { ifVersion: 1 }),
-    ).rejects.toMatchObject({ status: 409, code: "VERSION_CONFLICT" });
+    ).rejects.toMatchObject({ status: 409, code: "CONFLICT" });
     expect((await call("GET", ["guarded", "one"])).document!.data).toEqual({
       round: 2,
     });
@@ -260,7 +265,7 @@ integration("site database integration", () => {
           ifVersion: 1,
         },
       ),
-    ).rejects.toMatchObject({ status: 409, code: "VERSION_CONFLICT" });
+    ).rejects.toMatchObject({ status: 409, code: "CONFLICT" });
     await expect(call("GET", ["batched", "three"])).rejects.toMatchObject({
       status: 404,
     });
@@ -324,7 +329,7 @@ integration("site database integration", () => {
     ]);
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     expect(results.find((r) => r.status === "rejected")).toMatchObject({
-      reason: { status: 409 },
+      reason: { status: 409, code: "QUOTA_EXCEEDED" },
     });
     await call("PUT", ["bytes", "seed1"], { data: null });
     await expect(
@@ -455,7 +460,7 @@ integration("site database integration", () => {
     ]);
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     expect(results.find((r) => r.status === "rejected")).toMatchObject({
-      reason: { status: 409 },
+      reason: { status: 409, code: "QUOTA_EXCEEDED" },
     });
     await call("DELETE", ["quota", "seed1"]);
     await expect(call("POST", ["quota"], { data: 3 })).resolves.toBeDefined();

@@ -10,6 +10,7 @@ import {
   MAX_SITE_BYTES,
   name,
   permission,
+  unreservedName,
   writePermission,
 } from "./validation";
 import { COMPARISONS, filters } from "./filters";
@@ -36,11 +37,12 @@ export type DataCommand = {
   bearer?: { token: string; origin: string | null };
   clientIp?: string;
   body?: Record<string, unknown>;
-  pageToken?: string;
-  limit?: number;
+  /** Opaque cursor from the preceding page's nextCursor. */
+  after?: string;
+  size?: number;
   /** JSON array of one or two [field, direction] pairs. */
-  orderBy?: string;
-  where?: unknown;
+  sort?: string;
+  filter?: unknown;
   includeTotal?: boolean;
   ifVersion?: number;
   /**
@@ -81,7 +83,7 @@ function matchVersion(expected: number, actual: number | undefined) {
     throw new DataError(
       409,
       "Document version does not match ifVersion.",
-      "VERSION_CONFLICT",
+      "CONFLICT",
     );
 }
 /** Filters address top-level fields of a document's `data`. */
@@ -179,7 +181,7 @@ export async function executeData(command: DataCommand) {
         };
       if (method !== "POST") throw new DataError(405, "Method not allowed.");
       noteUse();
-      const collectionName = name(body.name);
+      const collectionName = unreservedName(body.name);
       if (
         await collections()
           .where("name", "=", collectionName)
@@ -191,7 +193,7 @@ export async function executeData(command: DataCommand) {
         .select(tx.fn.countAll<number>().as("count"))
         .executeTakeFirstOrThrow();
       if (Number(count.count) >= MAX_COLLECTIONS)
-        throw new DataError(409, "Collection limit reached.");
+        throw new DataError(409, "Collection limit reached.", "QUOTA_EXCEEDED");
       const collection = await tx
         .insertInto("site_data_collections")
         .values({
@@ -213,7 +215,7 @@ export async function executeData(command: DataCommand) {
       throw new DataError(
         403,
         "Collection is outside the approved scope.",
-        "COLLECTION_NOT_AUTHORIZED",
+        "ACCESS_DENIED",
       );
     if (path.length === 1 && (method === "PATCH" || method === "DELETE")) {
       if (allowedIds !== undefined)
@@ -265,27 +267,22 @@ export async function executeData(command: DataCommand) {
         if (!document) throw new DataError(404, "Document not found.");
         return { document };
       }
-      const filter = filters(command.where);
+      const filter = filters(command.filter);
       const conditions = filterConditions(filter);
-      const limit = command.limit ?? 50;
+      const limit = command.size ?? 50;
       if (!Number.isInteger(limit) || limit < 1 || limit > 100)
-        throw new DataError(400, "Limit must be 1–100.");
-      const sorts = sortings(command.orderBy);
+        throw new DataError(400, "Page size must be 1–100.");
+      const sorts = sortings(command.sort);
       const sort = sorts[0];
       const multiple = sorts.length > 1;
       const cursor = multiple
         ? decodeMultiCursor(
-            command.pageToken,
+            command.after,
             collection.id,
             sorts,
             filter.fingerprint,
           )
-        : decodeCursor(
-            command.pageToken,
-            collection.id,
-            sort,
-            filter.fingerprint,
-          );
+        : decodeCursor(command.after, collection.id, sort, filter.fingerprint);
       // A missing field collapses to JSON null, the lowest JSONB value, so the
       // sort key is never SQL NULL and the tuple comparison stays a total order.
       const sortValues = sorts.map((item) =>
@@ -378,13 +375,13 @@ export async function executeData(command: DataCommand) {
       }>;
       const page = rows.slice(0, limit);
       const last = page.at(-1);
-      let total: number | undefined;
+      let totalCount: number | undefined;
       if (command.includeTotal) {
         let counter = documents().select(
           tx.fn.countAll<string>().as("matched"),
         );
         for (const condition of conditions) counter = counter.where(condition);
-        total = Number((await counter.executeTakeFirstOrThrow()).matched);
+        totalCount = Number((await counter.executeTakeFirstOrThrow()).matched);
       }
       return {
         documents: page.map((row) => {
@@ -393,7 +390,7 @@ export async function executeData(command: DataCommand) {
           delete document.cursor_value_1;
           return document;
         }),
-        nextPageToken:
+        nextCursor:
           rows.length > limit && last
             ? multiple
               ? encodeMultiCursor(
@@ -416,7 +413,7 @@ export async function executeData(command: DataCommand) {
                   filter.fingerprint,
                 )
             : null,
-        total,
+        totalCount,
       };
     }
     const creating = method === "POST" && path.length === 1;
@@ -468,7 +465,11 @@ export async function executeData(command: DataCommand) {
         MAX_SITE_BYTES ||
       (!existing && Number(usage.count) >= MAX_DOCUMENTS)
     ) {
-      throw new DataError(409, "Site database quota exceeded.");
+      throw new DataError(
+        409,
+        "Site database quota exceeded.",
+        "QUOTA_EXCEEDED",
+      );
     }
     const insert = tx.insertInto("site_data_documents").values({
       collection_id: collection.id,
@@ -578,7 +579,7 @@ export async function executeBatch(command: DataCommand) {
         throw new DataError(
           403,
           `Collection ${collectionName} is outside the approved scope.`,
-          "COLLECTION_NOT_AUTHORIZED",
+          "ACCESS_DENIED",
         );
       authorize(collection.write_access, true);
       const expected = expectedVersion(operation.ifVersion);
@@ -663,7 +664,11 @@ export async function executeBatch(command: DataCommand) {
       Number(usage.bytes) > MAX_SITE_BYTES ||
       Number(usage.count) > MAX_DOCUMENTS
     )
-      throw new DataError(409, "Site database quota exceeded.");
+      throw new DataError(
+        409,
+        "Site database quota exceeded.",
+        "QUOTA_EXCEEDED",
+      );
     return { results };
   });
 }

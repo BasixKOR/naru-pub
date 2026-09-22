@@ -21,7 +21,7 @@ beforeEach(() => {
 
 test("public requests ignore even valid owner cookies", async () => {
   const response = await dataRequest(
-    new Request("https://naru.pub/api/data/alice/posts", {
+    new Request("https://naru.pub/api/data/v1/alice/posts", {
       headers: {
         Cookie: "auth_session=owner",
         Origin: "https://alice.naru.pub",
@@ -36,15 +36,17 @@ test("public requests ignore even valid owner cookies", async () => {
   expect(response.headers.get("access-control-allow-origin")).toBe("*");
   expect(response.headers.get("access-control-allow-credentials")).toBeNull();
   expect(response.headers.get("cache-control")).toBe("no-store");
-  expect(response.headers.get("naru-data-protocol")).toBe("1");
   expect(await response.json()).toMatchObject({ id: "one", revision: "r1.1" });
 });
 
 test("public conditional writes decode opaque revisions at the server boundary", async () => {
   await dataRequest(
-    new Request("https://naru.pub/api/data/alice/posts/one?ifRevision=r1.a", {
-      method: "DELETE",
-    }),
+    new Request(
+      "https://naru.pub/api/data/v1/alice/posts/one?ifRevision=r1.a",
+      {
+        method: "DELETE",
+      },
+    ),
     ["posts", "one"],
     "alice",
   );
@@ -76,7 +78,9 @@ test("unauthenticated admin requests are denied", async () => {
 });
 test("preflight needs no authentication and performs no database work", async () => {
   const response = await dataRequest(
-    new Request("https://naru.pub/api/data/alice/posts", { method: "OPTIONS" }),
+    new Request("https://naru.pub/api/data/v1/alice/posts", {
+      method: "OPTIONS",
+    }),
     ["posts"],
     "alice",
   );
@@ -88,7 +92,7 @@ test("preflight needs no authentication and performs no database work", async ()
 test("website bearer is passed with origin without consulting owner cookies", async () => {
   const token = "t".repeat(43);
   const response = await dataRequest(
-    new Request("https://naru.pub/api/data/alice/posts", {
+    new Request("https://naru.pub/api/data/v1/alice/posts", {
       headers: {
         Authorization: `Bearer ${token}`,
         Origin: "https://alice.example",
@@ -113,7 +117,7 @@ test.each(["", "Basic abc", "Bearer malformed"])(
   "invalid authorization never falls back to public access: %s",
   async (authorization) => {
     const response = await dataRequest(
-      new Request("https://naru.pub/api/data/alice/posts", {
+      new Request("https://naru.pub/api/data/v1/alice/posts", {
         headers: { Authorization: authorization },
       }),
       ["posts"],
@@ -128,7 +132,7 @@ test("untrusted IP headers do not select a separate rate limit bucket", async ()
   delete process.env.SITE_DATA_TRUST_CLOUDFLARE_IP;
   try {
     await dataRequest(
-      new Request("https://naru.pub/api/data/alice/posts", {
+      new Request("https://naru.pub/api/data/v1/alice/posts", {
         headers: { "cf-connecting-ip": "192.0.2.99" },
       }),
       ["posts"],
@@ -147,7 +151,7 @@ test("trusted ingress IP selects the public-write rate limit bucket", async () =
   process.env.SITE_DATA_TRUST_CLOUDFLARE_IP = "1";
   try {
     await dataRequest(
-      new Request("https://naru.pub/api/data/alice/posts", {
+      new Request("https://naru.pub/api/data/v1/alice/posts", {
         headers: { "cf-connecting-ip": "2001:db8::99" },
       }),
       ["posts"],
@@ -192,7 +196,7 @@ test("canonical control-plane origin works behind a proxy without trusting forwa
   }
 });
 
-test("list sort and opaque cursor are passed through for both API surfaces", async () => {
+test("list sort, cursor and page size are passed through for both API surfaces", async () => {
   auth.mockResolvedValue({
     user: { id: 1, loginName: "alice" },
     session: {},
@@ -200,37 +204,37 @@ test("list sort and opaque cursor are passed through for both API surfaces", asy
   for (const site of ["alice", undefined]) {
     await dataRequest(
       new Request(
-        `https://naru.pub/api/data/alice/posts?orderBy=${encodeURIComponent('[["createdAt","desc"]]')}&pageToken=v1.example&limit=7`,
+        `https://naru.pub/api/data/v1/alice/posts?sort=${encodeURIComponent('[[{"metadata":"createdAt"},"desc"]]')}&after=v1.example&size=7`,
       ),
       ["posts"],
       site,
     );
     expect(execute.mock.lastCall![0]).toMatchObject({
-      orderBy: '[["createdAt","desc"]]',
-      pageToken: "v1.example",
-      limit: 7,
+      sort: '[[{"metadata":"createdAt"},"desc"]]',
+      after: "v1.example",
+      size: 7,
     });
     expect(execute.mock.lastCall![0]).not.toHaveProperty("direction");
   }
 });
 
-test("where query JSON is decoded and bounded", async () => {
-  const where = { postId: "한글", approved: false };
+test("filter query JSON is decoded and bounded", async () => {
+  const filter = { postId: "한글", approved: false };
   const res = await dataRequest(
     new Request(
-      `https://naru.pub/api/data/alice/posts?where=${encodeURIComponent(JSON.stringify(where))}`,
+      `https://naru.pub/api/data/v1/alice/posts?filter=${encodeURIComponent(JSON.stringify(filter))}`,
     ),
     ["posts"],
     "alice",
   );
   expect(res.status).toBe(200);
-  expect(execute.mock.lastCall![0].where).toEqual(where);
+  expect(execute.mock.lastCall![0].filter).toEqual(filter);
   for (const raw of ["{", " ".repeat(2049)]) {
     expect(
       (
         await dataRequest(
           new Request(
-            `https://naru.pub/api/data/alice/posts?where=${encodeURIComponent(raw)}`,
+            `https://naru.pub/api/data/v1/alice/posts?filter=${encodeURIComponent(raw)}`,
           ),
           ["posts"],
           "alice",
@@ -238,4 +242,62 @@ test("where query JSON is decoded and bounded", async () => {
       ).status,
     ).toBe(400);
   }
+});
+
+test("website errors carry a protocol code; the control panel keeps a message", async () => {
+  const { DataError } = await import("../validation");
+  const fail = async (error: unknown, site?: string) => {
+    execute.mockRejectedValueOnce(error as never);
+    const response = await dataRequest(
+      new Request("https://naru.pub/api/data/v1/alice/posts", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...(site ? {} : { Origin: "https://naru.pub" }),
+        },
+        body: '{"data":1}',
+      }),
+      ["posts", "one"],
+      site,
+    );
+    return { status: response.status, body: await response.json() };
+  };
+  // The same status means different things; the code tells them apart.
+  expect(
+    await fail(new DataError(409, "Full.", "QUOTA_EXCEEDED"), "alice"),
+  ).toEqual({
+    status: 409,
+    body: { error: { code: "QUOTA_EXCEEDED", message: "Full." } },
+  });
+  expect(
+    await fail(new DataError(409, "Stale.", "CONFLICT"), "alice"),
+  ).toMatchObject({ body: { error: { code: "CONFLICT" } } });
+  // Without one, the status names it.
+  for (const [status, code] of [
+    [400, "INVALID_REQUEST"],
+    [401, "AUTH_REQUIRED"],
+    [403, "ACCESS_DENIED"],
+    [404, "NOT_FOUND"],
+    [413, "INVALID_REQUEST"],
+    [429, "RATE_LIMITED"],
+  ] as const)
+    expect(await fail(new DataError(status, "Failed."), "alice")).toMatchObject(
+      { status, body: { error: { code } } },
+    );
+  const unexpected = jest.spyOn(console, "error").mockImplementation(() => {});
+  expect(await fail(new Error("boom"), "alice")).toEqual({
+    status: 500,
+    body: {
+      error: { code: "UNAVAILABLE", message: "Database request failed." },
+    },
+  });
+  unexpected.mockRestore();
+  auth.mockResolvedValue({
+    user: { id: 1, loginName: "alice" },
+    session: {},
+  } as never);
+  expect(await fail(new DataError(409, "Full.", "QUOTA_EXCEEDED"))).toEqual({
+    status: 409,
+    body: { error: "Full." },
+  });
 });

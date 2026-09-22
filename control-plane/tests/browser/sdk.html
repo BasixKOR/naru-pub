@@ -76,7 +76,7 @@
                 createdAt: "2026-01-01T00:00:00Z",
                 updatedAt: "2026-01-01T00:00:00Z",
               }
-            : { documents: [], nextPageToken: null },
+            : { documents: [], nextCursor: null },
         );
       };
       const notes = naru.public.collection("notes");
@@ -86,7 +86,7 @@
         .set("one", { title: "x" }, { condition: { revision: "r1.1" } });
       await notes.list({ filter: { tag: "한글" } });
       check(
-        JSON.parse(calls[0].url.searchParams.get("where")).tag === "한글",
+        JSON.parse(calls[0].url.searchParams.get("filter")).tag === "한글",
         "Korean filters survive URL encoding",
       );
       check(

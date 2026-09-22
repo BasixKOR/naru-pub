@@ -18,8 +18,8 @@ const mockObjects = new Map<
 >();
 
 import { db } from "@/lib/database";
-import { GET as dataRoute } from "@/app/(main)/api/data/[site]/[[...path]]/route";
-import { POST as authRoute } from "@/app/(main)/api/data-auth/[action]/route";
+import { GET as dataRoute } from "@/app/(main)/api/data/v1/[site]/[[...path]]/route";
+import { POST as authRoute } from "@/app/(main)/api/data-auth/v1/[action]/route";
 import { executeData } from "../service";
 import { mediaStorage } from "../media";
 import {
@@ -91,12 +91,12 @@ integration("SDK and data API contract", () => {
         const response =
           parts[2] === "data-auth"
             ? await authRoute(request, {
-                params: Promise.resolve({ action: parts[3] }),
+                params: Promise.resolve({ action: parts[4] }),
               })
             : await dataRoute(request, {
                 params: Promise.resolve({
-                  site: parts[3],
-                  path: parts.slice(4),
+                  site: parts[4],
+                  path: parts.slice(5),
                 }),
               });
         outgoing.writeHead(
@@ -306,7 +306,7 @@ integration("SDK and data API contract", () => {
     });
     await posts.delete(added.id);
     // Partial updates are not part of the contract.
-    const patch = await nativeFetch(`${origin}/api/data/alice/crud/new`, {
+    const patch = await nativeFetch(`${origin}/api/data/v1/alice/crud/new`, {
       method: "PATCH",
       headers: { Origin: origin, "Content-Type": "application/json" },
       body: JSON.stringify({ data: { a: 1 } }),
@@ -329,14 +329,16 @@ integration("SDK and data API contract", () => {
     };
     const first = await feed.list({
       ...query,
-      page: { size: 2, includeTotal: true },
+      size: 2,
+      includeTotal: true,
     });
     expect(first.totalCount).toBe(3);
     expect(first.documents.map((d) => d.id)).toEqual(["post_5", "post_4"]);
     expect(first.nextCursor).toEqual(expect.any(String));
     const second = await feed.list({
       ...query,
-      page: { size: 2, after: first.nextCursor },
+      size: 2,
+      after: first.nextCursor,
     });
     expect(second.documents.map((d) => d.id)).toEqual(["post_2"]);
     expect(second.nextCursor).toBeNull();
@@ -344,13 +346,14 @@ integration("SDK and data API contract", () => {
       feed.list({
         ...query,
         filter: { visible: false },
-        page: { after: first.nextCursor },
+        after: first.nextCursor,
       }),
     ).rejects.toMatchObject({ status: 400 });
     // An empty filter and a null token are the first, unfiltered page.
     const everything = await feed.list({
       filter: {},
-      page: { after: null, includeTotal: true },
+      after: null,
+      includeTotal: true,
     });
     expect(everything.totalCount).toBe(5);
   });
@@ -440,7 +443,7 @@ integration("SDK and data API contract", () => {
   // hold them is the whole reason the SDK stopped forcing no-store. What must
   // never be cacheable is a response that depended on a credential.
   test("only anonymous reads of world collections are marked cacheable", async () => {
-    const anonymous = await nativeFetch(`${origin}/api/data/alice/feed`, {
+    const anonymous = await nativeFetch(`${origin}/api/data/v1/alice/feed`, {
       headers: { Origin: "https://example.test" },
     });
     await anonymous.arrayBuffer();
@@ -449,28 +452,28 @@ integration("SDK and data API contract", () => {
 
     // Same URL, but with a token: an intermediary that ignores Vary must not be
     // handed something it could replay to a stranger.
-    const authorized = await nativeFetch(`${origin}/api/data/alice/feed`, {
+    const authorized = await nativeFetch(`${origin}/api/data/v1/alice/feed`, {
       headers: { Origin: origin, Authorization: `Bearer ${accessToken}` },
     });
     await authorized.arrayBuffer();
     expect(authorized.headers.get("cache-control")).toBe("no-store");
 
     // An admin-only collection is never cacheable, whoever asks.
-    const priv = await nativeFetch(`${origin}/api/data/alice/private`, {
+    const priv = await nativeFetch(`${origin}/api/data/v1/alice/private`, {
       headers: { Origin: origin, Authorization: `Bearer ${accessToken}` },
     });
     await priv.arrayBuffer();
     expect(priv.headers.get("cache-control")).toBe("no-store");
 
     // Neither is a write, nor an error.
-    const written = await nativeFetch(`${origin}/api/data/alice/feed`, {
+    const written = await nativeFetch(`${origin}/api/data/v1/alice/feed`, {
       method: "POST",
       headers: { Origin: origin, "Content-Type": "application/json" },
       body: JSON.stringify({ data: { cacheable: false } }),
     });
     await written.arrayBuffer();
     expect(written.headers.get("cache-control")).toBe("no-store");
-    const missing = await nativeFetch(`${origin}/api/data/alice/nope`, {
+    const missing = await nativeFetch(`${origin}/api/data/v1/alice/nope`, {
       headers: { Origin: "https://example.test" },
     });
     await missing.arrayBuffer();
@@ -485,7 +488,7 @@ integration("SDK and data API contract", () => {
       code: "AUTH_REQUIRED",
     });
     const copiedTokenResponse = await nativeFetch(
-      `${origin}/api/data/alice/private`,
+      `${origin}/api/data/v1/alice/private`,
       {
         headers: { Origin: origin, Authorization: `Bearer ${accessToken}` },
       },

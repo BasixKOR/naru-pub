@@ -94,7 +94,8 @@ async function loadList(reset = true) {
   listKind = kind;
   const page = await owner.collection(kind).list({
     sort: [[{ metadata: "updatedAt" }, "desc"]],
-    page: { size: 20, after: cursor },
+    size: 20,
+    after: cursor,
   });
   for (const doc of page.documents) {
     const row = element("div", "", "manage-row");

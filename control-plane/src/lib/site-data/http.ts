@@ -1,7 +1,7 @@
 import { validateRequest } from "@/lib/auth";
 import { executeBatch, executeData } from "./service";
-import { DataError, jsonBody, sameOrigin } from "./validation";
-import { parseWhereQuery } from "./filters";
+import { DataError, jsonBody, protocolError, sameOrigin } from "./validation";
+import { parseFilterQuery } from "./filters";
 import { isIP } from "node:net";
 import { executeMedia } from "./media";
 
@@ -106,7 +106,6 @@ export async function dataRequest(
     ...(admin ? {} : publicHeaders),
     "Cache-Control": "no-store",
     Vary: "Origin, Authorization",
-    ...(!admin ? { "Naru-Data-Protocol": "1" } : {}),
     ...(!admin &&
     request.headers.get("origin") &&
     (request.headers.has("authorization") || request.method === "OPTIONS")
@@ -156,7 +155,7 @@ export async function dataRequest(
       bearer,
       clientIp: forwardedIp && isIP(forwardedIp) ? forwardedIp : undefined,
       body,
-      where: parseWhereQuery(url.searchParams.get("where")),
+      filter: parseFilterQuery(url.searchParams.get("filter")),
       includeTotal: url.searchParams.get("includeTotal") === "1",
       cacheability,
       // The control panel's quota readout; the media service ignores it for
@@ -169,10 +168,10 @@ export async function dataRequest(
         : url.searchParams.has("ifVersion")
           ? Number(url.searchParams.get("ifVersion"))
           : undefined,
-      orderBy: url.searchParams.get("orderBy") ?? undefined,
-      pageToken: url.searchParams.get("pageToken") ?? undefined,
-      limit: url.searchParams.has("limit")
-        ? Number(url.searchParams.get("limit"))
+      sort: url.searchParams.get("sort") ?? undefined,
+      after: url.searchParams.get("after") ?? undefined,
+      size: url.searchParams.has("size")
+        ? Number(url.searchParams.get("size"))
         : undefined,
     };
     const result =
@@ -191,6 +190,9 @@ export async function dataRequest(
       status: request.method === "POST" ? 201 : 200,
     });
   } catch (error) {
+    let status = 500;
+    let message = "Database request failed.";
+    let code;
     // JSONB cannot represent NUL or unpaired surrogate code points.
     if (
       error &&
@@ -198,24 +200,15 @@ export async function dataRequest(
       "code" in error &&
       ["22P05", "22021", "22P02", "22003"].includes(String(error.code))
     ) {
-      return Response.json(
-        { error: "Data cannot be represented as PostgreSQL JSON." },
-        { status: 400, headers },
-      );
-    }
-    if (!(error instanceof DataError))
-      console.error("Site database request failed", error);
-    return Response.json(
-      {
-        error:
-          error instanceof DataError
-            ? error.message
-            : "Database request failed.",
-        ...(error instanceof DataError && error.code
-          ? { code: error.code }
-          : {}),
-      },
-      { status: error instanceof DataError ? error.status : 500, headers },
-    );
+      status = 400;
+      message = "Data cannot be represented as PostgreSQL JSON.";
+    } else if (error instanceof DataError) {
+      ({ status, message, code } = error);
+    } else console.error("Site database request failed", error);
+    // The control panel ships with this server and reads a plain message;
+    // websites get the versioned protocol's coded error.
+    return admin
+      ? Response.json({ error: message }, { status, headers })
+      : protocolError(status, message, code, headers);
   }
 }

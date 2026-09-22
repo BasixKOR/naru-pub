@@ -4,14 +4,66 @@ export const MAX_SITE_BYTES = 10 * 1024 * 1024;
 export const MAX_DOCUMENTS = 10000;
 export const MAX_COLLECTIONS = 100;
 
+/**
+ * The failure codes of the v1 data protocol. A browser SDK released against
+ * v1 knows exactly these, so a new one needs a new protocol version; HTTP
+ * statuses stay diagnostic.
+ */
+export const ERROR_CODES = [
+  "CONFLICT",
+  "QUOTA_EXCEEDED",
+  "AUTH_REQUIRED",
+  "ACCESS_DENIED",
+  "NOT_FOUND",
+  "RATE_LIMITED",
+  "INVALID_REQUEST",
+  "REDIRECT_NOT_REGISTERED",
+  "UNAVAILABLE",
+] as const;
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
 export class DataError extends Error {
   constructor(
     public status: number,
     message: string,
-    public code?: string,
+    /** Only where the status alone would name the wrong code. */
+    public code?: ErrorCode,
   ) {
     super(message);
   }
+}
+
+function statusCode(status: number): ErrorCode {
+  if (status === 401) return "AUTH_REQUIRED";
+  if (status === 403) return "ACCESS_DENIED";
+  if (status === 404) return "NOT_FOUND";
+  if (status === 429) return "RATE_LIMITED";
+  if (status >= 500) return "UNAVAILABLE";
+  return "INVALID_REQUEST";
+}
+
+/** The v1 error body: `{ error: { code, message } }`. */
+export function protocolError(
+  status: number,
+  message: string,
+  code?: ErrorCode,
+  headers?: HeadersInit,
+) {
+  return Response.json(
+    { error: { code: code ?? statusCode(status), message } },
+    { status, headers },
+  );
+}
+
+/**
+ * A collection name. Names starting with an underscore are reserved for the
+ * protocol's own paths (`_batch`, `_files`), which a collection would shadow.
+ */
+export function unreservedName(value: unknown): string {
+  const result = name(value);
+  if (result.startsWith("_"))
+    throw new DataError(400, "Collection names cannot start with _.");
+  return result;
 }
 
 export function name(value: unknown): string {

@@ -1,4 +1,4 @@
-import { DataError, name } from "./validation";
+import { DataError, NAME, name } from "./validation";
 
 export type Column = "id" | "createdAt" | "updatedAt";
 export type Direction = "asc" | "desc";
@@ -39,9 +39,36 @@ export function sorting(orderBy = "id", direction = "asc"): Sort {
   };
 }
 
+const SORT_SHAPE =
+  'sort must be a JSON array of one or two [field, direction] pairs, such as [["date","desc"],[{"metadata":"createdAt"},"desc"]].';
+
+/** A wire sort field: a top-level user field by name, or `{ metadata }`. The
+ * result is the internal `orderBy` that cursors carry as their identity. */
+function orderByOf(field: unknown): string {
+  if (typeof field === "string") {
+    if (!NAME.test(field))
+      throw new DataError(400, "Sort fields are top-level field names.");
+    return `data.${field}`;
+  }
+  const metadata =
+    field && typeof field === "object" && !Array.isArray(field)
+      ? (field as Record<string, unknown>).metadata
+      : undefined;
+  if (
+    Object.keys(field ?? {}).length !== 1 ||
+    typeof metadata !== "string" ||
+    !Object.hasOwn(COLUMNS, metadata)
+  )
+    throw new DataError(
+      400,
+      "Metadata sort fields are { metadata: id, createdAt or updatedAt }.",
+    );
+  return metadata;
+}
+
 /** One wire form: a JSON array of one or two [field, direction] pairs. The
  * document id is always the final stable tie-breaker, so it may only be named
- * on its own. Without orderBy a query reads in id order. */
+ * on its own. Without a sort a query reads in id order. */
 export function sortings(raw?: string): Sort[] {
   if (raw === undefined) return [sorting()];
   let input: unknown;
@@ -58,19 +85,15 @@ export function sortings(raw?: string): Sort[] {
       (item) =>
         !Array.isArray(item) ||
         item.length !== 2 ||
-        typeof item[0] !== "string" ||
         (item[1] !== "asc" && item[1] !== "desc"),
     )
   )
-    throw new DataError(
-      400,
-      'orderBy must be a JSON array of one or two [field, direction] pairs, such as [["createdAt","desc"]].',
-    );
-  const result = (input as [string, Direction][]).map(
-    ([field, itemDirection]) => sorting(field, itemDirection),
+    throw new DataError(400, SORT_SHAPE);
+  const result = (input as [unknown, Direction][]).map(
+    ([field, itemDirection]) => sorting(orderByOf(field), itemDirection),
   );
   if (new Set(result.map((item) => item.orderBy)).size !== result.length)
-    throw new DataError(400, "orderBy fields must be unique.");
+    throw new DataError(400, "Sort fields must be unique.");
   if (result.length > 1 && result.some((item) => item.orderBy === "id"))
     throw new DataError(
       400,

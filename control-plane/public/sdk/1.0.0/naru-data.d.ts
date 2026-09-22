@@ -28,8 +28,13 @@ export interface WriteResult {
   updatedAt: string;
 }
 
+/**
+ * Why an operation failed. The list is closed for v1: a code a later server
+ * adds reaches this version as the nearest code here.
+ */
 export type NaruErrorCode =
   | "CONFLICT"
+  | "QUOTA_EXCEEDED"
   | "AUTH_REQUIRED"
   | "ACCESS_DENIED"
   | "NOT_FOUND"
@@ -78,18 +83,14 @@ export type Sort =
   | readonly [readonly [SortField, Direction]]
   | readonly [readonly [SortField, Direction], readonly [SortField, Direction]];
 
-export interface PageOptions {
-  /** Opaque cursor returned by the preceding page. */
-  after?: string | null;
-  /** Default 50; maximum 100. */
-  size?: number;
-  includeTotal?: boolean;
-}
-
 export interface ListOptions extends RequestOptions {
   filter?: Filter;
   sort?: Sort;
-  page?: PageOptions;
+  /** Default 50; maximum 100. */
+  size?: number;
+  /** Opaque cursor returned by the preceding page. */
+  after?: string | null;
+  includeTotal?: boolean;
 }
 
 export interface Page<T> {

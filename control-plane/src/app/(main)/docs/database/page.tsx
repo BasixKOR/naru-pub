@@ -114,7 +114,7 @@ export default function DatabaseDocs() {
                 빌드 도구도 API 키도 필요 없습니다.
               </p>
               <Code language="html">{`<script type="module">
-  import { createNaru } from "https://naru.pub/sdk/1.0.0/naru-data.js";
+  import { createNaru } from "https://naru.pub/sdk/1/naru-data.js";
 
   const naru = createNaru();
   const { documents } = await naru.public.collection("posts").list();
@@ -124,8 +124,10 @@ export default function DatabaseDocs() {
                 <code>내-로그인-이름.naru.pub</code>에서는 사이트를 주소로
                 알아냅니다. 연결한 도메인에서는{" "}
                 <code>createNaru({'{ site: "내-로그인-이름" }'})</code>처럼
-                로그인 이름을 넘기세요.{" "}
-                <a href="/sdk/1.0.0/naru-data.d.ts">TypeScript 타입 정의</a>도
+                로그인 이름을 넘기세요. <code>/sdk/1/</code>은 호환되는 최신
+                1.x를 가리키므로 수정 사항을 저절로 받습니다. 늘 같은 코드를
+                쓰려면 <code>/sdk/1.0.0/</code>처럼 버전을 고정하세요.{" "}
+                <a href="/sdk/1/naru-data.d.ts">TypeScript 타입 정의</a>도
                 있습니다.
               </p>
             </Section>
@@ -136,7 +138,8 @@ export default function DatabaseDocs() {
                 <strong>문서</strong>는 ID 하나와 JSON 데이터 하나입니다.
                 컬렉션을 만들고 지우거나 공개 범위를 바꾸는 일은 제어판에서
                 합니다. 이름과 문서 ID는 영문·숫자·<code>_</code>·<code>-</code>{" "}
-                1~64자입니다.
+                1~64자이고, <code>_</code>로 시작하는 컬렉션 이름은 나루가
+                쓰므로 만들 수 없습니다.
               </p>
               <p>
                 읽기와 쓰기 범위는 따로 정합니다. 새 컬렉션은 둘 다
@@ -187,13 +190,10 @@ const query = {
   filter: { category: "일상", date: { gte: "2026-09-01" } },
   sort: [["date", "desc"], [{ metadata: "createdAt" }, "desc"]],
 };
-const page = await posts.list({ ...query, page: { size: 20 } });
+const page = await posts.list({ ...query, size: 20 });
 // → { documents, nextCursor }
 
-const next = await posts.list({
-  ...query,
-  page: { size: 20, after: page.nextCursor },
-});`}</Code>
+const next = await posts.list({ ...query, size: 20, after: page.nextCursor });`}</Code>
               <ul className="list-disc space-y-3 pl-6">
                 <li>
                   <strong>filter</strong>: 최상위 필드를 값으로 비교하거나{" "}
@@ -209,7 +209,7 @@ const next = await posts.list({
                   ID 오름차순입니다.
                 </li>
                 <li>
-                  <strong>page</strong>: 한 번에 기본 50개, 최대 100개입니다.
+                  <strong>size</strong>: 한 번에 기본 50개, 최대 100개입니다.
                   다음 페이지는 같은 filter·sort에 <code>nextCursor</code>를{" "}
                   <code>after</code>로 넘기고, <code>nextCursor</code>가{" "}
                   <code>null</code>이면 끝입니다.{" "}
@@ -433,6 +433,10 @@ await owner
                     "관리자 권한이 만료되었습니다. 다시 로그인하세요.",
                   ],
                   ["CONFLICT", "condition이 맞지 않습니다."],
+                  [
+                    "QUOTA_EXCEEDED",
+                    "데이터나 미디어 저장 공간이 가득 찼습니다.",
+                  ],
                   [
                     "RATE_LIMITED",
                     "요청이 너무 많습니다. 잠시 후 다시 시도하세요.",

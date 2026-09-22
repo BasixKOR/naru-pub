@@ -1,6 +1,6 @@
 import { validateRequest } from "@/lib/auth";
 import { db } from "@/lib/database";
-import { DataError, jsonBody, sameOrigin } from "./validation";
+import { DataError, jsonBody, protocolError, sameOrigin } from "./validation";
 import { userHasFeature } from "@/lib/entitlements";
 import { noteSupporterFeatureUse } from "@/lib/feature-usage";
 import {
@@ -45,11 +45,7 @@ export async function ownerAuthRequest(request: Request, action: string) {
         throw new DataError(400, "Valid redirectUri required.");
       }
       if (!origin || origin !== callback.origin)
-        throw new DataError(
-          403,
-          "Redirect origin does not match.",
-          "REDIRECT_ORIGIN_MISMATCH",
-        );
+        throw new DataError(403, "Redirect origin does not match.");
       const registration = await db
         .selectFrom("site_data_clients as c")
         .innerJoin("users as u", "u.id", "c.user_id")
@@ -61,7 +57,7 @@ export async function ownerAuthRequest(request: Request, action: string) {
         throw new DataError(
           404,
           "Administrator callback is not registered.",
-          "UNREGISTERED_REDIRECT_URI",
+          "REDIRECT_NOT_REGISTERED",
         );
       return Response.json(
         { clientId: await siteClientId(registration.user_id) },
@@ -156,17 +152,20 @@ export async function ownerAuthRequest(request: Request, action: string) {
   } catch (error) {
     if (!(error instanceof DataError))
       console.error("Owner authorization request failed");
-    return Response.json(
-      {
-        error:
-          error instanceof DataError
-            ? error.message
-            : "Authorization request failed.",
-        ...(error instanceof DataError && error.code
-          ? { code: error.code }
-          : {}),
-      },
-      { status: error instanceof DataError ? error.status : 500, headers },
-    );
+    const status = error instanceof DataError ? error.status : 500;
+    const message =
+      error instanceof DataError
+        ? error.message
+        : "Authorization request failed.";
+    // What websites call is the versioned protocol; the rest is the control
+    // panel's own same-origin API, which reads a plain message.
+    return crossOrigin
+      ? protocolError(
+          status,
+          message,
+          error instanceof DataError ? error.code : undefined,
+          headers,
+        )
+      : Response.json({ error: message }, { status, headers });
   }
 }

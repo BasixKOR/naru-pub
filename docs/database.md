@@ -39,10 +39,7 @@ Create a collection in the control plane, choose its permissions, then use this 
 
 ```html
 <script type="module">
-  import {
-    createNaru,
-    NaruError,
-  } from "https://naru.pub/sdk/1.0.0/naru-data.js";
+  import { createNaru, NaruError } from "https://naru.pub/sdk/1/naru-data.js";
   const naru = createNaru();
   const entries = naru.public.collection("guestbook");
 
@@ -52,7 +49,7 @@ Create a collection in the control plane, choose its permissions, then use this 
     // set() and delete() require owner access or full public write permission.
     let cursor = null;
     do {
-      const page = await entries.list({ page: { size: 20, after: cursor } });
+      const page = await entries.list({ size: 20, after: cursor });
       render(page.documents);
       cursor = page.nextCursor;
     } while (cursor);
@@ -67,7 +64,7 @@ A page served from `<login>.naru.pub` belongs to that site, so `createNaru()` ne
 
 `get` returns `{ id, data, revision, createdAt, updatedAt }`; a missing document throws `NaruError` with `code: "NOT_FOUND"`. `set` replaces the whole document or creates it if absent. `add` generates an opaque ID without requiring read permission. `add` and `set` return `{ id, revision, createdAt, updatedAt }`, so a caller rendering what it just saved uses the server's own timestamps rather than the browser clock. `delete` is idempotent and resolves with nothing. JSON null is stored as a value, not treated as deletion. Render user data with `textContent`, not `innerHTML`.
 
-SDK declarations are available alongside the module at `/sdk/1.0.0/naru-data.d.ts`. The SDK pins `https://naru.pub` as its control-plane origin, even when bundled/copied. Naru's own tests point it at a loopback server through an undocumented `controlPlaneOrigin` option, which accepts nothing else.
+SDK declarations are available alongside the module at `/sdk/1/naru-data.d.ts`. The SDK pins `https://naru.pub` as its control-plane origin, even when bundled/copied. Naru's own tests point it at a loopback server through an undocumented `controlPlaneOrigin` option, which accepts nothing else.
 
 ## Website owner login
 
@@ -85,7 +82,7 @@ Minimal editor-page wiring:
 <button id="logout" disabled>Sign out</button>
 <p id="status"></p>
 <script type="module">
-  import { createNaru } from "https://naru.pub/sdk/1.0.0/naru-data.js";
+  import { createNaru } from "https://naru.pub/sdk/1/naru-data.js";
   const naru = createNaru();
   const status = document.querySelector("#status");
   async function run(action) {
@@ -131,11 +128,14 @@ Authorization approval and registration changes require same-origin owner reques
 
 ## SDK releases
 
-Use `/sdk/1.0.0/naru-data.js` and matching `/sdk/1.0.0/naru-data.d.ts` declarations. **1.0.0 remains under active development and will continue to be updated until the project owner says otherwise.** Its responses use `no-cache` so browsers revalidate; it must not be treated as immutable.
+Two URLs serve the SDK, and a site picks one:
 
-Unversioned SDK URLs are not served. Existing `/sdk/naru-data.js` imports must be changed before deployment. There are no floating `latest` or major-version aliases. When release freezing is explicitly requested, adopt immutable full-version releases and semantic versioning for subsequent changes.
+- `/sdk/1/naru-data.js` (and `/sdk/1/naru-data.d.ts`) is the newest 1.x release. A site that imports it picks up compatible fixes and additions without changing anything. This is what the docs and the example blog use.
+- `/sdk/1.0.0/naru-data.js` is one exact release, for a site that wants the same code on every load. **1.0.0 remains under active development and will continue to be updated until the project owner says otherwise**; once frozen it never changes, and fixes ship as 1.0.1 and so on.
 
-SDK versioning does not itself version the backend protocol. Version 1.0.0 uses `/api/data/:site`; preserve existing public CRUD behavior when extending it. Breaking server changes should introduce a separate API version.
+Both are served `no-cache`, so browsers revalidate. `/sdk/1/` is a rewrite in `next.config.mjs`; point it at the newest 1.x directory when one ships. Unversioned SDK URLs are not served. A change that would break a 1.x caller goes into `/sdk/2/`.
+
+The wire protocol is versioned separately, in the path: `/api/data/v1/:site` and `/api/data-auth/v1/*`. Every 1.x SDK file that was ever served keeps calling these, including copies cached or bundled by sites, so they stay compatible for as long as 1.x is supported: routes, parameters, response shapes and error codes. Breaking server changes need `/api/data/v2/` alongside v1.
 
 The 1.0.0 SDK is deliberately small. Its runtime exports are only `createNaru` and `NaruError`. A client has `public.collection()` and `auth`; an owner has `collection()`, `transaction()`, `media.upload()` and `signOut()`. Media listing and deletion remain in the control panel. Features are added when a site needs them, not in advance.
 
@@ -143,47 +143,49 @@ During 1.0.0 development the SDK dropped `createDatabase`, per-collection `parse
 
 ## Internal HTTP protocol
 
-This is the current SDK/control-plane wire format, not the browser application's
-public interface. The SDK sends `Accept: application/vnd.naru.data.v1+json` and
-translates transport query names while the server turns private numeric versions
-into opaque public revisions and semantic errors. Server revisions may change this table while the
-SDK surface remains stable.
+This is the v1 wire format the SDK speaks. Applications use the SDK, not these
+routes, but released SDK files depend on them, so the website root below is a
+compatibility surface: change it only compatibly. Query parameters and response
+fields use the SDK's own names, so the SDK passes them through; the server turns
+private numeric versions into opaque revisions.
 
-Public/website-token root: `/api/data/:site`. Control-plane root: `/api/account/database` (site derived from the session). Collection management is restricted to the control-plane root.
+Website root: `/api/data/v1/:site`. Control-plane root: `/api/account/database` (site derived from the session; ships with the server and is not versioned). Collection management is restricted to the control-plane root. Collection names starting with `_` are reserved for the protocol's own paths (`_batch`, `_files`) and cannot be created.
 
-| Method | Path relative to root                    | Body / result                                                       |
-| ------ | ---------------------------------------- | ------------------------------------------------------------------- |
-| GET    | `/`                                      | Admin only: `{ collections }`                                       |
-| POST   | `/`                                      | Admin only: `{ name, read?, write? }` creates collection            |
-| PATCH  | `/:collection`                           | Control panel only: `{ read, write }` replaces permissions          |
-| DELETE | `/:collection`                           | Admin only: deletes collection and its documents                    |
-| GET    | `/:collection?limit=50&pageToken=token`  | `{ documents, nextPageToken, total? }`; accepts sorting and filters |
-| POST   | `/:collection`                           | `{ data }` creates document; returns the write result               |
-| GET    | `/:collection/:id`                       | `{ document }`                                                      |
-| PUT    | `/:collection/:id?ifRevision=&ifAbsent=` | `{ data }` replaces document; returns the write result              |
-| DELETE | `/:collection/:id?ifRevision=`           | `{ success: true }`                                                 |
-| POST   | `/_batch`                                | Owner-only atomic `{ operations }`; returns `{ results }`           |
-| GET    | `/_files?limit=50&pageToken=&where=`     | Owner-only `{ files, nextPageToken }`, newest first                 |
-| GET    | `/_files?usage=1`                        | Control panel only: `{ usage }`                                     |
-| POST   | `/_files`                                | Owner-only upload authorization                                     |
-| PUT    | `/_files/:id`                            | Owner-only finalize; verifies the stored bytes                      |
-| DELETE | `/_files/:id`                            | `{ success: true }`                                                 |
+| Method | Path relative to root                    | Body / result                                                     |
+| ------ | ---------------------------------------- | ----------------------------------------------------------------- |
+| GET    | `/`                                      | Admin only: `{ collections }`                                     |
+| POST   | `/`                                      | Admin only: `{ name, read?, write? }` creates collection          |
+| PATCH  | `/:collection`                           | Control panel only: `{ read, write }` replaces permissions        |
+| DELETE | `/:collection`                           | Admin only: deletes collection and its documents                  |
+| GET    | `/:collection?size=50&after=cursor`      | `{ documents, nextCursor, totalCount? }`; accepts sort and filter |
+| POST   | `/:collection`                           | `{ data }` creates document; returns the write result             |
+| GET    | `/:collection/:id`                       | `{ document }`                                                    |
+| PUT    | `/:collection/:id?ifRevision=&ifAbsent=` | `{ data }` replaces document; returns the write result            |
+| DELETE | `/:collection/:id?ifRevision=`           | `{ success: true }`                                               |
+| POST   | `/_batch`                                | Owner-only atomic `{ operations }`; returns `{ results }`         |
+| GET    | `/_files?size=50&after=`                 | Owner-only `{ files, nextCursor }`, newest first                  |
+| GET    | `/_files?usage=1`                        | Control panel only: `{ usage }`                                   |
+| POST   | `/_files`                                | Owner-only upload authorization                                   |
+| PUT    | `/_files/:id`                            | Owner-only finalize; verifies the stored bytes                    |
+| DELETE | `/_files/:id`                            | `{ success: true }`                                               |
 
-A public write result is `{ id, revision, createdAt, updatedAt }`; `_batch` accepts the SDK's semantic set/delete writes and returns an ignored internal result payload. A list accepts private transport parameters `where`, `orderBy`, `limit`, `pageToken` and `includeTotal=1`. An upload authorization takes `{ name, contentType, size }` and returns `{ id, uploadUrl, headers }`: PUT the bytes to `uploadUrl` with those headers, then finalize with `PUT /_files/:id`. A file is `{ id, name, contentType, size, url, createdAt, updatedAt }`. The public route does not accept `PATCH`.
+A public write result is `{ id, revision, createdAt, updatedAt }`; `_batch` accepts the SDK's semantic set/delete writes and returns an ignored internal result payload. A list accepts `filter` and `sort` (URL-encoded JSON, exactly as passed to the SDK), `size`, `after` and `includeTotal=1`. An upload authorization takes `{ name, contentType, size }` and returns `{ id, uploadUrl, headers }`: PUT the bytes to `uploadUrl` with those headers, then finalize with `PUT /_files/:id`. A file is `{ id, name, contentType, size, url, createdAt, updatedAt }`. The public route does not accept `PATCH`.
 
-All JSON request bodies require `Content-Type: application/json`. Errors return `{ error }` with an HTTP status (400 invalid input, 401 no admin session, 403 denied, 404 missing, 405 unsupported method, 409 duplicate/quota/conflict, 413 oversized, 415 wrong content type, 429 rate limit). Public preflight needs no authentication. Errors, writes, and authenticated reads are not cached; anonymous reads from `world`-readable collections may use the short shared cache described below.
+All JSON request bodies require `Content-Type: application/json`. Website errors return `{ error: { code, message } }`, where `code` is one of the v1 codes in the [SDK reference](sdk-v1-api.md#errors-and-cancellation); the server sets it, and the HTTP status is diagnostic. A `DataError` names its code only where the status alone would be wrong (a failed condition and a full quota are both 409, for instance); otherwise 401, 403, 404, 429 and 5xx map to `AUTH_REQUIRED`, `ACCESS_DENIED`, `NOT_FOUND`, `RATE_LIMITED` and `UNAVAILABLE`, and any other status to `INVALID_REQUEST`. The v1 code list is closed: a new code needs a new protocol version, and the SDK reads a code it does not know by its status. The control-plane root keeps `{ error }` with a plain message. Public preflight needs no authentication. Errors, writes, and authenticated reads are not cached; anonymous reads from `world`-readable collections may use the short shared cache described below.
 
 Owner authorization endpoints:
 
-| Endpoint                                     | Purpose                                                                                                                                 |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /database/authorize`                    | Login/consent UI; never issues a code on GET.                                                                                           |
-| `GET /api/data-auth/discover`                | Discovers the public site Client ID for an exact registered callback and matching Origin.                                               |
-| `POST /api/data-auth/authorize`              | Same-origin owner approval with `clientId`, `site`, `redirectUri`, `challenge`, `state`, `collections`; returns validated redirect URL. |
-| `POST /api/data-auth/token`                  | Exchange JSON `{ code, verifier, clientId, redirectUri }` from the registered Origin; returns `{ accessToken, expiresAt }`.             |
-| `POST /api/data-auth/revoke`                 | Revoke the bearer token supplied in Authorization; requires its registered Origin.                                                      |
-| `GET/POST /api/account/database-clients`     | Same-origin owner registration listing/creation (`{ redirectUri, collections }`).                                                       |
-| `PATCH/DELETE /api/account/database-clients` | Same-origin owner revoke-all/remove registration (`{ id }`).                                                                            |
+| Endpoint                         | Purpose                                                                                                                                 |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /database/authorize`        | Login/consent UI; never issues a code on GET.                                                                                           |
+| `GET /api/data-auth/v1/discover` | Discovers the public site Client ID for an exact registered callback and matching Origin.                                               |
+| `POST /api/data-auth/authorize`  | Same-origin owner approval with `clientId`, `site`, `redirectUri`, `challenge`, `state`, `collections`; returns validated redirect URL. |
+| `POST /api/data-auth/v1/token`   | Exchange JSON `{ code, verifier, clientId, redirectUri }` from the registered Origin; returns `{ accessToken, expiresAt }`.             |
+| `POST /api/data-auth/v1/revoke`  | Revoke the bearer token supplied in Authorization; requires its registered Origin.                                                      |
+
+The `v1/` endpoints are what websites call and answer with the coded error body. `POST /api/data-auth/authorize` is the consent screen's own same-origin call. Released SDKs also fix the consent page's query (`site`, `clientId`, `redirectUri`, `challenge`, `state`, `collections`) and the `code`, `state` and `error` it returns to the callback, so those change only compatibly too.
+| `GET/POST /api/account/database-clients` | Same-origin owner registration listing/creation (`{ redirectUri, collections }`). |
+| `PATCH/DELETE /api/account/database-clients` | Same-origin owner revoke-all/remove registration (`{ id }`). |
 
 There are at most 20 registrations per site, 20 pending codes and 50 live tokens per registration. Expired grants are cleaned during authorization activity. Removing registrations/accounts/sessions cascades into their grants.
 
@@ -312,16 +314,10 @@ const query = {
     ["publishedOn", "desc"],
     [{ metadata: "createdAt" }, "desc"],
   ],
-  page: { size: 20 },
+  size: 20,
 };
-const first = await posts.list({
-  ...query,
-  page: { ...query.page, includeTotal: true },
-});
-const next = await posts.list({
-  ...query,
-  page: { ...query.page, after: first.nextCursor },
-});
+const first = await posts.list({ ...query, includeTotal: true });
+const next = await posts.list({ ...query, after: first.nextCursor });
 ```
 
 `sort` is always a list of one or two `[field, direction]` pairs. User fields are named directly; metadata uses `{ metadata: "id" | "createdAt" | "updatedAt" }`. `direction` is `asc` or `desc`. The document ID is appended automatically as the final tie-breaker. Without `sort`, a list reads in ID order.
@@ -330,9 +326,9 @@ Metadata timestamp ties use document ID in the last direction. JSON-field values
 
 `get` and `list` return `createdAt` as well as `updatedAt`. Server metadata is camelCase throughout the API; the underlying columns stay snake_case. Creation time is assigned by the server, preserved on replacement, and cannot be changed by fields in `data`. The migration backfills existing documents from their recorded modification time; their original creation time is unknown.
 
-Pass `nextCursor` unchanged as `page.after` with the same collection, ordering, and filters. Cursors are opaque, query-bound continuation state: applications must not inspect or construct them. The SDK and server may change their representation. They are not credentials; read permissions are checked on every request. Changing page size is allowed.
+Pass `nextCursor` unchanged as `after` with the same collection, ordering, and filters. Cursors are opaque, query-bound continuation state: applications must not inspect or construct them. The SDK and server may change their representation. They are not credentials; read permissions are checked on every request. Changing page size is allowed.
 
-A null cursor marks the end, and passing `null` as `page.after` reads the first page. Cache prior pages or their starting cursors for a Previous button. There are no page numbers or offsets. `page.includeTotal: true` returns `totalCount`; for only the number, use `page.size: 1`. Reset the cursor and displayed results when switching sort order or filters. Pagination is not a snapshot across requests: newly inserted records before the cursor require a refresh; changing a sort value during traversal can skip or repeat a record.
+A null cursor marks the end, and passing `null` as `after` reads the first page. Cache prior pages or their starting cursors for a Previous button. There are no page numbers or offsets. `includeTotal: true` returns `totalCount`; for only the number, use `size: 1`. Reset the cursor and displayed results when switching sort order or filters. Pagination is not a snapshot across requests: newly inserted records before the cursor require a refresh; changing a sort value during traversal can skip or repeat a record.
 
 Cancel a superseded read with a standard `AbortController`, passing its `signal`; the request then rejects with the browser's own `AbortError`.
 
@@ -345,11 +341,11 @@ const page = await naru.public.collection("posts").list({
     date: { gte: "2026-09-01", lt: "2026-10-01" },
   },
   sort: [["date", "desc"]],
-  page: { size: 20 },
+  size: 20,
 });
 ```
 
-HTTP: `GET /api/data/:site/:collection?where=<URL-encoded JSON object>&orderBy=<URL-encoded [["data.date","desc"]]>`. The account API accepts the same parameters. `where` applies to collection and media lists. Conditions address top-level fields and are ANDed. An equality value is a JSON string, finite number, boolean, or null. A range value is an object containing one or more of `gt`, `gte`, `lt`, and `lte`, whose bounds must be finite numbers or strings. Each equality or range bound counts as one predicate, with at most 5 predicates in total. Field names use the same 1–64 ASCII alphanumeric/underscore/hyphen rules as document IDs. The decoded filter JSON is limited to 2,048 UTF-8 bytes. Absent `where` and `{}` mean no filtering.
+HTTP: `GET /api/data/v1/:site/:collection?filter=<URL-encoded JSON object>&sort=<URL-encoded [["date","desc"]]>`. The account API accepts the same parameters. Media lists refuse a `filter`. Conditions address top-level fields and are ANDed. An equality value is a JSON string, finite number, boolean, or null. A range value is an object containing one or more of `gt`, `gte`, `lt`, and `lte`, whose bounds must be finite numbers or strings. Each equality or range bound counts as one predicate, with at most 5 predicates in total. Field names use the same 1–64 ASCII alphanumeric/underscore/hyphen rules as document IDs. The decoded filter JSON is limited to 2,048 UTF-8 bytes. Absent `filter` and `{}` mean no filtering.
 
 Equality types match exactly: number 1 differs from string "1"; null matches an explicit null field, not an absent field. Strings match case-sensitively. Arrays and objects cannot be equality values. Range comparisons operate only within the bound's JSON type, so a string bound never selects numeric fields and vice versa; multiple bounds for one field must use the same type. Store sortable dates in a fixed-width representation such as ISO `YYYY-MM-DD`. Missing fields do not match ranges. Nested paths, array membership, OR, and substring search are not supported. Filters are carried in URLs; do not put secrets in them.
 
@@ -369,7 +365,7 @@ Draft and public copies share an ID. Saving a private draft does not unpublish o
 
 `site_data_site_clients` stores one persistent ID per owner, independently of callback rows. Migration preserves callback rows as internal registration IDs, but invalidates all existing authorization codes and website access tokens. Old callback IDs are not accepted as public Client IDs. Each registered page retains its exact callback and collection IDs. Changing a callback URL or its collection permissions revokes all of its codes and access tokens, including when widening scope. Reducing its token lifetime also revokes them. Increasing only the lifetime preserves existing tokens with their original deadlines; pending codes retain the duration already approved. Saving an unchanged registration does not revoke access. Removing a callback cascades the same revocation; the website ID survives even when the last callback is removed.
 
-Every `/api/data-auth/token` exchange returns `{ accessToken, expiresAt }`; the token is sent as `Authorization: Bearer <accessToken>`. `expiresAt` is the fixed expiry in Unix milliseconds; the token lasts no longer than the configured page lifetime, consented duration, platform maximum, or approving Naru session, whichever ends first. `POST /api/data-auth/revoke` takes the bearer token and revokes it idempotently. The unpublished renewal tables and `/refresh` and `/end-session` endpoints have been removed; the existing access-token table is sufficient. Requests use explicit credentials and never ambient cookies.
+Every `/api/data-auth/v1/token` exchange returns `{ accessToken, expiresAt }`; the token is sent as `Authorization: Bearer <accessToken>`. `expiresAt` is the fixed expiry in Unix milliseconds; the token lasts no longer than the configured page lifetime, consented duration, platform maximum, or approving Naru session, whichever ends first. `POST /api/data-auth/v1/revoke` takes the bearer token and revokes it idempotently. The unpublished renewal tables and `/refresh` and `/end-session` endpoints have been removed; the existing access-token table is sufficient. Requests use explicit credentials and never ambient cookies.
 
 ### Configuring token lifetime
 
@@ -392,7 +388,7 @@ with `code: "CONFLICT"`; `condition: { absent: true }` asserts that the document
 exist. Applications must not parse or construct revisions.
 
 A failed operation throws `NaruError` with a stable semantic `code` such as
-`CONFLICT`, `AUTH_REQUIRED`, `RATE_LIMITED`, or `UNAVAILABLE`. HTTP status and
+`CONFLICT`, `QUOTA_EXCEEDED`, `AUTH_REQUIRED`, `RATE_LIMITED`, or `UNAVAILABLE`. HTTP status and
 the original cause are diagnostic only. Network and invalid proxy responses are
 normalized to `UNAVAILABLE`; cancellation remains the browser's `AbortError`. A
 collection name or ID outside 1–64 ASCII letters, digits, underscores and

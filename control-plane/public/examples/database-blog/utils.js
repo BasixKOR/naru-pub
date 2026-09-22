@@ -8,6 +8,7 @@ export function errorMessage(error) {
     ACCESS_DENIED: "권한이 없습니다.",
     NOT_FOUND: "찾을 수 없습니다.",
     CONFLICT: "다른 곳에서 먼저 고쳤습니다. 새로고침하세요.",
+    QUOTA_EXCEEDED: "저장 공간이 가득 찼습니다.",
     RATE_LIMITED: "잠시 후 다시 시도하세요.",
     // Seen only by the site owner while setting the example up.
     REDIRECT_NOT_REGISTERED:

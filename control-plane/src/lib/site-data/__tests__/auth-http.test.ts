@@ -75,7 +75,7 @@ test("token exchange ignores ambient cookies and forwards origin to grant verifi
     redirectUri: "https://alice.example/admin",
   };
   const response = await ownerAuthRequest(
-    new Request("https://naru.pub/api/data-auth/token", {
+    new Request("https://naru.pub/api/data-auth/v1/token", {
       method: "POST",
       headers: {
         Origin: "https://alice.example",
@@ -101,7 +101,7 @@ test("token exchange ignores ambient cookies and forwards origin to grant verifi
 });
 test("revocation requires explicit bearer credentials", async () => {
   const response = await ownerAuthRequest(
-    new Request("https://naru.pub/api/data-auth/revoke", {
+    new Request("https://naru.pub/api/data-auth/v1/revoke", {
       method: "POST",
       headers: {
         Origin: "https://alice.example",
@@ -111,6 +111,9 @@ test("revocation requires explicit bearer credentials", async () => {
     "revoke",
   );
   expect(response.status).toBe(401);
+  expect(await response.json()).toEqual({
+    error: { code: "AUTH_REQUIRED", message: "Invalid owner token." },
+  });
   expect(owner.revokeToken).not.toHaveBeenCalled();
 });
 
@@ -133,3 +136,33 @@ test.each(["refresh", "end-session"])(
     expect(response.status).toBe(404);
   },
 );
+
+test("website calls answer only under v1, and the consent approval only outside it", async () => {
+  const legacy =
+    require("@/app/(main)/api/data-auth/[action]/route") as typeof import("@/app/(main)/api/data-auth/[action]/route");
+  const v1 =
+    require("@/app/(main)/api/data-auth/v1/[action]/route") as typeof import("@/app/(main)/api/data-auth/v1/[action]/route");
+  const post = (route: Pick<typeof v1, "POST">, action: string) =>
+    route.POST(
+      new Request(`https://naru.pub/api/data-auth/${action}`, {
+        method: "POST",
+        headers: {
+          Origin: "https://alice.example",
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      }),
+      { params: Promise.resolve({ action }) },
+    );
+  for (const action of ["discover", "token", "revoke"]) {
+    const response = await post(legacy, action);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "Not found." });
+  }
+  const response = await post(v1, "authorize");
+  expect(response.status).toBe(404);
+  expect(await response.json()).toEqual({
+    error: { code: "NOT_FOUND", message: "Not found." },
+  });
+  expect(owner.approveAuthorization).not.toHaveBeenCalled();
+});

@@ -12,18 +12,29 @@ export class NaruError extends Error {
   }
 }
 
+// The server names the code. Only the codes this version knows are passed on,
+// so a code added later reads as the nearest one this version has.
+const CODES = new Set([
+  "CONFLICT",
+  "QUOTA_EXCEEDED",
+  "AUTH_REQUIRED",
+  "ACCESS_DENIED",
+  "NOT_FOUND",
+  "RATE_LIMITED",
+  "INVALID_REQUEST",
+  "REDIRECT_NOT_REGISTERED",
+  "UNAVAILABLE",
+]);
 const errorCode = (status, code) => {
-  if (code === "VERSION_CONFLICT") return "CONFLICT";
-  if (code === "OWNER_SESSION_EXPIRED" || status === 401)
-    return "AUTH_REQUIRED";
-  if (code === "COLLECTION_NOT_AUTHORIZED" || status === 403)
-    return "ACCESS_DENIED";
-  if (code === "UNREGISTERED_REDIRECT_URI") return "REDIRECT_NOT_REGISTERED";
+  if (CODES.has(code)) return code;
+  if (status === 401) return "AUTH_REQUIRED";
+  if (status === 403) return "ACCESS_DENIED";
   if (status === 404) return "NOT_FOUND";
   if (status === 429) return "RATE_LIMITED";
   if (status >= 500) return "UNAVAILABLE";
   return "INVALID_REQUEST";
 };
+const RETRYABLE = new Set(["RATE_LIMITED", "UNAVAILABLE"]);
 
 const CONTROL_PLANE = "https://naru.pub";
 const SITE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -35,7 +46,7 @@ const PUBLIC_CACHE_MS = 10_000;
 // only custom domains and local development need to say which site they are.
 // controlPlaneOrigin is for Naru's own tests against a loopback server.
 function target({ site, controlPlaneOrigin = CONTROL_PLANE } = {}) {
-  site ??= /^([a-z0-9-]+)\.naru\.pub$/.exec(
+  site ||= /^([a-z0-9-]+)\.naru\.pub$/.exec(
     globalThis.location?.hostname ?? "",
   )?.[1];
   if (typeof site !== "string" || !SITE.test(site))
@@ -53,7 +64,7 @@ function target({ site, controlPlaneOrigin = CONTROL_PLANE } = {}) {
   return {
     site,
     origin: origin.origin,
-    root: `${origin.origin}/api/data/${site}`,
+    root: `${origin.origin}/api/data/v1/${site}`,
   };
 }
 
@@ -85,7 +96,6 @@ async function request(url, { method = "GET", body, token, signal, touches }) {
       redirect: "error",
       cache: fresh ? "no-store" : "default",
       headers: {
-        Accept: "application/vnd.naru.data.v1+json",
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
@@ -104,15 +114,16 @@ async function request(url, { method = "GET", body, token, signal, touches }) {
         writtenUntil.set(path, Date.now() + PUBLIC_CACHE_MS);
   }
   const result = await response.json().catch(() => null);
-  if (!response.ok)
+  if (!response.ok) {
+    const code = errorCode(response.status, result?.error?.code);
     throw new NaruError(
-      result?.error ?? `Database request failed (HTTP ${response.status}).`,
-      errorCode(response.status, result?.code),
-      {
-        status: response.status,
-        retryable: response.status === 429 || response.status >= 500,
-      },
+      typeof result?.error?.message === "string"
+        ? result.error.message
+        : `Database request failed (HTTP ${response.status}).`,
+      code,
+      { status: response.status, retryable: RETRYABLE.has(code) },
     );
+  }
   // A proxy or challenge page can answer 200 with HTML. Handing that back as
   // an empty result would make a missing document look like a present one.
   if (result === null || typeof result !== "object")
@@ -124,27 +135,14 @@ async function request(url, { method = "GET", body, token, signal, touches }) {
   return result;
 }
 
-function query({ filter, sort, page = {} } = {}) {
+function query({ filter, sort, size, after, includeTotal } = {}) {
   const parameters = new URLSearchParams();
   if (filter && Object.keys(filter).length)
-    parameters.set("where", JSON.stringify(filter));
-  if (sort) {
-    const fields = sort.map(([field, direction]) => {
-      if (typeof field === "string") {
-        if (field.startsWith("data."))
-          throw new TypeError("Sort user fields without a data. prefix.");
-        return [`data.${field}`, direction];
-      }
-      const metadata = field?.metadata;
-      if (!["id", "createdAt", "updatedAt"].includes(metadata))
-        throw new TypeError("Unknown metadata sort field.");
-      return [metadata, direction];
-    });
-    parameters.set("orderBy", JSON.stringify(fields));
-  }
-  if (page.size !== undefined) parameters.set("limit", String(page.size));
-  if (page.after) parameters.set("pageToken", page.after);
-  if (page.includeTotal) parameters.set("includeTotal", "1");
+    parameters.set("filter", JSON.stringify(filter));
+  if (sort) parameters.set("sort", JSON.stringify(sort));
+  if (size !== undefined) parameters.set("size", String(size));
+  if (after) parameters.set("after", after);
+  if (includeTotal) parameters.set("includeTotal", "1");
   const text = String(parameters);
   return text ? `?${text}` : "";
 }
@@ -164,30 +162,19 @@ function condition(value) {
   throw new TypeError("condition must contain revision or absent.");
 }
 
-const document = (result) => result;
-const written = document;
-const page = ({ documents: rows, nextPageToken, total, ...rest }) => ({
-  ...rest,
-  documents: rows.map(document),
-  nextCursor: nextPageToken,
-  ...(total === undefined ? {} : { totalCount: total }),
-});
-
 function documents(root, name, send) {
   const path = `${root}/${segment(name)}`;
   const touches = [path];
   return Object.freeze({
     async get(id, { signal } = {}) {
       const result = await send(`${path}/${segment(id)}`, { signal, touches });
-      return document(result.document);
+      return result.document;
     },
-    async list(options = {}) {
-      return page(
-        await send(`${path}${query(options)}`, {
-          signal: options.signal,
-          touches,
-        }),
-      );
+    list(options = {}) {
+      return send(`${path}${query(options)}`, {
+        signal: options.signal,
+        touches,
+      });
     },
     add(data, { signal } = {}) {
       return send(path, {
@@ -195,7 +182,7 @@ function documents(root, name, send) {
         body: { data },
         signal,
         touches,
-      }).then(written);
+      });
     },
     set(id, data, { signal, condition: expected } = {}) {
       return send(`${path}/${segment(id)}${condition(expected)}`, {
@@ -203,7 +190,7 @@ function documents(root, name, send) {
         body: { data },
         signal,
         touches,
-      }).then(written);
+      });
     },
     async delete(id, { signal, condition: expected } = {}) {
       await send(`${path}/${segment(id)}${condition(expected)}`, {
@@ -384,7 +371,7 @@ function owner(context, token, expiresAt) {
     /** Forgets the session here first, then asks Naru to revoke it. */
     async signOut() {
       forget(key, token);
-      await request(`${origin}/api/data-auth/revoke`, {
+      await request(`${origin}/api/data-auth/v1/revoke`, {
         method: "POST",
         token,
         touches: [],
@@ -408,7 +395,7 @@ const callback = () => location.origin + location.pathname;
  */
 async function signIn(context, collections) {
   const { site, origin } = context;
-  const discovery = new URL("/api/data-auth/discover", origin);
+  const discovery = new URL("/api/data-auth/v1/discover", origin);
   discovery.search = String(
     new URLSearchParams({ site, redirectUri: callback() }),
   );
@@ -480,7 +467,7 @@ async function ownerSession(context) {
     );
   if (denied !== null)
     throw new NaruError("Sign-in was denied.", "ACCESS_DENIED");
-  const token = await request(`${context.origin}/api/data-auth/token`, {
+  const token = await request(`${context.origin}/api/data-auth/v1/token`, {
     method: "POST",
     body: {
       code,

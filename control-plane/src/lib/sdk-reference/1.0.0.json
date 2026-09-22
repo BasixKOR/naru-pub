@@ -72,132 +72,6 @@
       ]
     },
     {
-      "name": "ListOptions",
-      "kind": "interface",
-      "summary": [],
-      "throws": [],
-      "signature": "interface ListOptions extends RequestOptions",
-      "extends": [
-        "RequestOptions"
-      ],
-      "members": [
-        {
-          "name": "after",
-          "optional": true,
-          "signature": "after?: string | null",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "Opaque cursor returned by the preceding page."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
-          "name": "filter",
-          "optional": true,
-          "signature": "filter?: Filter",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "includeTotal",
-          "optional": true,
-          "signature": "includeTotal?: boolean",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "size",
-          "optional": true,
-          "signature": "size?: number",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "Default 50; maximum 100."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
-          "name": "sort",
-          "optional": true,
-          "signature": "sort?: Sort",
-          "summary": [],
-          "throws": []
-        }
-      ]
-    },
-    {
-      "name": "Media",
-      "kind": "interface",
-      "summary": [],
-      "throws": [],
-      "signature": "interface Media",
-      "extends": [],
-      "members": [
-        {
-          "name": "contentType",
-          "optional": false,
-          "signature": "contentType: string",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "createdAt",
-          "optional": false,
-          "signature": "createdAt: string",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "id",
-          "optional": false,
-          "signature": "id: string",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "name",
-          "optional": false,
-          "signature": "name: string",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "size",
-          "optional": false,
-          "signature": "size: number",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "updatedAt",
-          "optional": false,
-          "signature": "updatedAt: string",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "url",
-          "optional": false,
-          "signature": "url: string",
-          "summary": [],
-          "throws": []
-        }
-      ]
-    },
-    {
       "name": "NaruClient",
       "kind": "interface",
       "summary": [],
@@ -242,7 +116,7 @@
         {
           "name": "media",
           "optional": false,
-          "signature": "media: {\n  upload(file: Blob | File, options?: RequestOptions): Promise<Media>;\n}",
+          "signature": "media: {\n  upload(\n    file: Blob | File,\n    options?: { signal?: AbortSignal },\n  ): Promise<{ url: string }>;\n}",
           "summary": [],
           "throws": []
         },
@@ -263,7 +137,7 @@
         {
           "name": "transaction",
           "optional": false,
-          "signature": "transaction(\n  writes: readonly TransactionWrite[],\n  options?: RequestOptions,\n): Promise<void>",
+          "signature": "transaction(\n  writes: readonly (\n    | {\n        collection: string;\n        set: {\n          condition?: { revision: Revision } | { absent: true };\n          data: Json;\n          id: string;\n        };\n      }\n    | {\n        collection: string;\n        delete: {\n          condition?: { revision: Revision } | { absent: true };\n          id: string;\n        };\n      }\n  )[],\n  options?: { signal?: AbortSignal },\n): Promise<void>",
           "summary": [
             {
               "type": "paragraph",
@@ -292,7 +166,7 @@
         {
           "name": "delete",
           "optional": false,
-          "signature": "delete(id: string, options?: WriteOptions): Promise<void>",
+          "signature": "delete(\n  id: string,\n  options?: {\n    condition?: { revision: Revision } | { absent: true };\n    signal?: AbortSignal;\n  },\n): Promise<void>",
           "summary": [
             {
               "type": "paragraph",
@@ -309,7 +183,7 @@
         {
           "name": "set",
           "optional": false,
-          "signature": "set(id: string, data: T, options?: WriteOptions): Promise<WriteResult>",
+          "signature": "set(\n  id: string,\n  data: T,\n  options?: {\n    condition?: { revision: Revision } | { absent: true };\n    signal?: AbortSignal;\n  },\n): Promise<{ createdAt: string; id: string; revision: Revision }>",
           "summary": [
             {
               "type": "paragraph",
@@ -330,7 +204,7 @@
       "kind": "interface",
       "summary": [],
       "throws": [],
-      "signature": "interface Page<T>",
+      "signature": "interface Page<T = Json>",
       "extends": [],
       "members": [
         {
@@ -367,133 +241,21 @@
         {
           "name": "add",
           "optional": false,
-          "signature": "add(data: T, options?: RequestOptions): Promise<WriteResult>",
+          "signature": "add(\n  data: T,\n  options?: { signal?: AbortSignal },\n): Promise<{ createdAt: string; id: string; revision: Revision }>",
           "summary": [],
           "throws": []
         },
         {
           "name": "get",
           "optional": false,
-          "signature": "get(id: string, options?: RequestOptions): Promise<Document<T>>",
+          "signature": "get(id: string, options?: { signal?: AbortSignal }): Promise<Document<T>>",
           "summary": [],
           "throws": []
         },
         {
           "name": "list",
           "optional": false,
-          "signature": "list(options?: ListOptions): Promise<Page<T>>",
-          "summary": [],
-          "throws": []
-        }
-      ]
-    },
-    {
-      "name": "RangeFilter",
-      "kind": "interface",
-      "summary": [],
-      "throws": [],
-      "signature": "interface RangeFilter",
-      "extends": [],
-      "members": [
-        {
-          "name": "gt",
-          "optional": true,
-          "signature": "gt?: string | number",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "gte",
-          "optional": true,
-          "signature": "gte?: string | number",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "lt",
-          "optional": true,
-          "signature": "lt?: string | number",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "lte",
-          "optional": true,
-          "signature": "lte?: string | number",
-          "summary": [],
-          "throws": []
-        }
-      ]
-    },
-    {
-      "name": "RequestOptions",
-      "kind": "interface",
-      "summary": [],
-      "throws": [],
-      "signature": "interface RequestOptions",
-      "extends": [],
-      "members": [
-        {
-          "name": "signal",
-          "optional": true,
-          "signature": "signal?: AbortSignal",
-          "summary": [],
-          "throws": []
-        }
-      ]
-    },
-    {
-      "name": "WriteOptions",
-      "kind": "interface",
-      "summary": [],
-      "throws": [],
-      "signature": "interface WriteOptions extends RequestOptions",
-      "extends": [
-        "RequestOptions"
-      ],
-      "members": [
-        {
-          "name": "condition",
-          "optional": true,
-          "signature": "condition?: WriteCondition",
-          "summary": [],
-          "throws": []
-        }
-      ]
-    },
-    {
-      "name": "WriteResult",
-      "kind": "interface",
-      "summary": [],
-      "throws": [],
-      "signature": "interface WriteResult",
-      "extends": [],
-      "members": [
-        {
-          "name": "createdAt",
-          "optional": false,
-          "signature": "createdAt: string",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "id",
-          "optional": false,
-          "signature": "id: string",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "revision",
-          "optional": false,
-          "signature": "revision: Revision",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "updatedAt",
-          "optional": false,
-          "signature": "updatedAt: string",
+          "signature": "list(options?: {\n  after?: string | null;\n  filter?: Record<\n    string,\n    | string\n    | number\n    | boolean\n    | {\n        gt?: string | number;\n        gte?: string | number;\n        lt?: string | number;\n        lte?: string | number;\n      }\n    | null\n  >;\n  includeTotal?: boolean;\n  signal?: AbortSignal;\n  size?: number;\n  sort?:\n    | readonly [\n        readonly [\n          string | { metadata: \"createdAt\" | \"updatedAt\" },\n          \"desc\" | \"asc\",\n        ],\n      ]\n    | readonly [\n        readonly [\n          string | { metadata: \"createdAt\" | \"updatedAt\" },\n          \"desc\" | \"asc\",\n        ],\n        readonly [\n          string | { metadata: \"createdAt\" | \"updatedAt\" },\n          \"desc\" | \"asc\",\n        ],\n      ];\n}): Promise<Page<T>>",
           "summary": [],
           "throws": []
         }
@@ -502,20 +264,31 @@
     {
       "name": "NaruError",
       "kind": "class",
-      "summary": [],
+      "summary": [
+        {
+          "type": "paragraph",
+          "spans": [
+            {
+              "type": "text",
+              "value": "A Naru operation that could not be completed. Check it with "
+            },
+            {
+              "type": "code",
+              "value": "instanceof"
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ]
+        }
+      ],
       "throws": [],
       "signature": "class NaruError extends Error",
       "extends": [
         "Error"
       ],
       "members": [
-        {
-          "name": "cause",
-          "optional": true,
-          "signature": "cause?: unknown",
-          "summary": [],
-          "throws": []
-        },
         {
           "name": "code",
           "optional": false,
@@ -527,24 +300,25 @@
           "name": "retryable",
           "optional": false,
           "signature": "retryable: boolean",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "status",
-          "optional": true,
-          "signature": "status?: number",
           "summary": [
             {
               "type": "paragraph",
               "spans": [
                 {
                   "type": "text",
-                  "value": "Diagnostic only; application behavior should depend on "
+                  "value": "True for "
                 },
                 {
                   "type": "code",
-                  "value": "code"
+                  "value": "RATE_LIMITED"
+                },
+                {
+                  "type": "text",
+                  "value": " and "
+                },
+                {
+                  "type": "code",
+                  "value": "UNAVAILABLE"
                 },
                 {
                   "type": "text",
@@ -558,42 +332,11 @@
       ]
     },
     {
-      "name": "Direction",
-      "kind": "type",
-      "summary": [],
-      "throws": [],
-      "signature": "type Direction = \"asc\" | \"desc\""
-    },
-    {
-      "name": "Filter",
-      "kind": "type",
-      "summary": [
-        {
-          "type": "paragraph",
-          "spans": [
-            {
-              "type": "text",
-              "value": "Top-level user fields, combined with AND."
-            }
-          ]
-        }
-      ],
-      "throws": [],
-      "signature": "type Filter = Record<\n  string,\n  string | number | boolean | null | RangeFilter\n>"
-    },
-    {
       "name": "Json",
       "kind": "type",
       "summary": [],
       "throws": [],
       "signature": "type Json =\n  | null\n  | boolean\n  | number\n  | string\n  | Json[]\n  | { [key: string]: Json }"
-    },
-    {
-      "name": "MetadataField",
-      "kind": "type",
-      "summary": [],
-      "throws": [],
-      "signature": "type MetadataField = \"id\" | \"createdAt\" | \"updatedAt\""
     },
     {
       "name": "NaruErrorCode",
@@ -628,34 +371,6 @@
       ],
       "throws": [],
       "signature": "type Revision = string & { [revisionBrand]: true }"
-    },
-    {
-      "name": "Sort",
-      "kind": "type",
-      "summary": [],
-      "throws": [],
-      "signature": "type Sort =\n  | readonly [readonly [SortField, Direction]]\n  | readonly [\n      readonly [SortField, Direction],\n      readonly [SortField, Direction],\n    ]"
-    },
-    {
-      "name": "SortField",
-      "kind": "type",
-      "summary": [],
-      "throws": [],
-      "signature": "type SortField = string | { metadata: MetadataField }"
-    },
-    {
-      "name": "TransactionWrite",
-      "kind": "type",
-      "summary": [],
-      "throws": [],
-      "signature": "type TransactionWrite =\n  | {\n      collection: string;\n      set: { condition?: WriteCondition; data: Json; id: string };\n    }\n  | {\n      collection: string;\n      delete: { condition?: WriteCondition; id: string };\n    }"
-    },
-    {
-      "name": "WriteCondition",
-      "kind": "type",
-      "summary": [],
-      "throws": [],
-      "signature": "type WriteCondition = { revision: Revision } | { absent: true }"
     }
   ]
 }

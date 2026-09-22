@@ -50,7 +50,7 @@ export default function MediaDocs() {
           <div className="flex flex-wrap gap-5 text-sm underline underline-offset-4">
             <a href="/media">미디어 라이브러리 열기 →</a>
             <a href="/docs/database">데이터베이스 사용 안내 →</a>
-            <a href="/docs/sdk/1.0.0#Media">Media API →</a>
+            <a href="/docs/sdk/1.0.0#Owner">Media API →</a>
           </div>
         </header>
 
@@ -84,7 +84,7 @@ export default function MediaDocs() {
               <Code>{`const owner = await naru.auth.session();
 
 const image = await owner.media.upload(fileInput.files[0]);
-// → { id, name, contentType, size, url, createdAt, updatedAt }
+// → { url }
 
 await owner.collection("posts").set("hello", {
   title: "안녕하세요",

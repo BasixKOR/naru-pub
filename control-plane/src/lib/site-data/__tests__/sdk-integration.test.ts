@@ -257,13 +257,13 @@ integration("SDK and data API contract", () => {
       id: expect.any(String),
       revision: "r1.1",
       createdAt: expect.any(String),
-      updatedAt: expect.any(String),
     });
     // A write reports the very stamps the read comes back with, so a caller
     // rendering what it just saved never has to invent one.
     const first = await posts.get(added.id);
     expect(first).toEqual({
       ...added,
+      updatedAt: added.createdAt,
       data: {
         title: "한글",
         nested: { value: null },
@@ -281,7 +281,6 @@ integration("SDK and data API contract", () => {
       id: added.id,
       revision: "r1.2",
       createdAt: first.createdAt,
-      updatedAt: expect.any(String),
     });
     const replaced = await posts.get(added.id);
     expect(replaced.createdAt).toBe(first.createdAt);
@@ -290,7 +289,7 @@ integration("SDK and data API contract", () => {
       posts.set(added.id, null, {
         condition: { revision: "r1.1" as typeof first.revision },
       }),
-    ).rejects.toMatchObject({ status: 409, code: "CONFLICT" });
+    ).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(
       posts.delete(added.id, {
         condition: { revision: "r1.1" as typeof first.revision },
@@ -348,7 +347,7 @@ integration("SDK and data API contract", () => {
         filter: { visible: false },
         after: first.nextCursor,
       }),
-    ).rejects.toMatchObject({ status: 400 });
+    ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
     // An empty filter and a null token are the first, unfiltered page.
     const everything = await feed.list({
       filter: {},
@@ -394,7 +393,7 @@ integration("SDK and data API contract", () => {
           },
         },
       ]),
-    ).rejects.toMatchObject({ status: 409, code: "CONFLICT" });
+    ).rejects.toMatchObject({ code: "CONFLICT" });
     expect(await owner.collection("atomic").get("one")).toMatchObject({
       revision: "r1.1",
       data: { original: true },
@@ -414,19 +413,13 @@ integration("SDK and data API contract", () => {
     });
     const file = await owner.media.upload(source);
 
-    expect(file).toMatchObject({
-      id: expect.any(String),
-      name: "contract.txt",
-      contentType: "text/plain",
-      size: source.size,
+    expect(file).toEqual({
       url: expect.stringMatching(/^https:\/\/media\.naru\.pub\//),
-      createdAt: expect.any(String),
-      updatedAt: expect.any(String),
     });
     const row = await db
       .selectFrom("site_data_files")
       .select(["id", "object_key", "status", "size_bytes", "content_type"])
-      .where("id", "=", file.id)
+      .where("object_key", "=", new URL(file.url).pathname.slice(1))
       .executeTakeFirstOrThrow();
     expect(row).toMatchObject({
       status: "ready",
@@ -437,6 +430,41 @@ integration("SDK and data API contract", () => {
       contentLength: source.size,
       contentType: "text/plain",
     });
+  });
+
+  // The library is the control panel's; a website token only adds to it.
+  test("a website token can neither list nor delete media", async () => {
+    const file = await db
+      .selectFrom("site_data_files")
+      .select("id")
+      .where("status", "=", "ready")
+      .executeTakeFirstOrThrow();
+    for (const [method, path] of [
+      ["GET", "_files"],
+      ["DELETE", `_files/${file.id}`],
+    ]) {
+      const response = await nativeFetch(
+        `${origin}/api/data/v1/alice/${path}`,
+        {
+          method,
+          headers: { Origin: origin, Authorization: `Bearer ${accessToken}` },
+        },
+      );
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        error: {
+          code: "ACCESS_DENIED",
+          message: "Website tokens can only upload files.",
+        },
+      });
+    }
+    expect(
+      await db
+        .selectFrom("site_data_files")
+        .select("id")
+        .where("id", "=", file.id)
+        .executeTakeFirst(),
+    ).toBeDefined();
   });
 
   // Public reads are the request a site makes most, and letting a shared cache

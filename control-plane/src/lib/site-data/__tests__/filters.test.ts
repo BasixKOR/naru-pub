@@ -77,9 +77,12 @@ describe("filter validation", () => {
   });
 });
 // The wire form of one sort key.
+// Tests name keys the way cursors do; the wire names timestamps explicitly
+// and has no id key, since ascending id is what no sort at all reads.
 const order = (field: string, direction = "asc") =>
-  JSON.stringify([[sortField(field), direction]]);
-// Tests name keys the way cursors do; the wire names metadata explicitly.
+  field === "id" && direction === "asc"
+    ? undefined
+    : JSON.stringify([[sortField(field), direction]]);
 function sortField(field: string) {
   if (["id", "createdAt", "updatedAt"].includes(field))
     return { metadata: field };

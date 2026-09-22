@@ -54,21 +54,22 @@ function orderByOf(field: unknown): string {
     field && typeof field === "object" && !Array.isArray(field)
       ? (field as Record<string, unknown>).metadata
       : undefined;
+  // The id is not offered: it is already the default order and the final
+  // tie-breaker of every other one.
   if (
     Object.keys(field ?? {}).length !== 1 ||
-    typeof metadata !== "string" ||
-    !Object.hasOwn(COLUMNS, metadata)
+    (metadata !== "createdAt" && metadata !== "updatedAt")
   )
     throw new DataError(
       400,
-      "Metadata sort fields are { metadata: id, createdAt or updatedAt }.",
+      "Metadata sort fields are { metadata: createdAt or updatedAt }.",
     );
   return metadata;
 }
 
 /** One wire form: a JSON array of one or two [field, direction] pairs. The
- * document id is always the final stable tie-breaker, so it may only be named
- * on its own. Without a sort a query reads in id order. */
+ * document id is always the final stable tie-breaker, and without a sort a
+ * query reads in id order. */
 export function sortings(raw?: string): Sort[] {
   if (raw === undefined) return [sorting()];
   let input: unknown;
@@ -94,11 +95,6 @@ export function sortings(raw?: string): Sort[] {
   );
   if (new Set(result.map((item) => item.orderBy)).size !== result.length)
     throw new DataError(400, "Sort fields must be unique.");
-  if (result.length > 1 && result.some((item) => item.orderBy === "id"))
-    throw new DataError(
-      400,
-      "The document id is already the final tie-breaker.",
-    );
   return result;
 }
 

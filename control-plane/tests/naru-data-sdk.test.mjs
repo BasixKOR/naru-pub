@@ -244,7 +244,8 @@ test("errors have semantic codes and transport details stay diagnostic", async (
       posts.set("one", {}, { condition: { revision: revision(1) } }),
       (error) => {
         assert.ok(error instanceof NaruError);
-        assert.equal(error.status, 409);
+        // Status is the server's detail, not part of the error.
+        assert.equal("status" in error, false);
         assert.equal(error.code, "CONFLICT");
         assert.equal(error.retryable, false);
         assert.equal(error.message, "Document version does not match.");
@@ -265,20 +266,26 @@ test("errors have semantic codes and transport details stay diagnostic", async (
     // A challenge or proxy page can answer 200; it is not an empty result.
     respond(() => new Response("<html>checking your browser</html>"));
     await assert.rejects(posts.get("one"), {
-      status: 200,
       code: "UNAVAILABLE",
+      retryable: true,
+      message: "The data API did not answer with JSON (HTTP 200).",
     });
     respond(() => Response.json(null));
     await assert.rejects(posts.list(), { code: "UNAVAILABLE" });
     respond(() => new Response("<html>bad gateway</html>", { status: 502 }));
     await assert.rejects(posts.get("one"), {
-      status: 502,
       code: "UNAVAILABLE",
+      message: "Database request failed (HTTP 502).",
     });
     respond(() => {
       throw new TypeError("offline");
     });
-    await assert.rejects(posts.get("one"), { code: "UNAVAILABLE" });
+    // The platform's own Error cause, for a developer reading the console.
+    await assert.rejects(posts.get("one"), (error) => {
+      assert.equal(error.code, "UNAVAILABLE");
+      assert.equal(error.cause.message, "offline");
+      return true;
+    });
     const controller = new AbortController();
     respond(({ signal }) => {
       assert.equal(signal, controller.signal);
@@ -627,7 +634,8 @@ async function upload(file, images) {
 test("upload authorizes, sends the bytes straight to storage, then finalizes", async () => {
   const file = new File(["hello"], "note.txt", { type: "text/plain" });
   const { calls, stored, declared } = await upload(file);
-  assert.deepEqual(stored, { id: "f1", url: "https://media" });
+  // Only where the file is served; the rest is the media library's.
+  assert.deepEqual(stored, { url: "https://media" });
   assert.deepEqual(
     calls.map(({ method, url }) => [method, url.href]),
     [
@@ -723,7 +731,8 @@ test("a failed transfer is reported and not finalized", async () => {
     );
     await assert.rejects(
       owner.media.upload(new Blob(["x"], { type: "text/plain" })),
-      { status: 403 },
+      // Uploading again authorizes afresh, so this is worth retrying.
+      { code: "UNAVAILABLE", retryable: true },
     );
     assert.equal(calls.length, 2);
   });

@@ -150,6 +150,13 @@ export async function executeMedia(command: MediaCommand) {
   if (!admin) throw new DataError(403, "Owner access required.");
   if (command.adminUserId !== undefined && command.adminUserId !== owner.id)
     throw new DataError(403, "Permission denied.");
+  // A website uploads; listing and deleting the library is the control
+  // panel's. A copied website token then cannot empty the library.
+  const uploading =
+    (command.method === "POST" && command.path.length === 0) ||
+    (command.method === "PUT" && command.path.length === 1);
+  if (allowedIds !== undefined && !uploading)
+    throw new DataError(403, "Website tokens can only upload files.");
   // Recorded only now that the caller is known to be the owner. Uploading or
   // removing a file is the owner using the supporter storage; serving one back
   // is a visitor reading their site, and a refused request is neither.

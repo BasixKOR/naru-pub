@@ -1,14 +1,14 @@
 /** Naru Data SDK 1.0.0. This release is still under active development. */
 
-/** A Naru operation that could not be completed. */
+const RETRYABLE = new Set(["RATE_LIMITED", "UNAVAILABLE"]);
+
+/** A Naru operation that could not be completed. Only the SDK creates these. */
 export class NaruError extends Error {
-  constructor(message, code, { status, retryable = false, cause } = {}) {
-    super(message);
+  constructor(message, code, cause) {
+    super(message, cause === undefined ? undefined : { cause });
     this.name = "NaruError";
-    this.status = status;
     this.code = code;
-    this.retryable = retryable;
-    if (cause !== undefined) this.cause = cause;
+    this.retryable = RETRYABLE.has(code);
   }
 }
 
@@ -34,8 +34,6 @@ const errorCode = (status, code) => {
   if (status >= 500) return "UNAVAILABLE";
   return "INVALID_REQUEST";
 };
-const RETRYABLE = new Set(["RATE_LIMITED", "UNAVAILABLE"]);
-
 const CONTROL_PLANE = "https://naru.pub";
 const SITE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const ID = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -103,10 +101,7 @@ async function request(url, { method = "GET", body, token, signal, touches }) {
     });
   } catch (cause) {
     if (cause?.name === "AbortError") throw cause;
-    throw new NaruError("Naru is unavailable.", "UNAVAILABLE", {
-      retryable: true,
-      cause,
-    });
+    throw new NaruError("Naru is unavailable.", "UNAVAILABLE", cause);
   } finally {
     // Also when the response was lost: the write may still have landed.
     if (method !== "GET")
@@ -114,23 +109,19 @@ async function request(url, { method = "GET", body, token, signal, touches }) {
         writtenUntil.set(path, Date.now() + PUBLIC_CACHE_MS);
   }
   const result = await response.json().catch(() => null);
-  if (!response.ok) {
-    const code = errorCode(response.status, result?.error?.code);
+  if (!response.ok)
     throw new NaruError(
       typeof result?.error?.message === "string"
         ? result.error.message
         : `Database request failed (HTTP ${response.status}).`,
-      code,
-      { status: response.status, retryable: RETRYABLE.has(code) },
+      errorCode(response.status, result?.error?.code),
     );
-  }
   // A proxy or challenge page can answer 200 with HTML. Handing that back as
   // an empty result would make a missing document look like a present one.
   if (result === null || typeof result !== "object")
     throw new NaruError(
-      "The data API did not answer with JSON.",
+      `The data API did not answer with JSON (HTTP ${response.status}).`,
       "UNAVAILABLE",
-      { status: response.status, retryable: true },
     );
   return result;
 }
@@ -349,23 +340,21 @@ function owner(context, token, expiresAt) {
           });
         } catch (cause) {
           if (cause?.name === "AbortError") throw cause;
-          throw new NaruError("File upload failed.", "UNAVAILABLE", {
-            retryable: true,
-            cause,
-          });
+          throw new NaruError("File upload failed.", "UNAVAILABLE", cause);
         }
-        // An upload that never finishes is removed by the server within an hour.
+        // An upload that never finishes is removed by the server within an
+        // hour. Storage refusing the bytes (an expired authorization, say) is
+        // fixed by uploading again, which authorizes afresh.
         if (!upload.ok)
           throw new NaruError(
             `File upload failed (HTTP ${upload.status}).`,
             "UNAVAILABLE",
-            { status: upload.status, retryable: upload.status >= 500 },
           );
         const finished = await send(
           `${root}/_files/${segment(authorization.id)}`,
           { method: "PUT", body: {}, signal, touches: [] },
         );
-        return finished.file;
+        return { url: finished.file.url };
       },
     }),
     /** Forgets the session here first, then asks Naru to revoke it. */

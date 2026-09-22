@@ -58,18 +58,9 @@ const TIMESTAMPS = [
   sql<Date>`created_at`.as("createdAt"),
   sql<Date>`updated_at`.as("updatedAt"),
 ];
-/** Every accepted write reports the version and stamps conditional writes and
- * optimistic rendering both need, so a caller never has to guess a timestamp. */
-const WRITTEN = ["version", "created_at", "updated_at"] as const;
-const written = (
-  id: string,
-  row: { version: number; created_at: Date; updated_at: Date },
-) => ({
-  id,
-  version: row.version,
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-});
+/** Every accepted write reports the version a later conditional write quotes
+ * and the creation stamp a caller renders, so it never guesses a timestamp. */
+const WRITTEN = ["version", "created_at"] as const;
 
 /** `0` asserts the document does not exist yet, so a create cannot clobber. */
 function expectedVersion(value: unknown) {
@@ -507,7 +498,6 @@ export async function executeData(command: DataCommand) {
       id,
       version: row.version,
       createdAt: row.created_at,
-      updatedAt: row.updated_at,
     };
   });
 }
@@ -554,22 +544,12 @@ export async function executeBatch(command: DataCommand) {
       .selectAll()
       .where("user_id", "=", owner.id)
       .execute();
-    const results: {
-      id?: string;
-      version?: number;
-      createdAt?: Date;
-      updatedAt?: Date;
-      success?: true;
-    }[] = [];
     for (const raw of operations) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw))
         throw new DataError(400, "Invalid batch operation.");
       const operation = raw as Record<string, unknown>;
       const collectionName = name(operation.collection);
-      const adding = operation.type === "add";
-      if (adding && Object.hasOwn(operation, "id"))
-        throw new DataError(400, "add assigns the document ID itself.");
-      const id = adding ? randomUUID() : name(operation.id);
+      const id = name(operation.id);
       const collection = collectionRows.find(
         (row) => row.name === collectionName,
       );
@@ -583,9 +563,6 @@ export async function executeBatch(command: DataCommand) {
         );
       authorize(collection.write_access, true);
       const expected = expectedVersion(operation.ifVersion);
-      // A fresh ID has no version to quote, so the two cannot be combined.
-      if (adding && expected !== undefined)
-        throw new DataError(400, "add cannot take ifVersion.");
       // The batch holds the owner lock, so a read here cannot go stale before
       // the write that follows it.
       if (expected !== undefined)
@@ -606,17 +583,10 @@ export async function executeBatch(command: DataCommand) {
           .where("collection_id", "=", collection.id)
           .where("id", "=", id)
           .execute();
-        results.push({ success: true });
         continue;
       }
-      if (
-        !(operation.type === "set" || adding) ||
-        !Object.hasOwn(operation, "data")
-      )
-        throw new DataError(
-          400,
-          "Batch operations must be add, set or delete.",
-        );
+      if (operation.type !== "set" || !Object.hasOwn(operation, "data"))
+        throw new DataError(400, "Batch operations must be set or delete.");
       const encoded = JSON.stringify(operation.data);
       const size = Buffer.byteLength(encoded);
       if (size > MAX_DOCUMENT_BYTES)
@@ -627,18 +597,7 @@ export async function executeBatch(command: DataCommand) {
         data: sql`${encoded}::jsonb`,
         size_bytes: size,
       });
-      if (adding) {
-        // Never overwrite a document, even in the event of an ID collision.
-        const inserted = await insert
-          .onConflict((oc) => oc.columns(["collection_id", "id"]).doNothing())
-          .returning(WRITTEN)
-          .executeTakeFirst();
-        if (!inserted)
-          throw new DataError(409, "Document ID collision. Retry creation.");
-        results.push(written(id, inserted));
-        continue;
-      }
-      const row = await insert
+      await insert
         .onConflict((oc) =>
           oc.columns(["collection_id", "id"]).doUpdateSet({
             data: sql`${encoded}::jsonb`,
@@ -647,9 +606,7 @@ export async function executeBatch(command: DataCommand) {
             version: sql`site_data_documents.version + 1`,
           }),
         )
-        .returning(WRITTEN)
-        .executeTakeFirstOrThrow();
-      results.push(written(id, row));
+        .execute();
     }
     const usage = await tx
       .selectFrom("site_data_documents as d")
@@ -669,6 +626,7 @@ export async function executeBatch(command: DataCommand) {
         "Site database quota exceeded.",
         "QUOTA_EXCEEDED",
       );
-    return { results };
+    // The SDK resolves a transaction with nothing, so nothing is reported.
+    return { success: true };
   });
 }

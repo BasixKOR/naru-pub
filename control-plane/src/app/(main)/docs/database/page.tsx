@@ -237,8 +237,7 @@ const next = await posts.list({ ...query, size: 20, after: page.nextCursor });`}
                 방문자는 <code>naru.public</code>으로 <code>add</code>만 할 수
                 있고, <code>set</code>과 <code>delete</code>는{" "}
                 <a href="#owner">관리자 로그인</a> 후 <code>owner</code>로
-                부릅니다. 쓰기는{" "}
-                <code>{"{ id, revision, createdAt, updatedAt }"}</code>를
+                부릅니다. 쓰기는 <code>{"{ id, revision, createdAt }"}</code>를
                 돌려줍니다.
               </p>
               <p>

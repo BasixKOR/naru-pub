@@ -62,7 +62,7 @@ Create a collection in the control plane, choose its permissions, then use this 
 
 A page served from `<login>.naru.pub` belongs to that site, so `createNaru()` needs nothing else. A custom domain or local page uses `createNaru({ site: "login-name" })`. Every collection and authentication operation then comes from that one client.
 
-`get` returns `{ id, data, revision, createdAt, updatedAt }`; a missing document throws `NaruError` with `code: "NOT_FOUND"`. `set` replaces the whole document or creates it if absent. `add` generates an opaque ID without requiring read permission. `add` and `set` return `{ id, revision, createdAt, updatedAt }`, so a caller rendering what it just saved uses the server's own timestamps rather than the browser clock. `delete` is idempotent and resolves with nothing. JSON null is stored as a value, not treated as deletion. Render user data with `textContent`, not `innerHTML`.
+`get` returns `{ id, data, revision, createdAt, updatedAt }`; a missing document throws `NaruError` with `code: "NOT_FOUND"`. `set` replaces the whole document or creates it if absent. `add` generates an opaque ID without requiring read permission. `add` and `set` return `{ id, revision, createdAt }`, so a caller rendering what it just saved uses the server's own timestamp rather than the browser clock. `delete` is idempotent and resolves with nothing. JSON null is stored as a value, not treated as deletion. Render user data with `textContent`, not `innerHTML`.
 
 SDK declarations are available alongside the module at `/sdk/1/naru-data.d.ts`. The SDK pins `https://naru.pub` as its control-plane origin, even when bundled/copied. Naru's own tests point it at a loopback server through an undocumented `controlPlaneOrigin` option, which accepts nothing else.
 
@@ -162,14 +162,14 @@ Website root: `/api/data/v1/:site`. Control-plane root: `/api/account/database` 
 | GET    | `/:collection/:id`                       | `{ document }`                                                    |
 | PUT    | `/:collection/:id?ifRevision=&ifAbsent=` | `{ data }` replaces document; returns the write result            |
 | DELETE | `/:collection/:id?ifRevision=`           | `{ success: true }`                                               |
-| POST   | `/_batch`                                | Owner-only atomic `{ operations }`; returns `{ results }`         |
-| GET    | `/_files?size=50&after=`                 | Owner-only `{ files, nextCursor }`, newest first                  |
+| POST   | `/_batch`                                | Owner-only atomic set/delete `{ operations }`                     |
+| GET    | `/_files?size=50&after=`                 | Control panel only: `{ files, nextCursor }`, newest first         |
 | GET    | `/_files?usage=1`                        | Control panel only: `{ usage }`                                   |
 | POST   | `/_files`                                | Owner-only upload authorization                                   |
 | PUT    | `/_files/:id`                            | Owner-only finalize; verifies the stored bytes                    |
-| DELETE | `/_files/:id`                            | `{ success: true }`                                               |
+| DELETE | `/_files/:id`                            | Control panel only: `{ success: true }`                           |
 
-A public write result is `{ id, revision, createdAt, updatedAt }`; `_batch` accepts the SDK's semantic set/delete writes and returns an ignored internal result payload. A list accepts `filter` and `sort` (URL-encoded JSON, exactly as passed to the SDK), `size`, `after` and `includeTotal=1`. An upload authorization takes `{ name, contentType, size }` and returns `{ id, uploadUrl, headers }`: PUT the bytes to `uploadUrl` with those headers, then finalize with `PUT /_files/:id`. A file is `{ id, name, contentType, size, url, createdAt, updatedAt }`. The public route does not accept `PATCH`.
+A public write result is `{ id, revision, createdAt }`. `_batch` takes `set` and `delete` operations only (a server-assigned id is `add`'s, outside transactions) and reports nothing beyond success. A website token may only authorize and finalize uploads; the media library is listed and deleted from the control panel. A list accepts `filter` and `sort` (URL-encoded JSON, exactly as passed to the SDK), `size`, `after` and `includeTotal=1`. An upload authorization takes `{ name, contentType, size }` and returns `{ id, uploadUrl, headers }`: PUT the bytes to `uploadUrl` with those headers, then finalize with `PUT /_files/:id`. The SDK returns only a file's `url`; the control panel's library reads `{ id, name, contentType, size, url, createdAt, updatedAt }`. The public route does not accept `PATCH`.
 
 All JSON request bodies require `Content-Type: application/json`. Website errors return `{ error: { code, message } }`, where `code` is one of the v1 codes in the [SDK reference](sdk-v1-api.md#errors-and-cancellation); the server sets it, and the HTTP status is diagnostic. A `DataError` names its code only where the status alone would be wrong (a failed condition and a full quota are both 409, for instance); otherwise 401, 403, 404, 429 and 5xx map to `AUTH_REQUIRED`, `ACCESS_DENIED`, `NOT_FOUND`, `RATE_LIMITED` and `UNAVAILABLE`, and any other status to `INVALID_REQUEST`. The v1 code list is closed: a new code needs a new protocol version, and the SDK reads a code it does not know by its status. The control-plane root keeps `{ error }` with a plain message. Public preflight needs no authentication. Errors, writes, and authenticated reads are not cached; anonymous reads from `world`-readable collections may use the short shared cache described below.
 
@@ -320,7 +320,7 @@ const first = await posts.list({ ...query, includeTotal: true });
 const next = await posts.list({ ...query, after: first.nextCursor });
 ```
 
-`sort` is always a list of one or two `[field, direction]` pairs. User fields are named directly; metadata uses `{ metadata: "id" | "createdAt" | "updatedAt" }`. `direction` is `asc` or `desc`. The document ID is appended automatically as the final tie-breaker. Without `sort`, a list reads in ID order.
+`sort` is always a list of one or two `[field, direction]` pairs. User fields are named directly; timestamps use `{ metadata: "createdAt" | "updatedAt" }`. `direction` is `asc` or `desc`. The document ID is appended automatically as the final tie-breaker. Without `sort`, a list reads in ID order.
 
 Metadata timestamp ties use document ID in the last direction. JSON-field values use PostgreSQL JSONB ordering; missing fields sort at the same position as JSON null, followed by strings and then numbers. The metadata orders have composite collection/time/ID indexes; JSON-field sorting scans the narrowed collection and has no per-field index.
 

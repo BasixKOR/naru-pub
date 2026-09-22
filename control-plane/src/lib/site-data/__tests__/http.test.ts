@@ -15,7 +15,6 @@ beforeEach(() => {
     id: "one",
     version: 1,
     createdAt: new Date(0),
-    updatedAt: new Date(0),
   });
 });
 

@@ -1,5 +1,9 @@
 /** Browser SDK for data owned by one Naru site. @packageDocumentation */
 
+// Only the names an application writes itself are exported: every exported
+// name is one v1 can never rename. The rest are spelled out where they are
+// used, so the reference shows them in place.
+
 export type Json =
   | null
   | boolean
@@ -21,11 +25,10 @@ export interface Document<T = Json> {
   revision: Revision;
 }
 
-export interface WriteResult {
-  id: string;
-  revision: Revision;
-  createdAt: string;
-  updatedAt: string;
+export interface Page<T = Json> {
+  documents: Document<T>[];
+  nextCursor: string | null;
+  totalCount?: number;
 }
 
 /**
@@ -43,101 +46,111 @@ export type NaruErrorCode =
   | "REDIRECT_NOT_REGISTERED"
   | "UNAVAILABLE";
 
+/** A Naru operation that could not be completed. Check it with `instanceof`. */
 export class NaruError extends Error {
+  private constructor();
   readonly code: NaruErrorCode;
+  /** True for `RATE_LIMITED` and `UNAVAILABLE`. */
   readonly retryable: boolean;
-  /** Diagnostic only; application behavior should depend on `code`. */
-  readonly status?: number;
-  readonly cause?: unknown;
-  constructor(
-    message: string,
-    code: NaruErrorCode,
-    options?: { status?: number; retryable?: boolean; cause?: unknown },
-  );
-}
-
-export interface RequestOptions {
-  signal?: AbortSignal;
-}
-export type WriteCondition = { revision: Revision } | { absent: true };
-export interface WriteOptions extends RequestOptions {
-  condition?: WriteCondition;
-}
-
-export interface RangeFilter {
-  gt?: string | number;
-  gte?: string | number;
-  lt?: string | number;
-  lte?: string | number;
-}
-
-/** Top-level user fields, combined with AND. */
-export type Filter = Record<
-  string,
-  string | number | boolean | null | RangeFilter
->;
-export type Direction = "asc" | "desc";
-export type MetadataField = "id" | "createdAt" | "updatedAt";
-export type SortField = string | { metadata: MetadataField };
-export type Sort =
-  | readonly [readonly [SortField, Direction]]
-  | readonly [readonly [SortField, Direction], readonly [SortField, Direction]];
-
-export interface ListOptions extends RequestOptions {
-  filter?: Filter;
-  sort?: Sort;
-  /** Default 50; maximum 100. */
-  size?: number;
-  /** Opaque cursor returned by the preceding page. */
-  after?: string | null;
-  includeTotal?: boolean;
-}
-
-export interface Page<T> {
-  documents: Document<T>[];
-  nextCursor: string | null;
-  totalCount?: number;
 }
 
 export interface PublicCollection<T = Json> {
-  get(id: string, options?: RequestOptions): Promise<Document<T>>;
-  list(options?: ListOptions): Promise<Page<T>>;
-  add(data: T, options?: RequestOptions): Promise<WriteResult>;
+  get(id: string, options?: { signal?: AbortSignal }): Promise<Document<T>>;
+  list(options?: {
+    /** Top-level user fields, combined with AND. */
+    filter?: Record<
+      string,
+      | string
+      | number
+      | boolean
+      | null
+      | {
+          gt?: string | number;
+          gte?: string | number;
+          lt?: string | number;
+          lte?: string | number;
+        }
+    >;
+    /** One or two keys: a user field by name, or a timestamp as metadata. */
+    sort?:
+      | readonly [
+          readonly [
+            string | { metadata: "createdAt" | "updatedAt" },
+            "asc" | "desc",
+          ],
+        ]
+      | readonly [
+          readonly [
+            string | { metadata: "createdAt" | "updatedAt" },
+            "asc" | "desc",
+          ],
+          readonly [
+            string | { metadata: "createdAt" | "updatedAt" },
+            "asc" | "desc",
+          ],
+        ];
+    /** Default 50; maximum 100. */
+    size?: number;
+    /** Opaque cursor returned by the preceding page. */
+    after?: string | null;
+    includeTotal?: boolean;
+    signal?: AbortSignal;
+  }): Promise<Page<T>>;
+  add(
+    data: T,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ id: string; revision: Revision; createdAt: string }>;
 }
 
 export interface OwnerCollection<T = Json> extends PublicCollection<T> {
   /** Replaces the whole document or creates it. */
-  set(id: string, data: T, options?: WriteOptions): Promise<WriteResult>;
+  set(
+    id: string,
+    data: T,
+    options?: {
+      condition?: { revision: Revision } | { absent: true };
+      signal?: AbortSignal;
+    },
+  ): Promise<{ id: string; revision: Revision; createdAt: string }>;
   /** Deleting a missing document succeeds unless a condition was supplied. */
-  delete(id: string, options?: WriteOptions): Promise<void>;
+  delete(
+    id: string,
+    options?: {
+      condition?: { revision: Revision } | { absent: true };
+      signal?: AbortSignal;
+    },
+  ): Promise<void>;
 }
-
-export interface Media {
-  id: string;
-  name: string;
-  contentType: string;
-  size: number;
-  url: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export type TransactionWrite =
-  | {
-      collection: string;
-      set: { id: string; data: Json; condition?: WriteCondition };
-    }
-  | { collection: string; delete: { id: string; condition?: WriteCondition } };
 
 export interface Owner {
   collection<T = Json>(name: string): OwnerCollection<T>;
   /** Commits every write or none. */
   transaction(
-    writes: readonly TransactionWrite[],
-    options?: RequestOptions,
+    writes: readonly (
+      | {
+          collection: string;
+          set: {
+            id: string;
+            data: Json;
+            condition?: { revision: Revision } | { absent: true };
+          };
+        }
+      | {
+          collection: string;
+          delete: {
+            id: string;
+            condition?: { revision: Revision } | { absent: true };
+          };
+        }
+    )[],
+    options?: { signal?: AbortSignal },
   ): Promise<void>;
   media: {
-    upload(file: File | Blob, options?: RequestOptions): Promise<Media>;
+    /** Stores a file publicly. Large photos may be shrunk first. */
+    upload(
+      file: File | Blob,
+      options?: { signal?: AbortSignal },
+    ): Promise<{ url: string }>;
   };
   signOut(): Promise<void>;
 }
@@ -154,3 +167,5 @@ export interface NaruClient {
 
 /** Creates a client bound to one site. */
 export function createNaru(options?: { site?: string }): NaruClient;
+
+export {};

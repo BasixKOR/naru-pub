@@ -46,7 +46,8 @@ The blog tests exercise public browsing/guestbook and admin draft/publishing flo
   and `auth`; an owner has `collection()`, `transaction()`, `media.upload()` and
   `signOut()`. Server
   metadata is camelCase (`createdAt`/`updatedAt`), `add` and `set` return
-  `{ id, revision, createdAt, updatedAt }`, `sort` is always a list of
+  `{ id, revision, createdAt }`, `upload` returns `{ url }`, only the names an
+  application writes itself are exported, `sort` is always a list of
   `[field, direction]` pairs, `list` takes flat `size`/`after`/`includeTotal`,
   and pagination uses opaque cursors. Errors carry one of nine closed v1 codes,
   set by the server. Anything added later is added to the server contract too,

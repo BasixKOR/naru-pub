@@ -10,7 +10,6 @@ import { setupTestDatabase, teardownTestDatabase } from "./test-database";
 const writeStamps = (version: number) => ({
   version,
   createdAt: expect.any(Date),
-  updatedAt: expect.any(Date),
 });
 // Opt in against a dedicated disposable database, never the developer's app DB.
 const integration =
@@ -241,10 +240,9 @@ integration("site database integration", () => {
       },
       { type: "set", collection: "batched", id: "two", data: { title: "c" } },
     );
-    expect(applied.results).toEqual([
-      { id: "one", ...writeStamps(2) },
-      { id: "two", ...writeStamps(1) },
-    ]);
+    // The SDK resolves with nothing, so the server reports nothing.
+    expect(applied).toEqual({ success: true });
+    expect((await call("GET", ["batched", "one"])).document!.version).toBe(2);
     expect((await call("GET", ["batched", "one"])).document!.data).toEqual({
       title: "b",
     });
@@ -276,23 +274,11 @@ integration("site database integration", () => {
       await expect(
         batch({ type, collection: "batched", id: "one", data: {} }),
       ).rejects.toMatchObject({ status: 400 });
-    // add assigns server IDs, so a batch no longer has to mint its own.
-    const created = await batch(
-      { type: "add", collection: "batched", data: { title: "g" } },
-      { type: "add", collection: "batched", data: { title: "h" } },
-    );
-    expect(created.results).toEqual([
-      { id: expect.stringMatching(/^[0-9a-f-]{36}$/), ...writeStamps(1) },
-      { id: expect.stringMatching(/^[0-9a-f-]{36}$/), ...writeStamps(1) },
-    ]);
-    expect(created.results[0].id).not.toBe(created.results[1].id);
-    expect(
-      (await call("GET", ["batched", created.results[0].id!])).document!.data,
-    ).toEqual({ title: "g" });
+    // Creating with a server-assigned id is add(), outside transactions.
     for (const operation of [
+      { type: "add", collection: "batched", data: {} },
       { type: "add", collection: "batched", id: "one", data: {} },
-      { type: "add", collection: "batched", data: {}, ifVersion: 1 },
-      { type: "add", collection: "batched" },
+      { type: "set", collection: "batched", data: {} },
     ])
       await expect(batch(operation)).rejects.toMatchObject({ status: 400 });
   });

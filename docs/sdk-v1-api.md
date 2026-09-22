@@ -98,8 +98,9 @@ interface Page<T> {
 
 Filters are ANDed predicates on top-level user fields. A value is either scalar
 equality or a range with `gt`, `gte`, `lt`, and/or `lte`. Sorting accepts one or
-two `[field, "asc" | "desc"]` entries. User fields are strings; metadata fields
-must be explicit objects such as `{ metadata: "createdAt" }`. `size` is 1–100
+two `[field, "asc" | "desc"]` entries. User fields are strings; the timestamps
+are `{ metadata: "createdAt" }` or `{ metadata: "updatedAt" }`. Without `sort`,
+and after the last key, documents are in ID order. `size` is 1–100
 and defaults to 50. `totalCount` is returned only when `includeTotal` was
 requested.
 
@@ -144,7 +145,7 @@ await owner.signOut();
 owner = null;
 ```
 
-`upload` returns `{ id, name, contentType, size, url, createdAt, updatedAt }`.
+`upload` returns `{ url }`, the file's public address.
 The SDK may resize supported images before upload. The website SDK deliberately
 does not list or delete media; owners do that in Naru's media library. Sign-out
 forgets the tab's session before requesting remote revocation.
@@ -167,11 +168,17 @@ SDK failures are `NaruError` instances. Application logic should use the stable
 | `UNAVAILABLE`             | The service, network, or response is temporarily unusable.    |
 
 `error.retryable` is the SDK's retry hint: true for `RATE_LIMITED` and
-`UNAVAILABLE`. `error.status` and `error.message` are
-diagnostic and may change. Passing an `AbortSignal` cancels the request and
+`UNAVAILABLE`. `error.message` is diagnostic and may change; a network
+failure's original error is the standard `error.cause`. Only the SDK creates
+`NaruError`s; check them with `instanceof`. Passing an `AbortSignal` cancels the request and
 rejects with the platform's native `AbortError`, not `NaruError`.
 
 ## Compatibility guarantees
+
+The declarations export only what an application names itself: `createNaru`,
+`NaruError`, `NaruErrorCode`, `NaruClient`, `Owner`, `PublicCollection`,
+`OwnerCollection`, `Document`, `Page`, `Revision` and `Json`. Option and result
+shapes are written out in place.
 
 Naru v1 guarantees the public TypeScript shapes and behavior described here:
 

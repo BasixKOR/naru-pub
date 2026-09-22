@@ -141,7 +141,7 @@
       const source = await photo(4096, 2048);
       const stored = await uploader.media.upload(source);
       check(
-        stored.id === "browser_file",
+        stored.url === `${location.origin}/upload` && !("id" in stored),
         "native upload authorizes, transfers and finalizes",
       );
       const sent = declared[0];

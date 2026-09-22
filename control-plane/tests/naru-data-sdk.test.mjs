@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createNaru, NaruError } from "../public/sdk/1.0.0/naru-data.js";
+import { readFile } from "node:fs/promises";
 
 const collection = (name, options) =>
   createNaru(options).public.collection(name);
@@ -330,6 +331,34 @@ test("a collection this browser wrote is read past the shared cache for ten seco
   } finally {
     Date.now = realNow;
   }
+});
+
+// The SDK bypasses the shared cache for as long as the server lets it keep a
+// public read. If the server's window grows alone, reads stop showing writes.
+test("the SDK's cache bypass lasts exactly the server's shared-cache window", async () => {
+  const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
+  const [sdk, server] = await Promise.all([
+    read("../public/sdk/1.0.0/naru-data.js"),
+    read("../src/lib/site-data/http.ts"),
+  ]);
+  const bypass = /const PUBLIC_CACHE_MS = ([\d_]+);/.exec(sdk)?.[1];
+  const window = /const PUBLIC_READ_CACHE = "[^"]*\bs-maxage=(\d+)\b/.exec(
+    server,
+  )?.[1];
+  assert.ok(bypass && window, "both constants are where this test expects");
+  assert.equal(Number(bypass.replaceAll("_", "")), Number(window) * 1000);
+});
+
+test("signIn refuses a malformed collection name before leaving the page", async () => {
+  await browser(async ({ storage, location }) => {
+    const before = location.href;
+    await assert.rejects(
+      signIn({ collections: ["posts", "bad name"] }),
+      TypeError,
+    );
+    assert.equal(location.href, before);
+    assert.equal(storage.size, 0);
+  });
 });
 
 test("signIn leaves for approval with a PKCE challenge and no request", async () => {

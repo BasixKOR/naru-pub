@@ -37,6 +37,7 @@ const CONTROL_PLANE = "https://naru.pub";
 const SITE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const ID = /^[a-zA-Z0-9_-]{1,64}$/;
 // A public read may be answered by a shared cache for this long after a write.
+// It must match the server's `s-maxage` (src/lib/site-data/http.ts).
 const PUBLIC_CACHE_MS = 10_000;
 
 // Where requests go: always naru.pub. A page on alice.naru.pub belongs to the
@@ -183,6 +184,7 @@ function documents(root, name, send) {
   });
 }
 
+/** A collection of the site this page belongs to. Nothing is requested yet. */
 function publicDocuments(root, name) {
   const collection = documents(root, name, request);
   return Object.freeze({
@@ -192,7 +194,6 @@ function publicDocuments(root, name) {
   });
 }
 
-/** A collection of the site this page belongs to. Nothing is requested yet. */
 // Photos straight off a phone are several megabytes and thousands of pixels
 // for an image a page shows at a fraction of that. Uploads go straight to
 // object storage, so the browser is the only place to shrink them: before the
@@ -281,9 +282,6 @@ function owner(context, token, expiresAt) {
   return Object.freeze({
     collection: (name) => documents(root, name, send),
     async transaction(writes, { signal } = {}) {
-      const touches = [
-        ...new Set(writes.map((item) => `${root}/${item.collection}`)),
-      ];
       const operations = writes.map(({ collection, set, delete: remove }) => {
         const write = set ?? remove;
         if (!write || Boolean(set) === Boolean(remove))
@@ -298,6 +296,9 @@ function owner(context, token, expiresAt) {
           ...(write.condition ? { condition: write.condition } : {}),
         };
       });
+      const touches = [
+        ...new Set(operations.map((item) => `${root}/${item.collection}`)),
+      ];
       await send(`${root}/_batch`, {
         method: "POST",
         body: { operations },
@@ -376,6 +377,8 @@ const callback = () => location.origin + location.pathname;
  */
 async function signIn(context, collections) {
   const { site, origin } = context;
+  // Checked here so a bad name fails on this page, not on Naru's consent page.
+  collections.forEach(segment);
   const verifier = random();
   const state = random();
   const challenge = base64url(

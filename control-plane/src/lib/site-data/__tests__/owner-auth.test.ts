@@ -544,6 +544,30 @@ integration("website owner authorization", () => {
       .where("id", "=", "alice-session")
       .execute();
   });
+  test("a token row written by code from before renewal is still usable", async () => {
+    // What a traffic rollback would insert: the older code knows neither
+    // column, so the schema has to answer for both or sign-in breaks.
+    const legacy = "l".repeat(43);
+    const collection = await db
+      .selectFrom("site_data_collections")
+      .select("id")
+      .where("user_id", "=", owner)
+      .where("name", "=", "posts")
+      .executeTakeFirstOrThrow();
+    await sql`insert into site_data_access_tokens(hash,client_id,session_id,collection_ids,expires_at)
+      values (${digest(legacy)},${registrationId},'alice-session',${[collection.id]},now() + interval '10 minutes')`.execute(
+      db,
+    );
+    await expect(data(legacy, ["posts"])).resolves.toBeDefined();
+    const stored = await db
+      .selectFrom("site_data_access_tokens")
+      .select(["lifetime_seconds", "issued_at"])
+      .where("hash", "=", digest(legacy))
+      .executeTakeFirstOrThrow();
+    expect(stored.lifetime_seconds).toBe(86400);
+    expect(stored.issued_at.getTime()).toBeLessThanOrEqual(Date.now());
+    await revokeToken(legacy, origin);
+  });
   test("lost domain verification, deleted sessions and removed registrations invalidate access", async () => {
     const access = await token();
     await sql`update custom_domains set verified_at = null`.execute(db);

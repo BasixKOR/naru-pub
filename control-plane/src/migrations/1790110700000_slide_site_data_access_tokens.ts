@@ -11,9 +11,12 @@ export async function up(db: Kysely<any>): Promise<void> {
       c.notNull().defaultTo(sql`now()`),
     )
     .execute();
+  // Defaulted, not just not-null: a traffic rollback leaves this column in
+  // place under code that knows nothing about it, and an owner signing in
+  // through that older code must still get a token row it can insert.
   await db.schema
     .alterTable("site_data_access_tokens")
-    .addColumn("lifetime_seconds", "integer")
+    .addColumn("lifetime_seconds", "integer", (c) => c.defaultTo(86400))
     .execute();
   // Tokens issued before this migration expire within a day, so what remains of
   // their original window is the closest stand-in for the lifetime they carried.

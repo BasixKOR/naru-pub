@@ -39,10 +39,9 @@ const ID = /^[a-zA-Z0-9_-]{1,64}$/;
 // A public read may be answered by a shared cache for this long after a write.
 const PUBLIC_CACHE_MS = 10_000;
 
-// Where requests go. A page on alice.naru.pub belongs to the site alice, so
-// only custom domains and local development need to say which site they are.
-// controlPlaneOrigin is for Naru's own tests against a loopback server.
-function target({ site, controlPlaneOrigin = CONTROL_PLANE } = {}) {
+// Where requests go: always naru.pub. A page on alice.naru.pub belongs to the
+// site alice, so only custom domains and local development say which site.
+function target({ site } = {}) {
   site ||= /^([a-z0-9-]+)\.naru\.pub$/.exec(
     globalThis.location?.hostname ?? "",
   )?.[1];
@@ -50,18 +49,10 @@ function target({ site, controlPlaneOrigin = CONTROL_PLANE } = {}) {
     throw new TypeError(
       "Pass { site: <Naru login name> } when the page is not on <site>.naru.pub.",
     );
-  const origin = new URL(controlPlaneOrigin);
-  const loopback =
-    origin.protocol === "http:" &&
-    ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname);
-  if (origin.origin !== CONTROL_PLANE && !loopback)
-    throw new TypeError(
-      "controlPlaneOrigin must be https://naru.pub or an HTTP loopback origin.",
-    );
   return {
     site,
-    origin: origin.origin,
-    root: `${origin.origin}/api/data/v1/${site}`,
+    origin: CONTROL_PLANE,
+    root: `${CONTROL_PLANE}/api/data/v1/${site}`,
   };
 }
 

@@ -102,23 +102,17 @@ test("a page on <site>.naru.pub needs no site; anywhere else must name one", asy
     // An unfilled config's empty string means the same as leaving it out.
     await collection("posts", { site: "" }).list();
     assert.equal(calls[2].url.pathname, "/api/data/v1/alice/posts");
+    // There is no other server to point it at, whatever options it is given.
+    await collection("posts", {
+      site: "alice",
+      controlPlaneOrigin: "http://localhost:3000",
+    }).list();
+    assert.equal(calls[3].url.origin, "https://naru.pub");
   });
   await browser(
     async () => {
       assert.throws(() => collection("posts"), /site/);
       assert.throws(() => collection("posts", { site: "../bob" }), TypeError);
-      collection("posts", {
-        site: "alice",
-        controlPlaneOrigin: "http://localhost:3000",
-      });
-      assert.throws(
-        () =>
-          collection("posts", {
-            site: "alice",
-            controlPlaneOrigin: "https://evil.example",
-          }),
-        TypeError,
-      );
     },
     { href: "https://alice.example/" },
   );

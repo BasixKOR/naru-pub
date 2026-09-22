@@ -64,7 +64,7 @@ A page served from `<login>.naru.pub` belongs to that site, so `createNaru()` ne
 
 `get` returns `{ id, data, revision, createdAt, updatedAt }`; a missing document throws `NaruError` with `code: "NOT_FOUND"`. `set` replaces the whole document or creates it if absent. `add` generates an opaque ID without requiring read permission. `add` and `set` return `{ id, revision, createdAt, updatedAt }`, so a caller rendering what it just saved uses the server's own timestamps rather than the browser clock. `delete` is idempotent and resolves with nothing. JSON null is stored as a value, not treated as deletion. Render user data with `textContent`, not `innerHTML`.
 
-SDK declarations are available alongside the module at `/sdk/1/naru-data.d.ts`. The SDK pins `https://naru.pub` as its control-plane origin, even when bundled/copied. Naru's own tests point it at a loopback server through an undocumented `controlPlaneOrigin` option, which accepts nothing else.
+SDK declarations are available alongside the module at `/sdk/1/naru-data.d.ts`. The SDK pins `https://naru.pub` as its control-plane origin, even when bundled/copied. It takes no option to change that; Naru's own integration tests redirect its requests to a loopback server in their `fetch` shim instead.
 
 ## Website owner login
 

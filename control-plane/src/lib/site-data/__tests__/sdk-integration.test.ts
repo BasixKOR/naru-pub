@@ -130,10 +130,15 @@ integration("SDK and data API contract", () => {
         $metadata: {},
       };
     });
-    // Node fetch does not add a browser Origin header. Everything else, including
-    // HTTP errors, JSON serialization and response bodies, crosses the socket.
+    // The SDK only ever calls https://naru.pub; here that is this loopback
+    // server. Node fetch does not add a browser Origin header. Everything else,
+    // including HTTP errors, JSON serialization and response bodies, crosses
+    // the socket.
     globalThis.fetch = (input, init) => {
-      if (new URL(String(input)).origin !== origin)
+      const url = new URL(String(input));
+      if (url.origin === "https://naru.pub")
+        input = `${origin}${url.pathname}${url.search}`;
+      else if (url.origin !== origin)
         throw new Error("SDK test attempted nonlocal HTTP");
       const headers = new Headers(init?.headers);
       headers.set("Origin", origin);
@@ -197,7 +202,7 @@ integration("SDK and data API contract", () => {
         configurable: true,
         value: values[name],
       });
-    const sessionKey = `naru:owner:${origin}:alice:${redirectUri}`;
+    const sessionKey = `naru:owner:https://naru.pub:alice:${redirectUri}`;
     storage.set(
       `${sessionKey}:pending`,
       JSON.stringify({
@@ -206,11 +211,7 @@ integration("SDK and data API contract", () => {
         startedAt: Date.now(),
       }),
     );
-    // controlPlaneOrigin is a test-only hook, left out of the public types.
-    naru = createNaru({
-      site: "alice",
-      controlPlaneOrigin: origin,
-    } as { site: string });
+    naru = createNaru({ site: "alice" });
     owner = (await naru.auth.session())!;
     expect(location.href).toBe(redirectUri);
     accessToken = JSON.parse(storage.get(sessionKey)!).accessToken;

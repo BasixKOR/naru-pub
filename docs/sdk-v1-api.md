@@ -13,8 +13,8 @@ const naru = createNaru({ site: "alice" });
 TypeScript declarations are at `https://naru.pub/sdk/1/naru-data.d.ts`.
 
 `/sdk/1/` is the newest 1.x release, so a site importing it gets compatible
-fixes automatically. To pin one exact release instead, import
-`/sdk/1.0.0/naru-data.js`; exact versions never change once released.
+fixes automatically. It is the URL to import: 1.0.0 is still being changed, so
+no exact release is fixed enough to pin yet.
 
 ## Capabilities
 

@@ -125,10 +125,10 @@ export default function DatabaseDocs() {
                 알아냅니다. 연결한 도메인에서는{" "}
                 <code>createNaru({'{ site: "내-로그인-이름" }'})</code>처럼
                 로그인 이름을 넘기세요. <code>/sdk/1/</code>은 호환되는 최신
-                1.x를 가리키므로 수정 사항을 저절로 받습니다. 늘 같은 코드를
-                쓰려면 <code>/sdk/1.0.0/</code>처럼 버전을 고정하세요.{" "}
-                <a href="/sdk/1/naru-data.d.ts">TypeScript 타입 정의</a>도
-                있습니다.
+                1.x를 가리키므로 수정 사항을 저절로 받습니다. 1.0.0은 아직
+                고치는 중이라 고정할 만한 판이 없으니 <code>/sdk/1/</code>을
+                쓰세요. <a href="/sdk/1/naru-data.d.ts">TypeScript 타입 정의</a>
+                도 있습니다.
               </p>
             </Section>
 

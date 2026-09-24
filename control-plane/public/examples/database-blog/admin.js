@@ -3,7 +3,7 @@ import { connect } from "./client.js";
 import { $, message, errorMessage, element, text, date } from "./utils.js";
 import { publishPost } from "./editor.js";
 let db,
-  owner = null,
+  admin = null,
   busy = false,
   cursor,
   listKind = "posts";
@@ -44,19 +44,19 @@ function updateUI() {
     "manage-kind",
     "manage-more",
   ])
-    $(id).disabled = busy || !owner;
+    $(id).disabled = busy || !admin;
   for (const id of ["publish", "save-draft", "delete-post"])
     $(id).disabled ||= !!state.needsReload;
   $("delete-post").disabled =
-    busy || !owner || !state.kind || !!state.needsReload;
+    busy || !admin || !state.kind || !!state.needsReload;
   $("new-post").disabled = busy;
-  $("login").hidden = !!owner;
+  $("login").hidden = !!admin;
   $("login").disabled = busy;
-  $("logout").hidden = !owner;
+  $("logout").hidden = !admin;
   $("logout").disabled = busy;
   for (const id of ["title", "body", "category"]) $(id).readOnly = busy;
-  $("manage-list").disabled = busy || !owner;
-  $("auth").textContent = owner ? "로그인됨" : "주인만 쓸 수 있습니다.";
+  $("manage-list").disabled = busy || !admin;
+  $("auth").textContent = admin ? "로그인됨" : "주인만 쓸 수 있습니다.";
   $("editing").textContent =
     state.kind === "posts"
       ? "공개한 글 고치는 중"
@@ -64,7 +64,7 @@ function updateUI() {
         ? "초안 고치는 중"
         : "새 글";
   $("publish").textContent = state.kind === "posts" ? "저장" : "공개";
-  if (!owner) {
+  if (!admin) {
     $("manage-list").replaceChildren();
     $("manage-more").hidden = true;
   }
@@ -76,7 +76,7 @@ async function run(action) {
   try {
     await action();
   } catch (e) {
-    if (e.code === "AUTH_REQUIRED") owner = null;
+    if (e.code === "AUTH_REQUIRED") admin = null;
     message(errorMessage(e));
   } finally {
     busy = false;
@@ -101,7 +101,7 @@ function clearEditor() {
 }
 async function revisionOf(kind, id) {
   try {
-    return (await owner.collection(kind).get(id)).revision;
+    return (await admin.collection(kind).get(id)).revision;
   } catch (error) {
     if (error.code === "NOT_FOUND") return null;
     throw error;
@@ -114,14 +114,14 @@ function showDocument(doc) {
   $("category").value = text(doc.data.category);
 }
 async function loadList(reset = true) {
-  if (!owner) return;
+  if (!admin) return;
   const kind = $("manage-kind").value;
   if (reset || kind !== listKind) {
     cursor = undefined;
     $("manage-list").replaceChildren();
   }
   listKind = kind;
-  const page = await owner.collection(kind).list({
+  const page = await admin.collection(kind).list({
     sort: [[{ metadata: "updatedAt" }, "desc"]],
     size: 20,
     after: cursor,
@@ -134,7 +134,7 @@ async function loadList(reset = true) {
     button.addEventListener("click", () =>
       run(async () => {
         if (!canLeave()) return;
-        const latest = await owner.collection(kind).get(doc.id);
+        const latest = await admin.collection(kind).get(doc.id);
         const content =
           latest.data &&
           typeof latest.data === "object" &&
@@ -178,13 +178,13 @@ async function refreshAfterWrite(notice) {
     await loadList(true);
     message(notice);
   } catch (e) {
-    if (e.code === "AUTH_REQUIRED") owner = null;
+    if (e.code === "AUTH_REQUIRED") admin = null;
     message(`${notice} 목록은 불러오지 못했습니다. ${errorMessage(e)}`);
   }
 }
 try {
   db = await connect();
-  owner = await db.auth.session();
+  admin = await db.auth.session();
   message("");
 } catch (e) {
   message(errorMessage(e));
@@ -235,8 +235,8 @@ $("login").addEventListener("click", () =>
 $("logout").addEventListener("click", () =>
   run(async () => {
     if (!canLeave()) return;
-    const previous = owner;
-    owner = null;
+    const previous = admin;
+    admin = null;
     clearEditor();
     updateUI();
     try {
@@ -267,10 +267,10 @@ $("new-post").addEventListener("click", () =>
 );
 $("save-draft").addEventListener("click", () =>
   run(async () => {
-    if (!owner) throw new Error("먼저 로그인하세요.");
+    if (!admin) throw new Error("먼저 로그인하세요.");
     if (!$("title").value.trim()) throw new Error("제목을 입력하세요.");
     saveLocal();
-    const saved = await owner.collection("drafts").set(state.id, data(), {
+    const saved = await admin.collection("drafts").set(state.id, data(), {
       condition: state.draftRevision
         ? { revision: state.draftRevision }
         : { absent: true },
@@ -286,12 +286,12 @@ $("save-draft").addEventListener("click", () =>
 $("post-form").addEventListener("submit", (event) => {
   event.preventDefault();
   return run(async () => {
-    if (!owner) throw new Error("먼저 로그인하세요.");
+    if (!admin) throw new Error("먼저 로그인하세요.");
     if (!$("title").value.trim() || !$("body").value.trim())
       throw new Error("제목과 본문을 입력하세요.");
     saveLocal();
     await publishPost(
-      owner,
+      admin,
       state.id,
       data(),
       state.postRevision,
@@ -301,7 +301,7 @@ $("post-form").addEventListener("submit", (event) => {
     // before another save; never pair old editor content with a new revision.
     state.needsReload = true;
     saveLocal();
-    const saved = await owner.collection("posts").get(state.id);
+    const saved = await admin.collection("posts").get(state.id);
     showDocument(saved);
     state.postRevision = saved.revision;
     if (state.kind === "drafts") state.draftRevision = null;
@@ -316,14 +316,14 @@ $("post-form").addEventListener("submit", (event) => {
 });
 $("delete-post").addEventListener("click", () =>
   run(async () => {
-    if (!owner || !state.kind) return;
+    if (!admin || !state.kind) return;
     if (
       !window.confirm(
         `‘${$("title").value}’을(를) 지울까요? 되돌릴 수 없습니다.`,
       )
     )
       return;
-    await owner.collection(state.kind).delete(state.id, {
+    await admin.collection(state.kind).delete(state.id, {
       condition: {
         revision:
           state.kind === "posts" ? state.postRevision : state.draftRevision,

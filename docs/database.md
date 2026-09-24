@@ -31,7 +31,7 @@ Every new collection defaults to `admin` read and `admin` write. Permissions are
 
 Keep drafts in an admin-readable collection. A `published: false` field does not hide a document inside a public-readable collection. For moderation, accept messages into an admin-readable/create-only `submissions` collection and publish approved entries into a public-readable/admin-writable `comments` collection.
 
-Public API calls deliberately ignore cookies. SDK requests always use `credentials: "omit"`. An explicit owner bearer token grants scoped document access after Naru login; invalid or expired credentials never fall back to public access. Control-plane requests use the existing same-origin owner session. Never embed an owner session, password or fixed token in a public site.
+Public API calls deliberately ignore cookies. SDK requests always use `credentials: "omit"`. An explicit owner bearer token grants scoped document access after Naru login; invalid or expired credentials never fall back to public access. Control-plane requests use the existing same-origin admin session. Never embed an admin session, password or fixed token in a public site.
 
 ## Browser SDK
 
@@ -46,7 +46,7 @@ Create a collection in the control plane, choose its permissions, then use this 
   try {
     const { id } = await entries.add({ name: "Visitor", message: "Hello!" });
     const document = await entries.get(id);
-    // set() and delete() require owner access or full public write permission.
+    // set() and delete() require admin access or full public write permission.
     let cursor = null;
     do {
       const page = await entries.list({ size: 20, after: cursor });
@@ -89,27 +89,27 @@ Minimal editor-page wiring:
     try {
       await action();
     } catch (error) {
-      if (error.code === "AUTH_REQUIRED") owner = null;
+      if (error.code === "AUTH_REQUIRED") admin = null;
       status.textContent = error.message;
     }
   }
   // Call early on the callback page: it strips code/state from the address.
-  let owner = await naru.auth.session();
-  document.querySelector("#save").disabled = !owner;
-  document.querySelector("#logout").disabled = !owner;
+  let admin = await naru.auth.session();
+  document.querySelector("#save").disabled = !admin;
+  document.querySelector("#logout").disabled = !admin;
   document.querySelector("#login").onclick = () =>
     run(() => naru.auth.signIn({ collections: ["posts"] }));
   document.querySelector("#save").onclick = () =>
     run(async () => {
-      await owner
+      await admin
         .collection("posts")
         .set("hello", { title: "Hello", body: "My first post" });
       status.textContent = "Published";
     });
   document.querySelector("#logout").onclick = () =>
     run(async () => {
-      const previous = owner;
-      owner = null;
+      const previous = admin;
+      admin = null;
       document.querySelector("#save").disabled = true;
       document.querySelector("#logout").disabled = true;
       await previous.signOut();
@@ -118,13 +118,13 @@ Minimal editor-page wiring:
 </script>
 ```
 
-The site name and the exact callback URL identify the registration; there is no client ID. The requested collections must be a subset of the registration. Handles from `naru.collection()` never use owner credentials; only `owner.collection()` uses owner authority. Tokens permit reading, creating, replacing and deleting documents in those collections, including private documents. They are tied to collection IDs so deleting and recreating a collection does not transfer old grants.
+The site name and the exact callback URL identify the registration; there is no client ID. The requested collections must be a subset of the registration. Handles from `naru.collection()` never use admin credentials; only `admin.collection()` uses admin authority. Tokens permit reading, creating, replacing and deleting documents in those collections, including private documents. They are tied to collection IDs so deleting and recreating a collection does not transfer old grants.
 
 Authentication uses random state and mandatory S256 PKCE. The verifier and state live in tab-scoped sessionStorage for at most ten minutes; authorization codes expire after 60 seconds and are single-use, including concurrent exchanges. The server stores only code/token hashes. Each registered admin page has a control-plane token lifetime of 1-1440 whole minutes (default 1440). Each sign-in issues one opaque admin token capped by this setting, the duration displayed at consent, and the approving Naru session. The platform maximum remains 24 hours.
 
 That lifetime is an idle window rather than a countdown to being signed out mid-edit: an accepted owner request renews the token, so a page in use keeps working. Renewal stops at whichever comes first — seven days after the token was issued, the approving Naru session's own expiry, or a lifetime the registration has since lowered — and never shortens an expiry the token already has. Like a Naru session, a token is only rewritten once it is past the halfway mark, so an active page costs one extra write per half-window. Revocation, registration changes and session deletion end a token immediately, regardless of renewal. Session storage, restoration, and expiry remain SDK implementation details; a website never sees a token deadline.
 
-Control-plane session expiry/deletion, registration removal, token revocation, and domain status are checked on every authenticated data request. Use the control panel to revoke a page's outstanding codes and tokens, or remove its registration to disable future login. `naru.auth.session()` only finishes a sign-in that this tab started with `naru.auth.signIn()`; a page's own `?code=` or `?error=` parameters are left untouched otherwise. `owner.signOut()` clears local credentials before requesting server revocation. An unusable owner session fails with `AUTH_REQUIRED`, and the next `naru.auth.session()` returns null. A network failure is `UNAVAILABLE`. This does not sign out of the Naru control plane. Never share owner authority or load untrusted scripts on an editor page.
+Control-plane session expiry/deletion, registration removal, token revocation, and domain status are checked on every authenticated data request. Use the control panel to revoke a page's outstanding codes and tokens, or remove its registration to disable future login. `naru.auth.session()` only finishes a sign-in that this tab started with `naru.auth.signIn()`; a page's own `?code=` or `?error=` parameters are left untouched otherwise. `admin.signOut()` clears local credentials before requesting server revocation. An unusable admin session fails with `AUTH_REQUIRED`, and the next `naru.auth.session()` returns null. A network failure is `UNAVAILABLE`. This does not sign out of the Naru control plane. Never share admin authority or load untrusted scripts on an editor page.
 
 Authorization approval and registration changes require same-origin owner requests. Token exchange and API access require the registered origin plus the explicit code/verifier or bearer token; CORS never grants authorization. The consent page disallows framing. An origin check cannot prevent use of a stolen bearer token by a non-browser client: scripts running on your editor page can exercise owner privileges while signed in. Use a minimal trusted editor without third-party scripts, avoid unsafe HTML rendering, and set a no-referrer policy on the callback page.
 
@@ -139,7 +139,7 @@ Both are served `no-cache`, so browsers revalidate. `/sdk/1/` is a rewrite in `n
 
 The wire protocol is versioned separately, in the path: `/api/data/v1/:site` and `/api/data-auth/v1/*`. Every 1.x SDK file that was ever served keeps calling these, including copies cached or bundled by sites, so they stay compatible for as long as 1.x is supported: routes, parameters, response shapes and error codes. Breaking server changes need `/api/data/v2/` alongside v1.
 
-The 1.0.0 SDK is deliberately small. Its runtime exports are only `createNaru` and `NaruError`. A client has `collection()` and `auth`; an owner has `collection()`, `batch()`, `media.upload()` and `signOut()`. Media listing and deletion remain in the control panel. Features are added when a site needs them, not in advance.
+The 1.0.0 SDK is deliberately small. Its runtime exports are only `createNaru` and `NaruError`. A client has `collection()` and `auth`; an admin client has `collection()`, `batch()`, `media.upload()` and `signOut()`. Media listing and deletion remain in the control panel. Features are added when a site needs them, not in advance.
 
 During 1.0.0 development the SDK dropped `createDatabase`, per-collection `parse`/`map`, `schemas`, `update` merge patches and `unset`, `count()`, `all()`, string `orderBy` with `direction`, `fresh`, `timeoutMs`, `createRequestChannel`, session events, application schema parsing and response validation, upload progress, image tuning options, and the file `get`, `update` and `usage` methods. The server removed the obsolete public endpoints and options. The SDK still validates JSON values and uses private transport parameters for cache bypass.
 
@@ -164,18 +164,18 @@ Website root: `/api/data/v1/:site`. Control-plane root: `/api/account/database` 
 | GET    | `/:collection/:id`                       | `{ document }`                                                    |
 | PUT    | `/:collection/:id?ifRevision=&ifAbsent=` | `{ data }` replaces document; returns the write result            |
 | DELETE | `/:collection/:id?ifRevision=`           | `{ success: true }`                                               |
-| POST   | `/_batch`                                | Owner-only atomic set/delete `{ operations }`                     |
+| POST   | `/_batch`                                | Admin-only atomic set/delete `{ operations }`                     |
 | GET    | `/_files?size=50&after=`                 | Control panel only: `{ files, nextCursor }`, newest first         |
 | GET    | `/_files?usage=1`                        | Control panel only: `{ usage }`                                   |
-| POST   | `/_files`                                | Owner-only upload authorization                                   |
-| PUT    | `/_files/:id`                            | Owner-only finalize; verifies the stored bytes                    |
+| POST   | `/_files`                                | Admin-only upload authorization                                   |
+| PUT    | `/_files/:id`                            | Admin-only finalize; verifies the stored bytes                    |
 | DELETE | `/_files/:id`                            | Control panel only: `{ success: true }`                           |
 
 A response to an accepted owner request carries `Naru-Owner-Expires`, the renewed expiry as epoch milliseconds, exposed to the page through CORS; the SDK stores it so its own copy stays current. It is additive, so an SDK that ignores it simply holds an expiry no later than the true one. A public write result is `{ id, data, revision, createdAt, updatedAt }`. A delete, alone or batched, refuses an absence condition. `_batch` takes `set` and `delete` operations only (a server-assigned id is `add`'s, outside transactions) and reports nothing beyond success. A website token may only authorize and finalize uploads; the media library is listed and deleted from the control panel. A private `fresh=1` query flag forces a non-cacheable read; it is not an SDK option. A list accepts `filter` and `sort` (URL-encoded JSON, exactly as passed to the SDK), `size`, `after` and `includeTotal=1`. An upload authorization takes `{ name, contentType, size }` and returns `{ id, uploadUrl, headers }`: PUT the bytes to `uploadUrl` with those headers, then finalize with `PUT /_files/:id`. The SDK returns a file's `{ url, name, contentType, size }`; the control panel's library reads `{ id, name, contentType, size, url, createdAt, updatedAt }`. The public route does not accept `PATCH`.
 
 All JSON request bodies require `Content-Type: application/json`. Website errors return `{ error: { code, message } }`, where `code` is one of the v1 codes in the [SDK reference](sdk-v1-api.md#errors-and-cancellation); the server sets it, and the HTTP status is diagnostic. A `DataError` names its code only where the status alone would be wrong (a failed condition and a full quota are both 409, for instance); otherwise 401, 403, 404, 429 and 5xx map to `AUTH_REQUIRED`, `ACCESS_DENIED`, `NOT_FOUND`, `RATE_LIMITED` and `UNAVAILABLE`, and any other status to `INVALID_REQUEST`. The v1 code list is closed: a new code needs a new protocol version, and the SDK reads a code it does not know by its status. The control-plane root keeps `{ error }` with a plain message. Public preflight needs no authentication. Errors, writes, and authenticated reads are not cached; anonymous reads from `world`-readable collections may use the short shared cache described below.
 
-Owner authorization endpoints:
+Administrator authorization endpoints:
 
 | Endpoint                        | Purpose                                                                                                                     |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
@@ -199,20 +199,20 @@ There are at most 20 registrations per site, 20 pending codes and 50 live tokens
 - Documents use JSON values with JavaScript number precision and no significant object key order. Application-visible ordering is defined by Naru, not by database collation.
 - Owner-row locks serialize permission checks, writes, and quota checks across server processes. Reads take no such lock. Deletes free quota; account deletion cascades through collections and documents.
 - A site holds at most 10,000 media files: the byte quota alone does not bound row count, since the smallest accepted file is one byte.
-- Each individual replacement or delete is atomic. `owner.batch()` makes its ID-addressed sets and deletes one atomic server transaction. Writes are last-write-wins when no condition is supplied; `condition.revision` rejects stale writes and `condition.absent` guards creation. There are no realtime subscriptions, offline persistence, custom indexes, arbitrary query expressions, per-document rules, or visitor accounts in v1.
+- Each individual replacement or delete is atomic. `admin.batch()` makes its ID-addressed sets and deletes one atomic server transaction. Writes are last-write-wins when no condition is supplied; `condition.revision` rejects stale writes and `condition.absent` guards creation. There are no realtime subscriptions, offline persistence, custom indexes, arbitrary query expressions, per-document rules, or visitor accounts in v1.
 
 ## File uploads (SDK 1.0.0)
 
-Owner sessions can upload files directly to the `naru-media` R2 bucket. The SDK
+Admin sessions can upload files directly to the `naru-media` R2 bucket. The SDK
 obtains a ten-minute signed upload URL, sends the bytes directly to R2, and asks
 Naru to verify the stored size and content type before returning a ready file.
 Database documents should store `file.url`, not base64 data.
 
 ```js
-const image = await owner.media.upload(fileInput.files[0], {
+const image = await admin.media.upload(fileInput.files[0], {
   signal: abortController.signal,
 });
-await owner.collection("posts").set("hello", {
+await admin.collection("posts").set("hello", {
   title: "Hello",
   coverImage: image.url,
 });
@@ -365,7 +365,7 @@ Equality types match exactly: number 1 differs from string "1"; null matches an 
 
 A shared PostgreSQL GIN `jsonb_path_ops` index automatically supports equality containment candidate lookup; exact per-field JSONB comparisons enforce scalar equality semantics. Existing collection/ID and collection/time/ID indexes support tenant narrowing and metadata ordering. Range predicates and `data.<field>` sorting scan within the collection narrowed by the site, collection, and any equality candidates, so prefer an equality condition alongside a frequently used range where the data model permits it. PostgreSQL chooses its execution plan based on selectivity; an index does not guarantee every query avoids scanning. No user-managed index configuration is needed. The index migration creates no new document data and its rollback only drops the index. Index creation can block writes while building; schedule production migration accordingly for large databases.
 
-Opaque cursors include a SHA-256 fingerprint of normalized filters. Reordering equivalent keys works; changing, adding or dropping a filter invalidates the cursor. Read permissions and owner scopes are checked on each page. Filters are not authorization: publicly readable collections remain readable without filters.
+Opaque cursors include a SHA-256 fingerprint of normalized filters. Reordering equivalent keys works; changing, adding or dropping a filter invalidates the cursor. Read permissions and admin scopes are checked on each page. Filters are not authorization: publicly readable collections remain readable without filters.
 
 ## Extended blog example
 
@@ -373,7 +373,7 @@ Create `posts` (world/admin), `guestbook` (world/create), and **`drafts` (admin/
 
 The public list filters by exact `category`. The editor loads paginated posts/drafts, edits documents while preserving other JSON fields, saves private drafts, publishes, and deletes the selected document after confirmation. Local tab storage preserves the editor through the login redirect; explicit server draft saving persists across sessions. Signing out clears the editor and local draft.
 
-Draft and public copies share an ID. Saving a private draft does not unpublish or change an existing public post. Publication uses `owner.batch()` to write the post and remove its draft atomically; failure preserves the draft and leaves the public post unchanged. Deletion affects only the selected collection. An editor returns the opaque revision it read as `condition.revision` to detect a concurrent change and receive `CONFLICT` instead of overwriting it. Guestbook moderation remains in the control panel.
+Draft and public copies share an ID. Saving a private draft does not unpublish or change an existing public post. Publication uses `admin.batch()` to write the post and remove its draft atomically; failure preserves the draft and leaves the public post unchanged. Deletion affects only the selected collection. An editor returns the opaque revision it read as `condition.revision` to detect a concurrent change and receive `CONFLICT` instead of overwriting it. Guestbook moderation remains in the control panel.
 
 ### Website identity and admin tokens
 
@@ -389,7 +389,7 @@ Consent displays the configured duration and submits that displayed value. Appro
 
 ### SDK 1.0.0 data and error contract
 
-`collection<Post>("posts")` and `owner.collection<Post>("posts")` type reads,
+`collection<Post>("posts")` and `admin.collection<Post>("posts")` type reads,
 lists and complete replacement writes. Types describe the application's
 schema; the SDK checks JSON values but does not validate application fields at runtime.
 

@@ -1,6 +1,6 @@
 // Every replacement and deletion quotes the version the editor opened.
-export function publishPost(owner, id, data, postRevision, draftRevision) {
-  return owner.batch([
+export function publishPost(admin, id, data, postRevision, draftRevision) {
+  return admin.batch([
     {
       collection: "posts",
       set: {

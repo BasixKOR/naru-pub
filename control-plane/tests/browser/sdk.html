@@ -28,8 +28,8 @@
   const reloadDeadline = sessionStorage.getItem(reloadKey);
   if (reloadDeadline) {
     try {
-      const owner = await naru.auth.session();
-      output.textContent = owner
+      const admin = await naru.auth.session();
+      output.textContent = admin
         ? "PASS actual page reload restores the session"
         : "FAIL page reload lost the session";
     } finally {
@@ -62,8 +62,8 @@
     const original = window.fetch;
     try {
       saveSession(Date.now() + 60000);
-      const owner = await naru.auth.session();
-      check(owner, "native sessionStorage restores a session");
+      const admin = await naru.auth.session();
+      check(admin, "native sessionStorage restores a session");
 
       const calls = [];
       window.fetch = async (url, init = {}) => {
@@ -82,7 +82,7 @@
       };
       const notes = naru.collection("notes");
       await notes.list({ filter: { tag: "한글" } });
-      const saved = await owner
+      const saved = await admin
         .collection("notes")
         .set("one", { title: "x" }, { condition: { revision: "r1.1" } });
       await notes.list({ filter: { tag: "한글" } });
@@ -121,7 +121,7 @@
       window.fetch = async () => new Response("<html>", { status: 401 });
       let expired = false;
       try {
-        await owner.collection("notes").get("one");
+        await admin.collection("notes").get("one");
       } catch (error) {
         expired = error instanceof NaruError && error.code === "AUTH_REQUIRED";
       }

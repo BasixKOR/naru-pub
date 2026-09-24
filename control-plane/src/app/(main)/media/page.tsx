@@ -55,7 +55,7 @@ export default async function MediaPage() {
       <section className="min-w-0 space-y-3 border p-5">
         <h2 className="font-bold">웹 SDK에서 쓰기</h2>
         <p className="text-sm text-muted-foreground">
-          파일 API는 소유자 세션에서만 열립니다. 컬렉션과 달리{" "}
+          파일 API는 관리자 세션에서만 열립니다. 컬렉션과 달리{" "}
           <code className="bg-muted px-1">collection</code>만으로는 쓸 수 없고,{" "}
           <Link href="/database" className="text-primary hover:underline">
             웹사이트 관리자 로그인
@@ -64,8 +64,8 @@ export default async function MediaPage() {
         </p>
         <pre className="overflow-x-auto bg-muted p-3 text-sm">
           {`const naru = createNaru();
-const owner = await naru.auth.session();
-const image = await owner.media.upload(input.files[0]);
+const admin = await naru.auth.session();
+const image = await admin.media.upload(input.files[0]);
 // image.url 을 문서에 저장해 두고 그대로 사용합니다.
 // 목록과 삭제는 이 미디어 라이브러리에서 관리합니다.`}
         </pre>

@@ -106,7 +106,7 @@ export interface PublicCollection<T = Json> {
   add(data: T, options?: { signal?: AbortSignal }): Promise<Document<T>>;
 }
 
-export interface OwnerCollection<T = Json> extends PublicCollection<T> {
+export interface AdminCollection<T = Json> extends PublicCollection<T> {
   /** Replaces the whole document or creates it. */
   set(
     id: string,
@@ -120,8 +120,8 @@ export interface OwnerCollection<T = Json> extends PublicCollection<T> {
   ): Promise<void>;
 }
 
-export interface Owner {
-  collection<T = Json>(name: string): OwnerCollection<T>;
+export interface Admin {
+  collection<T = Json>(name: string): AdminCollection<T>;
   /** Commits every write or none. Conditions guard individual documents. Does not retry. */
   batch(
     writes: readonly (
@@ -155,7 +155,7 @@ export interface NaruClient {
   /** Visitor access, even when signed in. */
   collection<T = Json>(name: string): PublicCollection<T>;
   auth: {
-    session(): Promise<Owner | null>;
+    session(): Promise<Admin | null>;
     /** Redirects to Naru for approval. */
     signIn(options: { collections: readonly string[] }): Promise<void>;
   };

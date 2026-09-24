@@ -50,7 +50,7 @@ export default function MediaDocs() {
           <div className="flex flex-wrap gap-5 text-sm underline underline-offset-4">
             <a href="/media">미디어 라이브러리 열기 →</a>
             <a href="/docs/database">데이터베이스 사용 안내 →</a>
-            <a href="/docs/sdk/1.0.0#Owner">Media API →</a>
+            <a href="/docs/sdk/1.0.0#Admin">Media API →</a>
           </div>
         </header>
 
@@ -77,16 +77,16 @@ export default function MediaDocs() {
           <article className="min-w-0 space-y-12 leading-8 [&_a]:underline [&_a]:underline-offset-4">
             <Section id="upload" title="01 · 웹 SDK로 올리기">
               <p>
-                <a href="/docs/database#owner">관리자 로그인</a> 후{" "}
-                <code>owner.media.upload()</code>로 파일을 올리고, 돌려받은{" "}
+                <a href="/docs/database#admin">관리자 로그인</a> 후{" "}
+                <code>admin.media.upload()</code>로 파일을 올리고, 돌려받은{" "}
                 <code>url</code>을 문서에 저장하세요.
               </p>
-              <Code>{`const owner = await naru.auth.session();
+              <Code>{`const admin = await naru.auth.session();
 
-const image = await owner.media.upload(fileInput.files[0]);
+const image = await admin.media.upload(fileInput.files[0]);
 // → { url, name, contentType, size }
 
-await owner.collection("posts").set("hello", {
+await admin.collection("posts").set("hello", {
   title: "안녕하세요",
   coverImage: image.url,
 });`}</Code>

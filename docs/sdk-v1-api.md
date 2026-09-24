@@ -50,12 +50,12 @@ const saved = await naru.collection("guestbook").add({
 console.log(saved.data.message, saved.createdAt);
 ```
 
-Next, learn owner sign-in to edit posts, then pagination, and finally revision
+Next, learn admin sign-in to edit posts, then pagination, and finally revision
 conditions and atomic batches. No API key or build tool is needed.
 
 ## Visitor collections and queries
 
-The client separates anonymous operations from owner-authorized operations:
+The client separates anonymous operations from administrator operations:
 
 ```ts
 const posts = naru.collection<Post>("posts");
@@ -79,12 +79,12 @@ use visitor access, even while signed in.
 
 ## Sign in to edit
 
-An owner capability
+An admin client
 is restored for the current browser tab or obtained by redirecting for approval:
 
 ```js
-let owner = await naru.auth.session();
-if (!owner) {
+let admin = await naru.auth.session();
+if (!admin) {
   await naru.auth.signIn({ collections: ["posts", "categories"] });
   // The browser leaves this page. Call session() after the redirect back.
 }
@@ -101,10 +101,10 @@ request fails with `AUTH_REQUIRED`, which is the other moment an editor asks
 its owner to sign in again. Active use renews the session within platform limits; it can still expire or
 be revoked. Preserve unsaved work independently of the session.
 
-An owner collection adds replacement and deletion:
+An admin collection adds replacement and deletion:
 
 ```js
-const posts = owner.collection("posts");
+const posts = admin.collection("posts");
 const saved = await posts.set(
   "hello",
   { title: "Hello" },
@@ -178,11 +178,11 @@ text has no public format. `{ revision }` performs optimistic concurrency, while
 `{ absent: true }` permits creation only when the ID is unused; a delete takes
 only `{ revision }`, since deleting only when absent could never do anything.
 
-`owner.batch(writes)` atomically commits ID-addressed replacements and
+`admin.batch(writes)` atomically commits ID-addressed replacements and
 deletions across authorized collections:
 
 ```js
-await owner.batch(
+await admin.batch(
   [
     {
       collection: "posts",
@@ -204,9 +204,9 @@ batches.
 ## Media and sign-out
 
 ```js
-const media = await owner.media.upload(file, { signal });
-await owner.signOut();
-owner = null;
+const media = await admin.media.upload(file, { signal });
+await admin.signOut();
+admin = null;
 ```
 
 `upload` returns `{ url, name, contentType, size }` as stored: shrinking may
@@ -224,8 +224,8 @@ Service failures are `NaruError` instances. Application logic should use the sta
 | ----------------- | ------------------------------------------------------------- |
 | `CONFLICT`        | A revision or absence condition failed.                       |
 | `QUOTA_EXCEEDED`  | The site's database or media storage is full.                 |
-| `AUTH_REQUIRED`   | Owner authorization is missing, expired, or revoked.          |
-| `ACCESS_DENIED`   | The collection policy or owner scope denies the operation.    |
+| `AUTH_REQUIRED`   | Administrator authorization is missing, expired, or revoked.  |
+| `ACCESS_DENIED`   | The collection policy or admin scope denies the operation.    |
 | `NOT_FOUND`       | The requested site, collection, document, or media is absent. |
 | `RATE_LIMITED`    | The caller must wait before retrying.                         |
 | `INVALID_REQUEST` | Input is malformed or outside documented limits.              |
@@ -250,8 +250,8 @@ roll back a write the server already accepted.
 ## Compatibility guarantees
 
 The declarations export only what an application names itself: `createNaru`,
-`NaruError`, `NaruErrorCode`, `NaruClient`, `Owner`, `PublicCollection`,
-`OwnerCollection`, `Document`, `Page`, `ListOptions`, `Filter`, `Sort`,
+`NaruError`, `NaruErrorCode`, `NaruClient`, `Admin`, `PublicCollection`,
+`AdminCollection`, `Document`, `Page`, `ListOptions`, `Filter`, `Sort`,
 `WriteCondition`, `Revision` and `Json`. Other option and result shapes are
 written out in place.
 
@@ -274,6 +274,6 @@ Collection names starting with `_` are reserved and cannot be created.
 The SDK talks to a versioned wire protocol (`/api/data/v1/…`), which Naru keeps
 compatible for every released 1.x SDK file. It is documented for Naru's own
 maintenance in [database.md](database.md#internal-http-protocol); applications
-should use the SDK. Revision and cursor encoding, owner-token storage, upload
+should use the SDK. Revision and cursor encoding, admin-token storage, upload
 choreography, database technology, cache implementation, and HTTP status values
 are private and may change.

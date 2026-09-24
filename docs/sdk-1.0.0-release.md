@@ -43,7 +43,7 @@ The blog tests exercise public browsing/guestbook and admin draft/publishing flo
 - Confirm the frozen shapes one last time, since a new versioned directory is
   the only way to change them afterwards. The surface is deliberately minimal:
   the runtime exports `createNaru` and `NaruError`; a client has `collection()`
-  and `auth`; an owner has `collection()`, `batch()`, `media.upload()` and
+  and `auth`; an admin client has `collection()`, `batch()`, `media.upload()` and
   `signOut()`. Server
   metadata is camelCase (`createdAt`/`updatedAt`), `add` and `set` return
   `{ id, data, revision, createdAt, updatedAt }`, `upload` returns
@@ -92,9 +92,9 @@ to an ephemeral loopback port.
 
 The published SDK sends real HTTP requests to the actual data/auth route handlers
 and PostgreSQL. No service or response mocks are used. Coverage includes JSON and
-server metadata, conditional writes, filtered cursor pagination and counts, owner
+server metadata, conditional writes, filtered cursor pagination and counts, admin
 atomic results and rollback, media upload authorization and finalization, and token revocation. Browser
-Origin and sessionStorage are supplied by a small shim, and owner credentials are
+Origin and sessionStorage are supplied by a small shim, and admin credentials are
 issued through the real authorization service during setup. Object storage itself
 is simulated at the external boundary; the SDK's byte transfer and the real media
 route/database lifecycle are exercised. This is a contract test, not an

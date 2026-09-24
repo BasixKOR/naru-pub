@@ -323,7 +323,7 @@ function remember(key, token, expiresAt) {
     );
 }
 
-function owner(context, token, expiresAt) {
+function admin(context, token, expiresAt) {
   const { origin, root } = context;
   const key = sessionKey(context);
   // The server renews the token as it is used; a tab left open while its owner
@@ -470,11 +470,11 @@ async function signIn(context, collections) {
 }
 
 /**
- * The signed-in owner client for this page, or null. Finishes a sign-in when
+ * The signed-in admin client for this page, or null. Finishes a sign-in when
  * Naru has just redirected back, and otherwise restores this tab's session.
  * Call it before rendering: it removes the one-time code from the address bar.
  */
-async function ownerSession(context) {
+async function adminSession(context) {
   const key = sessionKey(context);
   const url = new URL(location.href);
   const code = url.searchParams.get("code");
@@ -492,7 +492,7 @@ async function ownerSession(context) {
     try {
       const saved = JSON.parse(sessionStorage.getItem(key));
       if (saved?.expiresAt > Date.now())
-        return owner(context, saved.accessToken, saved.expiresAt);
+        return admin(context, saved.accessToken, saved.expiresAt);
     } catch {
       /* no usable session */
     }
@@ -528,7 +528,7 @@ async function ownerSession(context) {
       expiresAt: token.expiresAt,
     }),
   );
-  return owner(context, token.accessToken, token.expiresAt);
+  return admin(context, token.accessToken, token.expiresAt);
 }
 
 /** Creates a client for one Naru site. */
@@ -537,7 +537,7 @@ export function createNaru(options) {
   return Object.freeze({
     collection: (name) => publicDocuments(context.root, name),
     auth: Object.freeze({
-      session: () => ownerSession(context),
+      session: () => adminSession(context),
       signIn: ({ collections }) => signIn(context, collections),
     }),
   });

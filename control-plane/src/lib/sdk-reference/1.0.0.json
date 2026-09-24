@@ -27,6 +27,100 @@
       ]
     },
     {
+      "name": "Admin",
+      "kind": "interface",
+      "summary": [],
+      "throws": [],
+      "signature": "interface Admin",
+      "extends": [],
+      "members": [
+        {
+          "name": "media",
+          "optional": false,
+          "signature": "media: {\n  upload(\n    file: Blob | File,\n    options?: { signal?: AbortSignal },\n  ): Promise<{\n    contentType: string;\n    name: string;\n    size: number;\n    url: string;\n  }>;\n}",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "batch",
+          "optional": false,
+          "signature": "batch(\n  writes: readonly (\n    | {\n        collection: string;\n        set: { condition?: WriteCondition; data: Json; id: string };\n      }\n    | {\n        collection: string;\n        delete: { condition?: { revision: Revision }; id: string };\n      }\n  )[],\n  options?: { signal?: AbortSignal },\n): Promise<void>",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Commits every write or none. Conditions guard individual documents. Does not retry."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "collection",
+          "optional": false,
+          "signature": "collection<T = Json>(name: string): AdminCollection<T>",
+          "summary": [],
+          "throws": []
+        },
+        {
+          "name": "signOut",
+          "optional": false,
+          "signature": "signOut(): Promise<void>",
+          "summary": [],
+          "throws": []
+        }
+      ]
+    },
+    {
+      "name": "AdminCollection",
+      "kind": "interface",
+      "summary": [],
+      "throws": [],
+      "signature": "interface AdminCollection<T = Json> extends PublicCollection<T>",
+      "extends": [
+        "PublicCollection<T>"
+      ],
+      "members": [
+        {
+          "name": "delete",
+          "optional": false,
+          "signature": "delete(\n  id: string,\n  options?: { condition?: { revision: Revision }; signal?: AbortSignal },\n): Promise<void>",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Deleting a missing document succeeds unless a condition was supplied."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
+          "name": "set",
+          "optional": false,
+          "signature": "set(\n  id: string,\n  data: T,\n  options?: { condition?: WriteCondition; signal?: AbortSignal },\n): Promise<Document<T>>",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Replaces the whole document or creates it."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        }
+      ]
+    },
+    {
       "name": "Document",
       "kind": "interface",
       "summary": [
@@ -164,7 +258,7 @@
         {
           "name": "auth",
           "optional": false,
-          "signature": "auth: {\n  session(): Promise<Owner | null>;\n  signIn(options: { collections: readonly string[] }): Promise<void>;\n}",
+          "signature": "auth: {\n  session(): Promise<Admin | null>;\n  signIn(options: { collections: readonly string[] }): Promise<void>;\n}",
           "summary": [],
           "throws": []
         },
@@ -179,100 +273,6 @@
                 {
                   "type": "text",
                   "value": "Visitor access, even when signed in."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        }
-      ]
-    },
-    {
-      "name": "Owner",
-      "kind": "interface",
-      "summary": [],
-      "throws": [],
-      "signature": "interface Owner",
-      "extends": [],
-      "members": [
-        {
-          "name": "media",
-          "optional": false,
-          "signature": "media: {\n  upload(\n    file: Blob | File,\n    options?: { signal?: AbortSignal },\n  ): Promise<{\n    contentType: string;\n    name: string;\n    size: number;\n    url: string;\n  }>;\n}",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "batch",
-          "optional": false,
-          "signature": "batch(\n  writes: readonly (\n    | {\n        collection: string;\n        set: { condition?: WriteCondition; data: Json; id: string };\n      }\n    | {\n        collection: string;\n        delete: { condition?: { revision: Revision }; id: string };\n      }\n  )[],\n  options?: { signal?: AbortSignal },\n): Promise<void>",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "Commits every write or none. Conditions guard individual documents. Does not retry."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
-          "name": "collection",
-          "optional": false,
-          "signature": "collection<T = Json>(name: string): OwnerCollection<T>",
-          "summary": [],
-          "throws": []
-        },
-        {
-          "name": "signOut",
-          "optional": false,
-          "signature": "signOut(): Promise<void>",
-          "summary": [],
-          "throws": []
-        }
-      ]
-    },
-    {
-      "name": "OwnerCollection",
-      "kind": "interface",
-      "summary": [],
-      "throws": [],
-      "signature": "interface OwnerCollection<T = Json> extends PublicCollection<T>",
-      "extends": [
-        "PublicCollection<T>"
-      ],
-      "members": [
-        {
-          "name": "delete",
-          "optional": false,
-          "signature": "delete(\n  id: string,\n  options?: { condition?: { revision: Revision }; signal?: AbortSignal },\n): Promise<void>",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "Deleting a missing document succeeds unless a condition was supplied."
-                }
-              ]
-            }
-          ],
-          "throws": []
-        },
-        {
-          "name": "set",
-          "optional": false,
-          "signature": "set(\n  id: string,\n  data: T,\n  options?: { condition?: WriteCondition; signal?: AbortSignal },\n): Promise<Document<T>>",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "Replaces the whole document or creates it."
                 }
               ]
             }

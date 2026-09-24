@@ -32,7 +32,7 @@ import { setupTestDatabase, teardownTestDatabase } from "./test-database";
 import {
   createNaru,
   type NaruClient,
-  type Owner,
+  type Admin,
 } from "../../../../public/sdk/1.0.0/naru.js";
 
 const integration =
@@ -46,7 +46,7 @@ integration("SDK and data API contract", () => {
   let origin: string;
   let accessToken: string;
   let sessionKey: string;
-  let owner: Owner;
+  let admin: Admin;
   let naru: NaruClient;
   const storage = new Map<string, string>();
   const nativeFetch = globalThis.fetch;
@@ -115,7 +115,7 @@ integration("SDK and data API contract", () => {
     origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     mockOrigin = origin;
     // Object storage is the sole external boundary in this suite.
-    // Authorization, media rows, owner scope, HTTP, and finalization stay real.
+    // Authorization, media rows, admin scope, HTTP, and finalization stay real.
     jest
       .spyOn(mediaStorage, "authorizeUpload")
       .mockImplementation(
@@ -213,7 +213,7 @@ integration("SDK and data API contract", () => {
       }),
     );
     naru = createNaru({ site: "alice" });
-    owner = (await naru.auth.session())!;
+    admin = (await naru.auth.session())!;
     expect(location.href).toBe(redirectUri);
     accessToken = JSON.parse(storage.get(sessionKey)!).accessToken;
   }, 30000);
@@ -244,7 +244,7 @@ integration("SDK and data API contract", () => {
   });
 
   test("CRUD preserves JSON, metadata, revisions, and semantic failures", async () => {
-    const posts = owner.collection("crud");
+    const posts = admin.collection("crud");
     const added = await posts.add({
       title: "한글",
       nested: { value: null },
@@ -317,7 +317,7 @@ integration("SDK and data API contract", () => {
       }),
     ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
     await expect(
-      owner.batch([
+      admin.batch([
         {
           collection: "crud",
           delete: { id: added.id, condition: { absent: true } as never },
@@ -339,7 +339,7 @@ integration("SDK and data API contract", () => {
   });
 
   test("filtered pages and totals use the same real query contract", async () => {
-    const feed = owner.collection<{ rank: number; visible: boolean }>("feed");
+    const feed = admin.collection<{ rank: number; visible: boolean }>("feed");
     for (let rank = 1; rank <= 5; rank++)
       await feed.set(`post_${rank}`, { rank, visible: rank !== 3 });
     const query = {
@@ -377,14 +377,14 @@ integration("SDK and data API contract", () => {
     expect(everything.totalCount).toBe(5);
   });
 
-  test("owner transactions return void and roll back conflicts across collections", async () => {
+  test("admin transactions return void and roll back conflicts across collections", async () => {
     await expect(naru.collection("private").list()).rejects.toMatchObject({
       code: "ACCESS_DENIED",
     });
-    const privateWrite = await owner
+    const privateWrite = await admin
       .collection("private")
       .add({ secret: true });
-    const result = await owner.batch([
+    const result = await admin.batch([
       {
         collection: "atomic",
         set: { id: "one", data: { original: true } },
@@ -394,7 +394,7 @@ integration("SDK and data API contract", () => {
     expect(result).toBeUndefined();
     const privateId = privateWrite.id;
     await expect(
-      owner.batch([
+      admin.batch([
         {
           collection: "atomic",
           set: {
@@ -412,24 +412,24 @@ integration("SDK and data API contract", () => {
         },
       ]),
     ).rejects.toMatchObject({ code: "CONFLICT" });
-    expect(await owner.collection("atomic").get("one")).toMatchObject({
+    expect(await admin.collection("atomic").get("one")).toMatchObject({
       revision: "r1.1",
       data: { original: true },
     });
-    expect((await owner.collection("private").get(privateId)).data).toEqual({
+    expect((await admin.collection("private").get(privateId)).data).toEqual({
       secret: true,
     });
   });
 
   test("the website media surface contains only upload", () => {
-    expect(Object.keys(owner.media)).toEqual(["upload"]);
+    expect(Object.keys(admin.media)).toEqual(["upload"]);
   });
 
-  test("owner upload authorizes, transfers, and finalizes a real media row", async () => {
+  test("admin upload authorizes, transfers, and finalizes a real media row", async () => {
     const source = new File(["contract bytes"], "contract.txt", {
       type: "text/plain",
     });
-    const file = await owner.media.upload(source);
+    const file = await admin.media.upload(source);
 
     expect(file).toEqual({
       url: expect.stringMatching(/^https:\/\/media\.naru\.pub\//),
@@ -530,10 +530,10 @@ integration("SDK and data API contract", () => {
     expect(missing.headers.get("cache-control")).toBe("no-store");
   });
 
-  test("an owner request past halfway renews the session the SDK holds", async () => {
+  test("an admin request past halfway renews the session the SDK holds", async () => {
     const stored = () => JSON.parse(storage.get(sessionKey)!).expiresAt;
     const issued = stored();
-    await owner.collection("crud").list();
+    await admin.collection("crud").list();
     // A token in the first half of its window is left where it is.
     expect(stored()).toBe(issued);
     await db
@@ -541,7 +541,7 @@ integration("SDK and data API contract", () => {
       .set({ expires_at: new Date(Date.now() + 60000) })
       .where("hash", "=", digest(accessToken))
       .execute();
-    await owner.collection("crud").list();
+    await admin.collection("crud").list();
     const renewed = stored();
     expect(renewed).toBeGreaterThan(Date.now() + 3500000);
     expect(
@@ -558,10 +558,10 @@ integration("SDK and data API contract", () => {
     expect(stored()).toBe(renewed);
   });
 
-  test("SDK signout revokes the real owner token", async () => {
-    await owner.signOut();
+  test("SDK signout revokes the real admin token", async () => {
+    await admin.signOut();
     expect(await naru.auth.session()).toBeNull();
-    await expect(owner.collection("private").list()).rejects.toMatchObject({
+    await expect(admin.collection("private").list()).rejects.toMatchObject({
       code: "AUTH_REQUIRED",
     });
     const copiedTokenResponse = await nativeFetch(

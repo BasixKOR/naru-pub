@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createNaru, NaruError } from "../public/sdk/1.0.0/naru.js";
 
 const collection = (name, options) => createNaru(options).collection(name);
-const ownerSession = (options) => createNaru(options).auth.session();
+const adminSession = (options) => createNaru(options).auth.session();
 const signIn = ({ collections, ...options }) =>
   createNaru(options).auth.signIn({ collections });
 
@@ -145,7 +145,7 @@ test("documents are read and written with plain requests that carry no cookies",
       createdAt: written().createdAt,
       updatedAt: written().updatedAt,
     });
-    const owned = await ownerSession();
+    const owned = await adminSession();
     await owned
       .collection("posts")
       .set("one", { title: "x" }, { condition: { absent: true } });
@@ -223,7 +223,7 @@ test("revisions are passed through without client-side parsing", async () => {
   await browser(async ({ calls, respond, storage }) => {
     saveSession(storage);
     respond(() => Response.json({ ...written(), revision: "future.token" }));
-    const posts = (await ownerSession()).collection("posts");
+    const posts = (await adminSession()).collection("posts");
     assert.equal((await posts.set("one", {})).revision, "future.token");
     await posts.delete("one", { condition: { revision: "future.token" } });
     assert.equal(calls[1].url.searchParams.get("ifRevision"), "future.token");
@@ -233,7 +233,7 @@ test("revisions are passed through without client-side parsing", async () => {
 test("errors have semantic codes and transport details stay diagnostic", async () => {
   await browser(async ({ respond, storage }) => {
     saveSession(storage);
-    const posts = (await ownerSession()).collection("posts");
+    const posts = (await adminSession()).collection("posts");
     const failure = (status, code, message = "Failed.") =>
       respond(() => Response.json({ error: { code, message } }, { status }));
     failure(409, "CONFLICT", "Document version does not match.");
@@ -390,7 +390,7 @@ test("signIn leaves for approval with a PKCE challenge and no request", async ()
   });
 });
 
-test("ownerSession exchanges the returned code once and strips it from the address", async () => {
+test("adminSession exchanges the returned code once and strips it from the address", async () => {
   await browser(async ({ calls, respond, storage, location }) => {
     storage.set(
       `${SESSION}:pending`,
@@ -406,8 +406,8 @@ test("ownerSession exchanges the returned code once and strips it from the addre
     location.href = "https://alice.naru.pub/admin.html?tab=2&code=c1&state=s1";
     const expiresAt = Date.now() + 3600000;
     respond(() => Response.json({ accessToken: "t".repeat(43), expiresAt }));
-    const owner = await ownerSession();
-    assert.ok(owner);
+    const admin = await adminSession();
+    assert.ok(admin);
     assert.equal(location.href, "https://alice.naru.pub/admin.html?tab=2");
     assert.equal(calls[0].url.href, "https://naru.pub/api/data-auth/v1/token");
     assert.deepEqual(JSON.parse(calls[0].body), {
@@ -421,7 +421,7 @@ test("ownerSession exchanges the returned code once and strips it from the addre
       expiresAt,
     });
     // A reload restores the same deadline without a request.
-    assert.ok(await ownerSession());
+    assert.ok(await adminSession());
     assert.equal(calls.length, 1);
   });
   for (const query of [
@@ -434,7 +434,7 @@ test("ownerSession exchanges the returned code once and strips it from the addre
         JSON.stringify({ state: "s1", startedAt: Date.now() }),
       );
       location.href = `https://alice.naru.pub/admin.html${query}`;
-      await assert.rejects(ownerSession(), NaruError);
+      await assert.rejects(adminSession(), NaruError);
       assert.equal(calls.length, 0);
       assert.equal(location.href, "https://alice.naru.pub/admin.html");
     });
@@ -444,9 +444,9 @@ test("a page's own ?code= is left alone when no sign-in was started here", async
   await browser(async ({ calls, storage, location }) => {
     location.href =
       "https://alice.naru.pub/admin.html?code=SUMMER&error=none&state=x";
-    assert.equal(await ownerSession(), null);
+    assert.equal(await adminSession(), null);
     saveSession(storage);
-    assert.ok(await ownerSession());
+    assert.ok(await adminSession());
     assert.equal(
       location.href,
       "https://alice.naru.pub/admin.html?code=SUMMER&error=none&state=x",
@@ -457,7 +457,7 @@ test("a page's own ?code= is left alone when no sign-in was started here", async
       JSON.stringify({ state: "s1", startedAt: Date.now() }),
     );
     location.href = "https://alice.naru.pub/admin.html?code=SUMMER";
-    assert.ok(await ownerSession());
+    assert.ok(await adminSession());
     assert.equal(
       location.href,
       "https://alice.naru.pub/admin.html?code=SUMMER",
@@ -466,17 +466,17 @@ test("a page's own ?code= is left alone when no sign-in was started here", async
   });
 });
 
-test("the owner client sends its token and forgets it when the session ends", async () => {
+test("the admin client sends its token and forgets it when the session ends", async () => {
   await browser(async ({ calls, respond, storage }) => {
-    assert.equal(await ownerSession(), null);
+    assert.equal(await adminSession(), null);
     saveSession(storage, Date.now() - 1);
-    assert.equal(await ownerSession(), null);
+    assert.equal(await adminSession(), null);
     assert.equal(storage.has(SESSION), false);
 
     saveSession(storage);
-    const owner = await ownerSession();
+    const admin = await adminSession();
     respond(() => Response.json(written()));
-    await owner.collection("posts").set("one", { title: "x" });
+    await admin.collection("posts").set("one", { title: "x" });
     assert.equal(calls[0].headers.Authorization, `Bearer ${"t".repeat(43)}`);
     assert.equal(calls[0].cache, "no-store");
 
@@ -486,19 +486,19 @@ test("the owner client sends its token and forgets it when the session ends", as
         { status: 401 },
       ),
     );
-    await assert.rejects(owner.collection("posts").get("one"), {
+    await assert.rejects(admin.collection("posts").get("one"), {
       code: "AUTH_REQUIRED",
     });
     assert.equal(storage.has(SESSION), false);
-    assert.equal(await ownerSession(), null);
+    assert.equal(await adminSession(), null);
   });
   await browser(async ({ calls, storage }) => {
     const realNow = Date.now;
     saveSession(storage, realNow() + 1000);
-    const owner = await ownerSession();
+    const admin = await adminSession();
     Date.now = () => realNow() + 2000;
     try {
-      await assert.rejects(owner.collection("posts").list(), {
+      await assert.rejects(admin.collection("posts").list(), {
         code: "AUTH_REQUIRED",
       });
     } finally {
@@ -513,14 +513,14 @@ test("a renewed token keeps working past the expiry the session was stored with"
   await browser(async ({ respond, storage }) => {
     const renewed = Date.now() + 7200000;
     saveSession(storage);
-    const owner = await ownerSession();
+    const admin = await adminSession();
     respond(() =>
       Response.json(written(), { headers: { "Naru-Owner-Expires": renewed } }),
     );
-    await owner.collection("posts").set("one", { title: "x" });
+    await admin.collection("posts").set("one", { title: "x" });
     assert.equal(JSON.parse(storage.get(SESSION)).expiresAt, renewed);
     // The renewal survives a reload, and the client itself now runs that long.
-    const restored = await ownerSession();
+    const restored = await adminSession();
     assert.ok(restored);
     respond(() => Response.json(written()));
     await restored.collection("posts").set("two", { title: "y" });
@@ -538,7 +538,7 @@ test("a renewed token keeps working past the expiry the session was stored with"
         headers: { "Naru-Owner-Expires": Date.now() + 10800000 },
       }),
     );
-    await owner.collection("posts").set("three", { title: "z" });
+    await admin.collection("posts").set("three", { title: "z" });
     assert.deepEqual(JSON.parse(storage.get(SESSION)), {
       accessToken: "n".repeat(43),
       expiresAt: renewed,
@@ -549,17 +549,17 @@ test("a renewed token keeps working past the expiry the session was stored with"
 test("signing out forgets the session before revoking, and never erases a newer one", async () => {
   await browser(async ({ calls, respond, storage }) => {
     saveSession(storage);
-    const owner = await ownerSession();
+    const admin = await adminSession();
     respond(() => {
       assert.equal(storage.has(SESSION), false);
       throw new TypeError("offline");
     });
-    await assert.rejects(owner.signOut(), { code: "UNAVAILABLE" });
+    await assert.rejects(admin.signOut(), { code: "UNAVAILABLE" });
     assert.equal(calls[0].url.pathname, "/api/data-auth/v1/revoke");
     assert.equal(calls[0].headers.Authorization, `Bearer ${"t".repeat(43)}`);
 
     saveSession(storage);
-    const older = await ownerSession();
+    const older = await adminSession();
     storage.set(
       SESSION,
       JSON.stringify({
@@ -576,7 +576,7 @@ test("signing out forgets the session before revoking, and never erases a newer 
 test("batch sends semantic writes and returns no transport results", async () => {
   await browser(async ({ calls, respond, storage }) => {
     saveSession(storage);
-    const owner = await ownerSession();
+    const admin = await adminSession();
     respond(() =>
       Response.json({ results: [written("hello"), { success: true }] }),
     );
@@ -587,7 +587,7 @@ test("batch sends semantic writes and returns no transport results", async () =>
       },
       { collection: "drafts", delete: { id: "hello" } },
     ];
-    assert.equal(await owner.batch(writes), undefined);
+    assert.equal(await admin.batch(writes), undefined);
     assert.equal(calls[0].url.pathname, "/api/data/v1/alice/_batch");
     assert.deepEqual(JSON.parse(calls[0].body), {
       operations: [
@@ -654,7 +654,7 @@ async function upload(file, images) {
     await browser(async (page) => {
       calls = page.calls;
       saveSession(page.storage);
-      const owner = await ownerSession();
+      const admin = await adminSession();
       page.respond(({ url, method }) => {
         if (url.host === "upload.example")
           return new Response(null, { status: 200 });
@@ -676,7 +676,7 @@ async function upload(file, images) {
           },
         });
       });
-      stored = await owner.media.upload(file);
+      stored = await admin.media.upload(file);
     });
   } finally {
     images?.restore();
@@ -777,7 +777,7 @@ test("photos fall back to JPEG, and are left alone when shrinking would not help
 test("a failed transfer is reported and not finalized", async () => {
   await browser(async ({ calls, respond, storage }) => {
     saveSession(storage);
-    const owner = await ownerSession();
+    const admin = await adminSession();
     respond(({ url }) =>
       url.host === "upload.example"
         ? new Response(null, { status: 403 })
@@ -788,7 +788,7 @@ test("a failed transfer is reported and not finalized", async () => {
           }),
     );
     await assert.rejects(
-      owner.media.upload(new Blob(["x"], { type: "text/plain" })),
+      admin.media.upload(new Blob(["x"], { type: "text/plain" })),
       // Uploading again authorizes afresh, so this is worth retrying.
       { code: "UNAVAILABLE" },
     );
@@ -799,8 +799,8 @@ test("a failed transfer is reported and not finalized", async () => {
 test("non-JSON writes fail locally without losing data or masquerading as network errors", async () => {
   await browser(async ({ calls, storage, respond }) => {
     saveSession(storage);
-    const owner = await ownerSession();
-    const posts = owner.collection("json-input");
+    const admin = await adminSession();
+    const posts = admin.collection("json-input");
     const cycle = {};
     cycle.self = cycle;
     class ChangedArray extends Array {
@@ -833,7 +833,7 @@ test("non-JSON writes fail locally without losing data or masquerading as networ
       assert.throws(() => posts.set("one", data), TypeError);
       assert.throws(() => posts.add(data), TypeError);
       await assert.rejects(
-        owner.batch([{ collection: "json-input", set: { id: "one", data } }]),
+        admin.batch([{ collection: "json-input", set: { id: "one", data } }]),
         TypeError,
       );
     }
@@ -858,11 +858,11 @@ test("visitor handles remain anonymous after signing in and expose no legacy nam
     assert.equal("public" in naru, false);
     const notes = naru.collection("anonymous");
     saveSession(storage);
-    const owner = await naru.auth.session();
-    assert.equal("transaction" in owner, false);
+    const admin = await naru.auth.session();
+    assert.equal("transaction" in admin, false);
     respond(() => emptyPage());
     await notes.list();
-    await owner.collection("anonymous").list();
+    await admin.collection("anonymous").list();
     assert.equal(calls[0].headers.Authorization, undefined);
     assert.ok(calls[1].headers.Authorization);
   });

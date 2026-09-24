@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 const sections = [
   ["start", "01 · 빠른 시작"],
   ["collections", "02 · 컬렉션과 공개 범위"],
-  ["owner", "03 · 관리자 로그인"],
+  ["admin", "03 · 관리자 로그인"],
   ["write", "04 · 글 수정과 충돌 처리"],
   ["read", "05 · 목록과 페이지 나누기"],
   ["recipes", "06 · 사용 예"],
@@ -133,8 +133,8 @@ export default function DatabaseDocs() {
                 로그인 이름을 넘기세요. <code>/sdk/1/</code>은 호환되는 최신
                 1.x를 가리키므로 수정 사항을 저절로 받습니다. 1.0.0은 아직
                 고치는 중이라 고정할 만한 판이 없으니 <code>/sdk/1/</code>을
-                쓰세요. <a href="/sdk/1/naru.d.ts">TypeScript 타입 정의</a>
-                도 있습니다.
+                쓰세요. <a href="/sdk/1/naru.d.ts">TypeScript 타입 정의</a>도
+                있습니다.
               </p>
               <h3 className="font-bold">방명록에 인사 남기기</h3>
               <p>
@@ -165,7 +165,7 @@ export default function DatabaseDocs() {
               <p>
                 <code>naru.collection()</code>은 언제나 방문자 권한입니다.
                 관리자 로그인 뒤에도 바뀌지 않습니다. 글을 고칠 때는 다음 단계의{" "}
-                <code>owner.collection()</code>을 씁니다.
+                <code>admin.collection()</code>을 씁니다.
               </p>
             </Section>
 
@@ -210,14 +210,14 @@ export default function DatabaseDocs() {
                 ]}
               />
               <p>
-                관리자는 <a href="#owner">로그인</a>하면 등록한 컬렉션을 공개
+                관리자는 <a href="#admin">로그인</a>하면 등록한 컬렉션을 공개
                 범위와 상관없이 읽고 쓸 수 있습니다. 공개 읽기 컬렉션의 문서는
                 필드를 화면에서 숨겨도 누구나 읽을 수 있으니, 비공개로 둘
                 데이터는 ‘관리자만’ 읽는 컬렉션에 따로 저장하세요.
               </p>
             </Section>
 
-            <Section id="owner" title="03 · 관리자 로그인">
+            <Section id="admin" title="03 · 관리자 로그인">
               <p>
                 사이트에 비밀번호나 API 키를 넣지 않습니다. 방문자가 아닌
                 소유자가 나루에서 로그인하고 승인하면 페이지가 관리자 권한을
@@ -240,11 +240,11 @@ export default function DatabaseDocs() {
 <script type="module">
   import { createNaru } from "https://naru.pub/sdk/1/naru.js";
   const naru = createNaru();
-  const owner = await naru.auth.session();
+  const admin = await naru.auth.session();
   const login = document.querySelector("#login");
-  login.hidden = !!owner;
+  login.hidden = !!admin;
   document.querySelector("#auth-status").textContent =
-    owner ? "로그인되었습니다." : "글을 고치려면 로그인하세요.";
+    admin ? "로그인되었습니다." : "글을 고치려면 로그인하세요.";
   login.onclick = () => naru.auth.signIn({ collections: ["posts", "drafts"] });
   // 다음 예제의 owner는 이 스크립트 안에서 사용하세요.
 </script>`}</Code>
@@ -277,7 +277,7 @@ export default function DatabaseDocs() {
               <p>
                 방문자는 <code>naru</code>으로 <code>add</code>만 할 수 있고,{" "}
                 <code>set</code>과 <code>delete</code>는{" "}
-                <a href="#owner">관리자 로그인</a> 후 <code>owner</code>로
+                <a href="#admin">관리자 로그인</a> 후 <code>admin</code>로
                 부릅니다. 쓰기는{" "}
                 <code>{"{ id, data, revision, createdAt, updatedAt }"}</code>를
                 돌려줍니다. 저장된 데이터까지 포함하므로 읽기와 같은 모양입니다.
@@ -288,9 +288,9 @@ export default function DatabaseDocs() {
                 <code>{"{ absent: true }"}</code>는 아직 없는 문서일 때만
                 저장하고, 아니면 <code>CONFLICT</code>로 실패합니다.
               </p>
-              <Code>{`const post = await owner.collection("posts").get("hello");
+              <Code>{`const post = await admin.collection("posts").get("hello");
 try {
-  await owner.collection("posts").set(
+  await admin.collection("posts").set(
     "hello",
     { ...post.data, title: "새 제목" },
     { condition: { revision: post.revision } },
@@ -306,13 +306,13 @@ try {
               </p>
               <h3 className="font-bold">여러 변경을 함께 저장하기</h3>
               <p>
-                <code>owner.batch()</code>은 여러 컬렉션의 <code>set</code>·
+                <code>admin.batch()</code>은 여러 컬렉션의 <code>set</code>·
                 <code>delete</code>를 최대 100개까지 묶어, 모두 반영하거나
                 하나도 반영하지 않습니다. 각 변경의 condition도 함께 검사합니다.
                 미리 읽은 값이 저절로 보호되는 것은 아니므로 고치는 문서의
                 revision을 넘기세요.
               </p>
-              <Code>{`await owner.batch([
+              <Code>{`await admin.batch([
   { collection: "posts", set: { id, data: post, condition: { absent: true } } },
   { collection: "drafts", delete: { id, condition: { revision: draft.revision } } },
 ]);`}</Code>
@@ -392,7 +392,7 @@ if (page.nextCursor) {
                   {
                     title: "초안 저장 후 공개",
                     setup: "drafts · 읽기 관리자만 / 쓰기 관리자만",
-                    code: `owner.batch([
+                    code: `admin.batch([
   { collection: "posts",
     set: { id, data, condition: { absent: true } } },
   { collection: "drafts",
@@ -408,8 +408,8 @@ if (page.nextCursor) {
                       </>
                     ),
                     code: `const image =
-  await owner.media.upload(file);
-const posts = owner.collection("posts");
+  await admin.media.upload(file);
+const posts = admin.collection("posts");
 const post = await posts.get(id);
 await posts.set(id, { ...post.data, cover: image.url },
   { condition: { revision: post.revision } });`,

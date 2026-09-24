@@ -6,8 +6,8 @@ import {
   type ListOptions,
   NaruError,
   type NaruErrorCode,
-  type Owner,
-  type OwnerCollection,
+  type Admin,
+  type AdminCollection,
   type Page,
   type PublicCollection,
   type Revision,
@@ -72,8 +72,8 @@ void everything({ sort: recent, filter: published });
 // @ts-expect-error Merge patches are not part of the API.
 posts.update("one", { title: "x" });
 
-async function owner(admin: Owner) {
-  const drafts: OwnerCollection<Post> = admin.collection<Post>("drafts");
+async function admin(admin: Admin) {
+  const drafts: AdminCollection<Post> = admin.collection<Post>("drafts");
   await drafts.set("one", { title: "draft", published: false });
   const revision = (await drafts.get("one")).revision;
   const written = await drafts.set(
@@ -114,7 +114,7 @@ async function owner(admin: Owner) {
 }
 
 async function auth() {
-  const admin: Owner | null = await naru.auth.session();
+  const admin: Admin | null = await naru.auth.session();
   if (!admin) await naru.auth.signIn({ collections: ["posts"] });
 }
 
@@ -130,4 +130,4 @@ function failed(error: unknown) {
 // @ts-expect-error Only the SDK creates errors.
 new NaruError("Conflict", "CONFLICT");
 declare const opaque: Revision;
-void [post, page, owner, auth, failed, opaque];
+void [post, page, admin, auth, failed, opaque];

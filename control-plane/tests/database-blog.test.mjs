@@ -51,7 +51,7 @@ async function page(name, db, storage = new Map(), query = "") {
         this.setExport("connect", async () => ({
           collection: (name) => db.collection(name),
           auth: {
-            session: () => db.auth?.session?.() ?? db.ownerSession?.(),
+            session: () => db.auth?.session?.() ?? db.adminSession?.(),
             signIn: ({ collections }) =>
               db.auth?.signIn?.({ collections }) ?? db.signIn?.(collections),
           },
@@ -172,7 +172,7 @@ test("guestbook submits via add only and resets after success", async () => {
 test("admin preserves draft across login, retries same ID, fails closed on expiry", async () => {
   let requested;
   const before = await page("admin", {
-    ownerSession: async () => null,
+    adminSession: async () => null,
     signIn: async (collections) => {
       requested = collections;
     },
@@ -184,7 +184,7 @@ test("admin preserves draft across login, retries same ID, fails closed on expir
   assert.equal(requested.join(), "posts,drafts");
   const writes = [];
   let failure = new Error("response lost");
-  const owner = fakeOwner({
+  const admin = fakeAdmin({
     collection: () => ({
       get: async (id) => ({
         id,
@@ -201,7 +201,7 @@ test("admin preserves draft across login, retries same ID, fails closed on expir
   });
   const after = await page(
     "admin",
-    { ownerSession: async () => owner },
+    { adminSession: async () => admin },
     before.storage(),
   );
   assert.equal(after.$("title").value, "제목");
@@ -227,8 +227,8 @@ test("admin preserves draft across login, retries same ID, fails closed on expir
 });
 test("admin clears local authorization when server revocation fails", async () => {
   const app = await page("admin", {
-    ownerSession: async () =>
-      fakeOwner({
+    adminSession: async () =>
+      fakeAdmin({
         signOut: async () => {
           throw new Error("offline");
         },
@@ -258,14 +258,14 @@ test("guestbook distinguishes successful save from failed list refresh", async (
   assert.equal(app.$("message").value, "");
 });
 
-test("malformed draft does not prevent owner callback completion", async () => {
+test("malformed draft does not prevent admin callback completion", async () => {
   let completed = false;
   const app = await page(
     "admin",
     {
-      ownerSession: async () => {
+      adminSession: async () => {
         completed = true;
-        return fakeOwner();
+        return fakeAdmin();
       },
     },
     new Map([["naru:blog-draft:example:/blog/admin/", "invalid JSON"]]),
@@ -307,8 +307,8 @@ test("category changes reset the cursor and preserve filters on subsequent pages
   assert.equal(Object.keys(calls[4].filter).length, 0);
   assert.equal(calls[4].after, undefined);
 });
-// Stands in for the SDK's owner client.
-function fakeOwner(methods = {}) {
+// Stands in for the SDK's admin client.
+function fakeAdmin(methods = {}) {
   return { ...methods };
 }
 function editorBackend() {
@@ -331,7 +331,7 @@ function editorBackend() {
     setFailure(fn) {
       failure = fn;
     },
-    owner: fakeOwner({
+    admin: fakeAdmin({
       async batch(writes) {
         for (const write of writes) {
           const type = write.set ? "set" : "delete";
@@ -406,7 +406,7 @@ function editorBackend() {
 }
 test("server drafts survive publication failure; retry publishes same ID before cleanup", async () => {
   const db = editorBackend(),
-    app = await page("admin", { ownerSession: async () => db.owner });
+    app = await page("admin", { adminSession: async () => db.admin });
   app.$("title").value = "초안";
   app.$("body").value = "비공개 내용";
   app.$("category").value = "일상";
@@ -432,7 +432,7 @@ test("server drafts survive publication failure; retry publishes same ID before 
 });
 test("batch cleanup failure rolls publication back and can be retried", async () => {
   const db = editorBackend(),
-    app = await page("admin", { ownerSession: async () => db.owner });
+    app = await page("admin", { adminSession: async () => db.admin });
   app.$("title").value = "제목";
   app.$("body").value = "내용";
   await app.fire("save-draft", "click");
@@ -458,7 +458,7 @@ test("editing preserves extra fields and deletion confirms and affects only sele
   });
   db.rows.drafts.set("existing", { title: "다른 초안", body: "내용" });
   const app = await page("admin", {
-    ownerSession: async () => db.owner,
+    adminSession: async () => db.admin,
   });
   await app.fire("reload-list", "click");
   await app.fire("edit-posts-existing", "click");
@@ -479,8 +479,8 @@ test("editing preserves extra fields and deletion confirms and affects only sele
 test("two editors cannot overwrite or delete a post saved by the other", async () => {
   const db = editorBackend();
   db.rows.posts.set("shared", { title: "Original", body: "Body" });
-  const first = await page("admin", { ownerSession: async () => db.owner });
-  const second = await page("admin", { ownerSession: async () => db.owner });
+  const first = await page("admin", { adminSession: async () => db.admin });
+  const second = await page("admin", { adminSession: async () => db.admin });
   for (const app of [first, second]) {
     await app.fire("reload-list", "click");
     await app.fire("edit-posts-shared", "click");
@@ -502,11 +502,11 @@ test("two editors cannot overwrite or delete a post saved by the other", async (
 test("publication does not delete a draft changed since it was opened", async () => {
   const db = editorBackend();
   db.rows.drafts.set("draft", { title: "Draft", body: "Body" });
-  const app = await page("admin", { ownerSession: async () => db.owner });
+  const app = await page("admin", { adminSession: async () => db.admin });
   app.$("manage-kind").value = "drafts";
   await app.fire("reload-list", "click");
   await app.fire("edit-drafts-draft", "click");
-  await db.owner
+  await db.admin
     .collection("drafts")
     .set("draft", { title: "Other editor", body: "New body" });
   await app.fire("post-form", "submit");

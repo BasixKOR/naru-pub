@@ -65,6 +65,11 @@ import {
   down as featureUseDown,
 } from "@/migrations/1788473207664_add_supporter_feature_uses";
 
+import {
+  up as orderingUp,
+  down as orderingDown,
+} from "@/migrations/1790200121054_explicit_document_ordering";
+
 export async function setupTestDatabase() {
   process.env.FEATURE_ACCESS_MODE = "preview";
   if (new URL(process.env.DATABASE_URL!).pathname !== "/naru_data_test")
@@ -95,8 +100,10 @@ export async function setupTestDatabase() {
   await featureUseUp(db);
   await dropSiteClientsUp(db);
   await slideTokensUp(db);
+  await orderingUp(db);
 }
 export async function teardownTestDatabase() {
+  await orderingDown(db);
   await slideTokensDown(db);
   await dropSiteClientsDown(db);
   await featureUseDown(db);

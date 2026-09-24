@@ -13,6 +13,7 @@ beforeEach(() => {
   jest.resetAllMocks();
   execute.mockResolvedValue({
     id: "one",
+    data: { title: "saved" },
     version: 1,
     createdAt: new Date(0),
     updatedAt: new Date(0),
@@ -300,4 +301,23 @@ test("website errors carry a protocol code; the control panel keeps a message", 
     status: 409,
     body: { error: "Full." },
   });
+});
+
+test("SDK freshness reads stay uncached independently of the shared cache lifetime", async () => {
+  execute.mockImplementation(async (command) => {
+    command.cacheability!.public = true;
+    return { documents: [], nextCursor: null, totalCount: undefined };
+  });
+  for (const fresh of [false, true]) {
+    const response = await dataRequest(
+      new Request(
+        `https://naru.pub/api/data/v1/alice/posts${fresh ? "?fresh=1" : ""}`,
+      ),
+      ["posts"],
+      "alice",
+    );
+    expect(response.headers.get("cache-control")).toBe(
+      fresh ? "no-store" : "public, max-age=0, s-maxage=10",
+    );
+  }
 });

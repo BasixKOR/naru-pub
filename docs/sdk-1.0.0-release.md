@@ -38,15 +38,15 @@ The blog tests exercise public browsing/guestbook and admin draft/publishing flo
 - Review supported browser targets; native ESM, fetch, Web Crypto, and
   sessionStorage are required for administrator sign-in. No browser-version
   compatibility matrix has been certified by this pass.
-- Confirm documented limits, equality-only filters, replacement writes,
+- Confirm documented limits, equality and range filters, replacement writes,
   non-snapshot pagination, and no automatic write retries.
 - Confirm the frozen shapes one last time, since a new versioned directory is
   the only way to change them afterwards. The surface is deliberately minimal:
-  the runtime exports `createNaru` and `NaruError`; a client has `public.collection()`
-  and `auth`; an owner has `collection()`, `transaction()`, `media.upload()` and
+  the runtime exports `createNaru` and `NaruError`; a client has `collection()`
+  and `auth`; an owner has `collection()`, `batch()`, `media.upload()` and
   `signOut()`. Server
   metadata is camelCase (`createdAt`/`updatedAt`), `add` and `set` return
-  `{ id, revision, createdAt, updatedAt }`, `upload` returns
+  `{ id, data, revision, createdAt, updatedAt }`, `upload` returns
   `{ url, name, contentType, size }`, only the names an application writes
   itself (including option types its helpers pass along) are exported, `sort` is always a list of
   `[field, direction]` pairs, `list` takes flat `size`/`after`/`includeTotal`,

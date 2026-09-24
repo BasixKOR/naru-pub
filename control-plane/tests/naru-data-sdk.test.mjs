@@ -1,10 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createNaru, NaruError } from "../public/sdk/1.0.0/naru-data.js";
-import { readFile } from "node:fs/promises";
+import { createNaru, NaruError } from "../public/sdk/1.0.0/naru.js";
 
-const collection = (name, options) =>
-  createNaru(options).public.collection(name);
+const collection = (name, options) => createNaru(options).collection(name);
 const ownerSession = (options) => createNaru(options).auth.session();
 const signIn = ({ collections, ...options }) =>
   createNaru(options).auth.signIn({ collections });
@@ -123,13 +121,13 @@ test("documents are read and written with plain requests that carry no cookies",
   await browser(async ({ calls, respond, storage }) => {
     saveSession(storage);
     const document = { ...written(), data: { title: "hello" } };
-    respond(({ method }) =>
+    respond(({ method, body }) =>
       Response.json(
         method === "GET"
           ? { document }
           : method === "DELETE"
             ? { success: true }
-            : written(),
+            : { ...written(), data: JSON.parse(body).data },
       ),
     );
     const posts = collection("posts");
@@ -142,6 +140,7 @@ test("documents are read and written with plain requests that carry no cookies",
     });
     assert.deepEqual(await posts.add({ title: "new" }), {
       id: "one",
+      data: { title: "new" },
       revision: "r1.1",
       createdAt: written().createdAt,
       updatedAt: written().updatedAt,
@@ -189,7 +188,10 @@ test("list sends only the query options that constrain something", async () => {
     );
     const posts = collection("posts");
     await posts.list({ filter: {}, after: null });
-    assert.equal(calls[0].url.search, "");
+    assert.deepEqual(
+      [...calls[0].url.searchParams.keys()].filter((key) => key !== "fresh"),
+      [],
+    );
     const page = await posts.list({
       filter: { category: "일상", date: { gte: "2026-09-01" } },
       sort: [
@@ -242,7 +244,7 @@ test("errors have semantic codes and transport details stay diagnostic", async (
         // Status is the server's detail, not part of the error.
         assert.equal("status" in error, false);
         assert.equal(error.code, "CONFLICT");
-        assert.equal(error.retryable, false);
+        assert.equal("retryable" in error, false);
         assert.equal(error.message, "Document version does not match.");
         return true;
       },
@@ -254,7 +256,6 @@ test("errors have semantic codes and transport details stay diagnostic", async (
     failure(429, "SOMETHING_NEW");
     await assert.rejects(posts.set("one", {}), {
       code: "RATE_LIMITED",
-      retryable: true,
     });
     failure(409, "SOMETHING_NEW");
     await assert.rejects(posts.set("one", {}), { code: "INVALID_REQUEST" });
@@ -262,7 +263,6 @@ test("errors have semantic codes and transport details stay diagnostic", async (
     respond(() => new Response("<html>checking your browser</html>"));
     await assert.rejects(posts.get("one"), {
       code: "UNAVAILABLE",
-      retryable: true,
       message: "The data API did not answer with JSON (HTTP 200).",
     });
     respond(() => Response.json(null));
@@ -293,7 +293,7 @@ test("errors have semantic codes and transport details stay diagnostic", async (
   });
 });
 
-test("a collection this browser wrote is read past the shared cache for ten seconds", async () => {
+test("a collection this browser wrote is read past the shared cache for the lifetime of the module", async () => {
   const realNow = Date.now;
   let now = realNow();
   Date.now = () => now;
@@ -316,7 +316,8 @@ test("a collection this browser wrote is read past the shared cache for ten seco
       );
       now += 10_001;
       await guestbook.list();
-      assert.equal(calls.at(-1).cache, "default");
+      assert.equal(calls.at(-1).cache, "no-store");
+      assert.equal(calls.at(-1).url.searchParams.get("fresh"), "1");
       // A write whose response was lost may still have landed.
       respond(({ method }) => {
         if (method === "POST") throw new TypeError("offline");
@@ -331,22 +332,6 @@ test("a collection this browser wrote is read past the shared cache for ten seco
   } finally {
     Date.now = realNow;
   }
-});
-
-// The SDK bypasses the shared cache for as long as the server lets it keep a
-// public read. If the server's window grows alone, reads stop showing writes.
-test("the SDK's cache bypass lasts exactly the server's shared-cache window", async () => {
-  const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
-  const [sdk, server] = await Promise.all([
-    read("../public/sdk/1.0.0/naru-data.js"),
-    read("../src/lib/site-data/http.ts"),
-  ]);
-  const bypass = /const PUBLIC_CACHE_MS = ([\d_]+);/.exec(sdk)?.[1];
-  const window = /const PUBLIC_READ_CACHE = "[^"]*\bs-maxage=(\d+)\b/.exec(
-    server,
-  )?.[1];
-  assert.ok(bypass && window, "both constants are where this test expects");
-  assert.equal(Number(bypass.replaceAll("_", "")), Number(window) * 1000);
 });
 
 test("signIn refuses a malformed collection name before leaving the page", async () => {
@@ -588,7 +573,7 @@ test("signing out forgets the session before revoking, and never erases a newer 
   });
 });
 
-test("transaction sends semantic writes and returns no transport results", async () => {
+test("batch sends semantic writes and returns no transport results", async () => {
   await browser(async ({ calls, respond, storage }) => {
     saveSession(storage);
     const owner = await ownerSession();
@@ -602,7 +587,7 @@ test("transaction sends semantic writes and returns no transport results", async
       },
       { collection: "drafts", delete: { id: "hello" } },
     ];
-    assert.equal(await owner.transaction(writes), undefined);
+    assert.equal(await owner.batch(writes), undefined);
     assert.equal(calls[0].url.pathname, "/api/data/v1/alice/_batch");
     assert.deepEqual(JSON.parse(calls[0].body), {
       operations: [
@@ -805,8 +790,80 @@ test("a failed transfer is reported and not finalized", async () => {
     await assert.rejects(
       owner.media.upload(new Blob(["x"], { type: "text/plain" })),
       // Uploading again authorizes afresh, so this is worth retrying.
-      { code: "UNAVAILABLE", retryable: true },
+      { code: "UNAVAILABLE" },
     );
     assert.equal(calls.length, 2);
+  });
+});
+
+test("non-JSON writes fail locally without losing data or masquerading as network errors", async () => {
+  await browser(async ({ calls, storage, respond }) => {
+    saveSession(storage);
+    const owner = await ownerSession();
+    const posts = owner.collection("json-input");
+    const cycle = {};
+    cycle.self = cycle;
+    class ChangedArray extends Array {
+      toJSON() {
+        return "changed";
+      }
+    }
+    const accessor = Object.defineProperty({}, "x", {
+      enumerable: true,
+      get() {
+        throw new Error("must not run");
+      },
+    });
+    for (const data of [
+      undefined,
+      NaN,
+      Infinity,
+      1n,
+      new Date(),
+      new Map(),
+      new ChangedArray(1, 2),
+      cycle,
+      [1, , 3],
+      { missing: undefined },
+      { fn() {} },
+      { value: Symbol() },
+      accessor,
+      { [Symbol()]: 1 },
+    ]) {
+      assert.throws(() => posts.set("one", data), TypeError);
+      assert.throws(() => posts.add(data), TypeError);
+      await assert.rejects(
+        owner.batch([{ collection: "json-input", set: { id: "one", data } }]),
+        TypeError,
+      );
+    }
+    assert.equal(calls.length, 0);
+    const shared = { value: 1 };
+    const data = {
+      left: shared,
+      right: shared,
+      values: [null, true, 0, "한글"],
+    };
+    respond(({ body }) =>
+      Response.json({ ...written(), data: JSON.parse(body).data }),
+    );
+    assert.deepEqual((await posts.set("one", data)).data, data);
+    assert.equal(calls.length, 1);
+  });
+});
+
+test("visitor handles remain anonymous after signing in and expose no legacy namespace", async () => {
+  await browser(async ({ storage, calls, respond }) => {
+    const naru = createNaru();
+    assert.equal("public" in naru, false);
+    const notes = naru.collection("anonymous");
+    saveSession(storage);
+    const owner = await naru.auth.session();
+    assert.equal("transaction" in owner, false);
+    respond(() => emptyPage());
+    await notes.list();
+    await owner.collection("anonymous").list();
+    assert.equal(calls[0].headers.Authorization, undefined);
+    assert.ok(calls[1].headers.Authorization);
   });
 });

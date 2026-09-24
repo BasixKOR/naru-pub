@@ -17,14 +17,12 @@ async function load(reset = false) {
   }
   try {
     db ??= await connect();
-    const page = await db.public
-      .collection(guestbook ? "guestbook" : "posts")
-      .list({
-        filter: category ? { category } : {},
-        sort: [[{ metadata: "createdAt" }, "desc"]],
-        size: 20,
-        after: cursor,
-      });
+    const page = await db.collection(guestbook ? "guestbook" : "posts").list({
+      filter: category ? { category } : {},
+      sort: [[{ metadata: "createdAt" }, "desc"]],
+      size: 20,
+      after: cursor,
+    });
     if (reset) $("entries").replaceChildren();
     for (const doc of page.documents) {
       const data = doc.data && typeof doc.data === "object" ? doc.data : {};
@@ -92,7 +90,7 @@ if (guestbook)
     $("submit").disabled = true;
     try {
       db ??= await connect();
-      await db.public.collection("guestbook").add({ name, message: body });
+      await db.collection("guestbook").add({ name, message: body });
       $("entry-form").reset();
       // The SDK keeps this collection fresh after the write.
       const refreshed = await load(true);

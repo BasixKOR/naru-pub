@@ -287,17 +287,69 @@ integration("sorted database pagination", () => {
       ).documents!.map((d) => d.id),
     ).toEqual(["two"]);
   });
+  test("scalar ordering and cursors use explicit code-point order and type groups", async () => {
+    await call("POST", [], { body: { name: "scalars", read: "world" } });
+    const entries = [
+      ["A-missing", {}],
+      ["B-null", { key: null }],
+      ["C-array", { key: [] }],
+      ["D-object", { key: {} }],
+      ["upper", { key: "Z" }],
+      ["lower", { key: "a" }],
+      ["accent", { key: "é" }],
+      ["korean", { key: "가" }],
+      ["negative", { key: -2 }],
+      ["ten", { key: 10 }],
+      ["false", { key: false }],
+      ["true", { key: true }],
+    ] as const;
+    for (const [id, data] of entries)
+      await call("PUT", ["scalars", id], { body: { data } });
+    for (const direction of ["asc", "desc"]) {
+      for (const sort of [
+        order("data.key", direction),
+        JSON.stringify([
+          ["key", direction],
+          [{ metadata: "createdAt" }, "asc"],
+        ]),
+      ]) {
+        // Single-key order has ID ties. Multi-key ties use creation time (insert order here).
+        const ids: string[] = [];
+        let after: string | undefined;
+        do {
+          const page = await call("GET", ["scalars"], { sort, size: 1, after });
+          ids.push(...page.documents!.map((doc) => doc.id));
+          after = page.nextCursor ?? undefined;
+          expect(ids.length).toBeLessThanOrEqual(entries.length);
+        } while (after);
+        const expected = entries.map(([id]) => id);
+        if (direction === "desc") {
+          expected.reverse();
+          if (JSON.parse(sort).length === 2)
+            expected.splice(8, 4, "A-missing", "B-null", "C-array", "D-object");
+        }
+        expect(ids).toEqual(expected);
+      }
+    }
+    const ranged = await call("GET", ["scalars"], {
+      filter: { key: { gte: "Z", lt: "é" } },
+      sort: order("data.key"),
+    });
+    expect(ranged.documents!.map((doc) => doc.id)).toEqual(["upper", "lower"]);
+  });
+
   test("metadata ordering still reaches its index after the sort rewrite", async () => {
     const plan = await db.transaction().execute(async (tx) => {
       await sql`set local enable_seqscan=off`.execute(tx);
       return sql`explain (format json) select id from site_data_documents
-        where collection_id = 1 order by "created_at" desc, id desc limit 2`.execute(
+        where collection_id = 1 order by "created_at" desc, id collate "C" desc limit 2`.execute(
         tx,
       );
     });
     expect(JSON.stringify(plan.rows)).toContain(
       "site_data_documents_created_at_idx",
     );
+    expect(JSON.stringify(plan.rows)).not.toContain('"Node Type":"Sort"');
   });
 
   test("two-field ordering remains global across page tokens", async () => {

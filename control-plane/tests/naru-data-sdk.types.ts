@@ -13,22 +13,27 @@ import {
   type Revision,
   type Sort,
   type WriteCondition,
-} from "../public/sdk/1.0.0/naru-data.js";
+} from "../public/sdk/1.0.0/naru.js";
 // Only names an application writes itself are exported.
 // @ts-expect-error Spelled out in place rather than exported.
-import type { WriteResult } from "../public/sdk/1.0.0/naru-data.js";
+import type { WriteResult } from "../public/sdk/1.0.0/naru.js";
 
 interface Post {
   title: string;
   published: boolean;
 }
 const naru = createNaru({ site: "alice" });
-const posts: PublicCollection<Post> = naru.public.collection<Post>("posts");
-const other = naru.public.collection("other");
+const posts: PublicCollection<Post> = naru.collection<Post>("posts");
+const other = naru.collection("other");
 const signal = new AbortController().signal;
 
 const post: Promise<Document<Post>> = posts.get("one", { signal });
-posts.add({ title: "hello", published: false });
+const added: Promise<Document<Post>> = posts.add({
+  title: "hello",
+  published: false,
+});
+// @ts-expect-error Visitor access is the default, without another namespace.
+void naru.public;
 // @ts-expect-error Public handles cannot replace documents.
 posts.set("one", { title: 123, published: false });
 
@@ -84,7 +89,7 @@ async function owner(admin: Owner) {
   await drafts.delete("one", { condition: { absent: true } });
   await drafts.delete("one", { condition: { revision: next } });
   void [created, saved, expected];
-  await admin.transaction([
+  await admin.batch([
     {
       collection: "posts",
       set: { id: "one", data: {}, condition: { absent: true } },
@@ -116,10 +121,11 @@ async function auth() {
 function failed(error: unknown) {
   if (!(error instanceof NaruError)) return;
   const code: NaruErrorCode = error.code;
-  const retry: boolean = error.retryable;
+  // @ts-expect-error A transient error does not make a write safe to retry.
+  void error.retryable;
   // @ts-expect-error HTTP status is not part of the contract.
   void error.status;
-  void [code, retry];
+  void code;
 }
 // @ts-expect-error Only the SDK creates errors.
 new NaruError("Conflict", "CONFLICT");

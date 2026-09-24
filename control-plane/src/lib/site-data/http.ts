@@ -23,12 +23,8 @@ import { executeMedia } from "./media";
 // here can purge. Ten seconds of that is worth the traffic it collapses; a
 // minute of it would not be.
 //
-// This number is half of a contract. Each SDK file bypasses the shared cache
-// for its own copy of it after a write (`PUBLIC_CACHE_MS`), and a test fails if
-// the two drift apart. Once 1.x is frozen, that copy lives in every cached and
-// bundled SDK a site holds, which nothing here can reach: raising `s-maxage`
-// above what they bypass would let them read a cached page that predates their
-// own write. Lowering it is always safe; raising it needs a new SDK major.
+// Cache duration is private. SDK reads after a write use the fresh transport
+// flag, which bypasses shared storage regardless of the configured lifetime.
 const PUBLIC_READ_CACHE = "public, max-age=0, s-maxage=10";
 
 // Sent on an owner request the server accepted, as epoch milliseconds. An SDK
@@ -205,7 +201,9 @@ export async function dataRequest(
           : {}),
         // Only a read the service itself vouched for as public. Anything else
         // keeps the default no-store, including every error path below.
-        ...(cacheability.public ? { "Cache-Control": PUBLIC_READ_CACHE } : {}),
+        ...(cacheability.public && url.searchParams.get("fresh") !== "1"
+          ? { "Cache-Control": PUBLIC_READ_CACHE }
+          : {}),
       },
       status: request.method === "POST" ? 201 : 200,
     });
@@ -221,7 +219,7 @@ export async function dataRequest(
       ["22P05", "22021", "22P02", "22003"].includes(String(error.code))
     ) {
       status = 400;
-      message = "Data cannot be represented as PostgreSQL JSON.";
+      message = "Data contains unsupported characters or numbers.";
     } else if (error instanceof DataError) {
       ({ status, message, code } = error);
     } else console.error("Site database request failed", error);

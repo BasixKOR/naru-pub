@@ -132,8 +132,11 @@ every error carry `no-store`, and anonymous public responses use
 `Access-Control-Allow-Origin: *`, so ignoring `Vary` cannot hand one caller's
 response to another. Stale serving stays off because the 10-second window is
 also how long a collection just changed from `world` to `admin` can still be
-served. The browser SDK reads a collection with `cache: "no-store"` for 10
-seconds after its own write, so a writer sees their change immediately.
+served. The browser SDK reads a collection with `cache: "no-store"` and the private
+`fresh=1` query parameter after its own write for the rest of the loaded module's lifetime. The server returns `no-store` for that query variant. Keep query
+strings in the cache key and respect origin headers: this makes read-after-write
+independent of the shared cache duration. A request with `fresh=1` must never
+be a cache HIT.
 
 Check it with GET requests; `curl -I` sends HEAD, which the expression does not
 match and which always reports `DYNAMIC`:

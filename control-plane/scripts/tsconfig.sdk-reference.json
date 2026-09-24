@@ -10,5 +10,5 @@
     "noEmit": true,
     "skipLibCheck": false
   },
-  "include": ["../public/sdk/*/naru-data.d.ts"]
+  "include": ["../public/sdk/*/naru.d.ts"]
 }

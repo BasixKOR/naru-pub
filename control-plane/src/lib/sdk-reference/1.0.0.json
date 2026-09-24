@@ -29,7 +29,17 @@
     {
       "name": "Document",
       "kind": "interface",
-      "summary": [],
+      "summary": [
+        {
+          "type": "paragraph",
+          "spans": [
+            {
+              "type": "text",
+              "value": "A read or successful write: user data stays separate from server metadata."
+            }
+          ]
+        }
+      ],
       "throws": [],
       "signature": "interface Document<T = Json>",
       "extends": [],
@@ -159,16 +169,16 @@
           "throws": []
         },
         {
-          "name": "public",
+          "name": "collection",
           "optional": false,
-          "signature": "public: { collection<T = Json>(name: string): PublicCollection<T> }",
+          "signature": "collection<T = Json>(name: string): PublicCollection<T>",
           "summary": [
             {
               "type": "paragraph",
               "spans": [
                 {
                   "type": "text",
-                  "value": "Operations that do not use owner credentials."
+                  "value": "Visitor access, even when signed in."
                 }
               ]
             }
@@ -193,6 +203,23 @@
           "throws": []
         },
         {
+          "name": "batch",
+          "optional": false,
+          "signature": "batch(\n  writes: readonly (\n    | {\n        collection: string;\n        set: { condition?: WriteCondition; data: Json; id: string };\n      }\n    | {\n        collection: string;\n        delete: { condition?: { revision: Revision }; id: string };\n      }\n  )[],\n  options?: { signal?: AbortSignal },\n): Promise<void>",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Commits every write or none. Conditions guard individual documents. Does not retry."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
           "name": "collection",
           "optional": false,
           "signature": "collection<T = Json>(name: string): OwnerCollection<T>",
@@ -204,23 +231,6 @@
           "optional": false,
           "signature": "signOut(): Promise<void>",
           "summary": [],
-          "throws": []
-        },
-        {
-          "name": "transaction",
-          "optional": false,
-          "signature": "transaction(\n  writes: readonly (\n    | {\n        collection: string;\n        set: { condition?: WriteCondition; data: Json; id: string };\n      }\n    | {\n        collection: string;\n        delete: { condition?: { revision: Revision }; id: string };\n      }\n  )[],\n  options?: { signal?: AbortSignal },\n): Promise<void>",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "Commits every write or none."
-                }
-              ]
-            }
-          ],
           "throws": []
         }
       ]
@@ -255,7 +265,7 @@
         {
           "name": "set",
           "optional": false,
-          "signature": "set(\n  id: string,\n  data: T,\n  options?: { condition?: WriteCondition; signal?: AbortSignal },\n): Promise<{\n  createdAt: string;\n  id: string;\n  revision: Revision;\n  updatedAt: string;\n}>",
+          "signature": "set(\n  id: string,\n  data: T,\n  options?: { condition?: WriteCondition; signal?: AbortSignal },\n): Promise<Document<T>>",
           "summary": [
             {
               "type": "paragraph",
@@ -313,7 +323,7 @@
         {
           "name": "add",
           "optional": false,
-          "signature": "add(\n  data: T,\n  options?: { signal?: AbortSignal },\n): Promise<{\n  createdAt: string;\n  id: string;\n  revision: Revision;\n  updatedAt: string;\n}>",
+          "signature": "add(data: T, options?: { signal?: AbortSignal }): Promise<Document<T>>",
           "summary": [],
           "throws": []
         },
@@ -366,39 +376,6 @@
           "optional": false,
           "signature": "code: NaruErrorCode",
           "summary": [],
-          "throws": []
-        },
-        {
-          "name": "retryable",
-          "optional": false,
-          "signature": "retryable: boolean",
-          "summary": [
-            {
-              "type": "paragraph",
-              "spans": [
-                {
-                  "type": "text",
-                  "value": "True for "
-                },
-                {
-                  "type": "code",
-                  "value": "RATE_LIMITED"
-                },
-                {
-                  "type": "text",
-                  "value": " and "
-                },
-                {
-                  "type": "code",
-                  "value": "UNAVAILABLE"
-                },
-                {
-                  "type": "text",
-                  "value": "."
-                }
-              ]
-            }
-          ],
           "throws": []
         }
       ]

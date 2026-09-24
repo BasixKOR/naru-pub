@@ -49,7 +49,7 @@ async function page(name, db, storage = new Map(), query = "") {
       function () {
         // Only what NaruClient exposes, so pages cannot rely on anything else.
         this.setExport("connect", async () => ({
-          public: { collection: (name) => db.collection(name) },
+          collection: (name) => db.collection(name),
           auth: {
             session: () => db.auth?.session?.() ?? db.ownerSession?.(),
             signIn: ({ collections }) =>
@@ -185,7 +185,15 @@ test("admin preserves draft across login, retries same ID, fails closed on expir
   const writes = [];
   let failure = new Error("response lost");
   const owner = fakeOwner({
-    async transaction(operations) {
+    collection: () => ({
+      get: async (id) => ({
+        id,
+        data: writes.at(-1).data,
+        revision: "r1.saved",
+      }),
+      list: async () => ({ documents: [], nextCursor: null }),
+    }),
+    async batch(operations) {
       const operation = operations[0].set;
       writes.push({ id: operation.id, data: operation.data });
       if (failure) throw failure;
@@ -307,6 +315,16 @@ function editorBackend() {
   const rows = { posts: new Map(), drafts: new Map() },
     calls = [];
   let failure;
+  const versions = { posts: new Map(), drafts: new Map() };
+  const revision = (kind, id) => `test.${versions[kind].get(id) ?? 1}`;
+  const check = (kind, id, condition) => {
+    if (
+      (condition?.absent && rows[kind].has(id)) ||
+      (condition?.revision &&
+        (!rows[kind].has(id) || condition.revision !== revision(kind, id)))
+    )
+      throw Object.assign(new Error("conflict"), { code: "CONFLICT" });
+  };
   return {
     rows,
     calls,
@@ -314,9 +332,11 @@ function editorBackend() {
       failure = fn;
     },
     owner: fakeOwner({
-      async transaction(writes) {
+      async batch(writes) {
         for (const write of writes) {
           const type = write.set ? "set" : "delete";
+          const operation = write.set ?? write.delete;
+          check(write.collection, operation.id, operation.condition);
           const error = failure?.(type, write.collection);
           if (error) throw error;
         }
@@ -330,19 +350,30 @@ function editorBackend() {
               structuredClone(write.set.data),
             );
           else rows[write.collection].delete(operation.id);
+          versions[write.collection].set(
+            operation.id,
+            (versions[write.collection].get(operation.id) ?? 1) + 1,
+          );
         }
       },
       collection(kind) {
         assert.ok(kind in rows);
         return {
-          async set(id, data) {
+          async set(id, data, options = {}) {
+            check(kind, id, options.condition);
             calls.push(["set", kind, id]);
             const error = failure?.("set", kind);
             if (error) throw error;
             rows[kind].set(id, structuredClone(data));
-            return { id };
+            versions[kind].set(id, (versions[kind].get(id) ?? 1) + 1);
+            return {
+              id,
+              data: structuredClone(data),
+              revision: revision(kind, id),
+            };
           },
-          async delete(id) {
+          async delete(id, options = {}) {
+            check(kind, id, options.condition);
             calls.push(["delete", kind, id]);
             const error = failure?.("delete", kind);
             if (error) throw error;
@@ -350,13 +381,20 @@ function editorBackend() {
             return { success: true };
           },
           async get(id) {
-            return { id, data: structuredClone(rows[kind].get(id)) };
+            if (!rows[kind].has(id))
+              throw Object.assign(new Error("missing"), { code: "NOT_FOUND" });
+            return {
+              id,
+              data: structuredClone(rows[kind].get(id)),
+              revision: revision(kind, id),
+            };
           },
           async list() {
             return {
               documents: [...rows[kind]].map(([id, data]) => ({
                 id,
                 data: structuredClone(data),
+                revision: revision(kind, id),
               })),
               nextCursor: null,
             };
@@ -436,4 +474,43 @@ test("editing preserves extra fields and deletion confirms and affects only sele
   assert.equal(db.rows.posts.size, 0);
   assert.equal(db.rows.drafts.size, 1);
   assert.match(app.$("editing").textContent, /새 글/);
+});
+
+test("two editors cannot overwrite or delete a post saved by the other", async () => {
+  const db = editorBackend();
+  db.rows.posts.set("shared", { title: "Original", body: "Body" });
+  const first = await page("admin", { ownerSession: async () => db.owner });
+  const second = await page("admin", { ownerSession: async () => db.owner });
+  for (const app of [first, second]) {
+    await app.fire("reload-list", "click");
+    await app.fire("edit-posts-shared", "click");
+  }
+  first.$("title").value = "First save";
+  await first.fire("post-form", "submit");
+  second.$("title").value = "Stale save";
+  await second.fire("post-form", "submit");
+  assert.equal(db.rows.posts.get("shared").title, "First save");
+  assert.match(second.$("status").textContent, /다른 곳에서/);
+  await second.fire("delete-post", "click");
+  assert.equal(db.rows.posts.has("shared"), true);
+  // The first editor received a fresh document and can save again.
+  first.$("title").value = "Second save";
+  await first.fire("post-form", "submit");
+  assert.equal(db.rows.posts.get("shared").title, "Second save");
+});
+
+test("publication does not delete a draft changed since it was opened", async () => {
+  const db = editorBackend();
+  db.rows.drafts.set("draft", { title: "Draft", body: "Body" });
+  const app = await page("admin", { ownerSession: async () => db.owner });
+  app.$("manage-kind").value = "drafts";
+  await app.fire("reload-list", "click");
+  await app.fire("edit-drafts-draft", "click");
+  await db.owner
+    .collection("drafts")
+    .set("draft", { title: "Other editor", body: "New body" });
+  await app.fire("post-form", "submit");
+  assert.equal(db.rows.posts.size, 0);
+  assert.equal(db.rows.drafts.get("draft").title, "Other editor");
+  assert.match(app.$("status").textContent, /다른 곳에서/);
 });

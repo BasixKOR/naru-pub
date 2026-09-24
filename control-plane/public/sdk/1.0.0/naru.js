@@ -1,14 +1,11 @@
 /** Naru Data SDK 1.0.0. This release is still under active development. */
 
-const RETRYABLE = new Set(["RATE_LIMITED", "UNAVAILABLE"]);
-
 /** A Naru operation that could not be completed. Only the SDK creates these. */
 export class NaruError extends Error {
   constructor(message, code, cause) {
     super(message, cause === undefined ? undefined : { cause });
     this.name = "NaruError";
     this.code = code;
-    this.retryable = RETRYABLE.has(code);
   }
 }
 
@@ -36,10 +33,6 @@ const errorCode = (status, code) => {
 const CONTROL_PLANE = "https://naru.pub";
 const SITE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const ID = /^[a-zA-Z0-9_-]{1,64}$/;
-// A public read may be answered by a shared cache for this long after a write.
-// It must match the server's `s-maxage` (src/lib/site-data/http.ts).
-const PUBLIC_CACHE_MS = 10_000;
-
 // Where requests go: always naru.pub. A page on alice.naru.pub belongs to the
 // site alice, so only custom domains and local development say which site.
 function target({ site } = {}) {
@@ -67,18 +60,65 @@ function segment(value) {
   return value;
 }
 
-// Collections this browser wrote recently, so reading them skips the shared
-// cache and shows the write. Keyed by collection URL, which names the site.
-const writtenUntil = new Map();
+// Once this module writes a collection, its subsequent reads bypass caches.
+// No cache lifetime is baked into deployed SDKs; the server may change it.
+const written = new Set();
+
+// Accept only JSON values, without silently dropping or converting input.
+function jsonValue(value, ancestors = new Set(), path = "data") {
+  if (value === null || typeof value === "string" || typeof value === "boolean")
+    return;
+  if (typeof value === "number" && Number.isFinite(value)) return;
+  if (typeof value !== "object" || ancestors.has(value))
+    throw new TypeError(
+      `${path} must contain only JSON values (no cycles or non-finite numbers).`,
+    );
+  const array = Array.isArray(value);
+  const prototype = Object.getPrototypeOf(value);
+  if (
+    array
+      ? prototype !== Array.prototype
+      : prototype !== Object.prototype && prototype !== null
+  )
+    throw new TypeError(
+      `${path} must be a plain JSON object; convert dates to strings.`,
+    );
+  ancestors.add(value);
+  const keys = Reflect.ownKeys(value).filter(
+    (key) => !(array && key === "length"),
+  );
+  if (array && keys.length !== value.length)
+    throw new TypeError(`${path} must be a dense JSON array.`);
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (
+      typeof key !== "string" ||
+      !descriptor.enumerable ||
+      !("value" in descriptor) ||
+      (array && !/^(0|[1-9][0-9]*)$/.test(key))
+    )
+      throw new TypeError(
+        `${path} must contain only ordinary JSON properties.`,
+      );
+    jsonValue(descriptor.value, ancestors, `${path}.${key}`);
+  }
+  ancestors.delete(value);
+}
 
 async function request(
   url,
   { method = "GET", body, token, signal, touches, renew },
 ) {
   const fresh =
-    token ||
-    method !== "GET" ||
-    touches.some((path) => (writtenUntil.get(path) ?? 0) > Date.now());
+    token || method !== "GET" || touches.some((path) => written.has(path));
+  // An explicit transport flag makes cache bypass enforceable by the server.
+  if (fresh && method === "GET") {
+    const target = new URL(url);
+    target.searchParams.set("fresh", "1");
+    url = target.href;
+  }
+  // Serialization errors are input errors, never network failures.
+  const encoded = body === undefined ? undefined : JSON.stringify(body);
   let response;
   try {
     response = await fetch(url, {
@@ -91,16 +131,14 @@ async function request(
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: encoded,
     });
   } catch (cause) {
     if (cause?.name === "AbortError") throw cause;
     throw new NaruError("Naru is unavailable.", "UNAVAILABLE", cause);
   } finally {
     // Also when the response was lost: the write may still have landed.
-    if (method !== "GET")
-      for (const path of touches)
-        writtenUntil.set(path, Date.now() + PUBLIC_CACHE_MS);
+    if (method !== "GET") for (const path of touches) written.add(path);
   }
   // A token's lifetime is an idle window the server pushes forward as the
   // token is used, and this is the expiry it now has.
@@ -166,6 +204,7 @@ function documents(root, name, send) {
       });
     },
     add(data, { signal } = {}) {
+      jsonValue(data);
       return send(path, {
         method: "POST",
         body: { data },
@@ -174,6 +213,7 @@ function documents(root, name, send) {
       });
     },
     set(id, data, { signal, condition: expected } = {}) {
+      jsonValue(data);
       return send(`${path}/${segment(id)}${condition(expected)}`, {
         method: "PUT",
         body: { data },
@@ -307,11 +347,12 @@ function owner(context, token, expiresAt) {
   };
   return Object.freeze({
     collection: (name) => documents(root, name, send),
-    async transaction(writes, { signal } = {}) {
+    async batch(writes, { signal } = {}) {
       const operations = writes.map(({ collection, set, delete: remove }) => {
         const write = set ?? remove;
         if (!write || Boolean(set) === Boolean(remove))
-          throw new TypeError("Each transaction write must set or delete.");
+          throw new TypeError("Each batch write must set or delete.");
+        if (set) jsonValue(set.data);
         segment(collection);
         segment(write.id);
         return {
@@ -494,9 +535,7 @@ async function ownerSession(context) {
 export function createNaru(options) {
   const context = target(options);
   return Object.freeze({
-    public: Object.freeze({
-      collection: (name) => publicDocuments(context.root, name),
-    }),
+    collection: (name) => publicDocuments(context.root, name),
     auth: Object.freeze({
       session: () => ownerSession(context),
       signIn: ({ collections }) => signIn(context, collections),

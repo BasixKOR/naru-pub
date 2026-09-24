@@ -149,8 +149,8 @@ export function decodeCursor(
       throw new Error();
     name(cursor.i);
     if (sort.field) {
-      // The anchor is the field's JSONB text, compared as JSONB again on the
-      // way in, so PostgreSQL's own rendering round-trips exactly.
+      // Preserve the field value exactly; the service derives Naru's explicit
+      // ordering keys from it again when continuing the query.
       if (typeof cursor.t !== "string") throw new Error();
       JSON.parse(cursor.t);
     } else if (sort.orderBy === "id") {

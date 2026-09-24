@@ -39,9 +39,9 @@ Create a collection in the control plane, choose its permissions, then use this 
 
 ```html
 <script type="module">
-  import { createNaru, NaruError } from "https://naru.pub/sdk/1/naru-data.js";
+  import { createNaru, NaruError } from "https://naru.pub/sdk/1/naru.js";
   const naru = createNaru();
-  const entries = naru.public.collection("guestbook");
+  const entries = naru.collection("guestbook");
 
   try {
     const { id } = await entries.add({ name: "Visitor", message: "Hello!" });
@@ -62,9 +62,9 @@ Create a collection in the control plane, choose its permissions, then use this 
 
 A page served from `<login>.naru.pub` belongs to that site, so `createNaru()` needs nothing else. A custom domain or local page uses `createNaru({ site: "login-name" })`. Every collection and authentication operation then comes from that one client.
 
-`get` returns `{ id, data, revision, createdAt, updatedAt }`; a missing document throws `NaruError` with `code: "NOT_FOUND"`. `set` replaces the whole document or creates it if absent. `add` generates an opaque ID without requiring read permission. `add` and `set` return `{ id, revision, createdAt, updatedAt }`, so a caller rendering what it just saved uses the server's own timestamps rather than the browser clock. `delete` is idempotent and resolves with nothing. JSON null is stored as a value, not treated as deletion. Render user data with `textContent`, not `innerHTML`.
+`get` returns `{ id, data, revision, createdAt, updatedAt }`; a missing document throws `NaruError` with `code: "NOT_FOUND"`. `set` replaces the whole document or creates it if absent. `add` generates an opaque ID without requiring read permission. `add` and `set` return `{ id, data, revision, createdAt, updatedAt }`, so a caller rendering what it just saved uses the server's own timestamps rather than the browser clock. `delete` is idempotent and resolves with nothing. JSON null is stored as a value, not treated as deletion. Render user data with `textContent`, not `innerHTML`.
 
-SDK declarations are available alongside the module at `/sdk/1/naru-data.d.ts`. The SDK pins `https://naru.pub` as its control-plane origin, even when bundled/copied. It takes no option to change that; Naru's own integration tests redirect its requests to a loopback server in their `fetch` shim instead.
+SDK declarations are available alongside the module at `/sdk/1/naru.d.ts`. The SDK pins `https://naru.pub` as its control-plane origin, even when bundled/copied. It takes no option to change that; Naru's own integration tests redirect its requests to a loopback server in their `fetch` shim instead.
 
 ## Website owner login
 
@@ -82,7 +82,7 @@ Minimal editor-page wiring:
 <button id="logout" disabled>Sign out</button>
 <p id="status"></p>
 <script type="module">
-  import { createNaru } from "https://naru.pub/sdk/1/naru-data.js";
+  import { createNaru } from "https://naru.pub/sdk/1/naru.js";
   const naru = createNaru();
   const status = document.querySelector("#status");
   async function run(action) {
@@ -118,7 +118,7 @@ Minimal editor-page wiring:
 </script>
 ```
 
-The site name and the exact callback URL identify the registration; there is no client ID. The requested collections must be a subset of the registration. Handles from `naru.public.collection()` never use owner credentials; only `owner.collection()` uses owner authority. Tokens permit reading, creating, replacing and deleting documents in those collections, including private documents. They are tied to collection IDs so deleting and recreating a collection does not transfer old grants.
+The site name and the exact callback URL identify the registration; there is no client ID. The requested collections must be a subset of the registration. Handles from `naru.collection()` never use owner credentials; only `owner.collection()` uses owner authority. Tokens permit reading, creating, replacing and deleting documents in those collections, including private documents. They are tied to collection IDs so deleting and recreating a collection does not transfer old grants.
 
 Authentication uses random state and mandatory S256 PKCE. The verifier and state live in tab-scoped sessionStorage for at most ten minutes; authorization codes expire after 60 seconds and are single-use, including concurrent exchanges. The server stores only code/token hashes. Each registered admin page has a control-plane token lifetime of 1-1440 whole minutes (default 1440). Each sign-in issues one opaque admin token capped by this setting, the duration displayed at consent, and the approving Naru session. The platform maximum remains 24 hours.
 
@@ -132,16 +132,16 @@ Authorization approval and registration changes require same-origin owner reques
 
 Two URLs serve the SDK, and a site picks one:
 
-- `/sdk/1/naru-data.js` (and `/sdk/1/naru-data.d.ts`) is the newest 1.x release. A site that imports it picks up compatible fixes and additions without changing anything. This is what the docs and the example blog use.
-- `/sdk/1.0.0/naru-data.js` is one exact release, for a site that wants the same code on every load. **1.0.0 remains under active development and will continue to be updated until the project owner says otherwise**; once frozen it never changes, and fixes ship as 1.0.1 and so on.
+- `/sdk/1/naru.js` (and `/sdk/1/naru.d.ts`) is the newest 1.x release. A site that imports it picks up compatible fixes and additions without changing anything. This is what the docs and the example blog use.
+- `/sdk/1.0.0/naru.js` is one exact release, for a site that wants the same code on every load. **1.0.0 remains under active development and will continue to be updated until the project owner says otherwise**; once frozen it never changes, and fixes ship as 1.0.1 and so on.
 
 Both are served `no-cache`, so browsers revalidate. `/sdk/1/` is a rewrite in `next.config.mjs`; point it at the newest 1.x directory when one ships. Unversioned SDK URLs are not served. A change that would break a 1.x caller goes into `/sdk/2/`.
 
 The wire protocol is versioned separately, in the path: `/api/data/v1/:site` and `/api/data-auth/v1/*`. Every 1.x SDK file that was ever served keeps calling these, including copies cached or bundled by sites, so they stay compatible for as long as 1.x is supported: routes, parameters, response shapes and error codes. Breaking server changes need `/api/data/v2/` alongside v1.
 
-The 1.0.0 SDK is deliberately small. Its runtime exports are only `createNaru` and `NaruError`. A client has `public.collection()` and `auth`; an owner has `collection()`, `transaction()`, `media.upload()` and `signOut()`. Media listing and deletion remain in the control panel. Features are added when a site needs them, not in advance.
+The 1.0.0 SDK is deliberately small. Its runtime exports are only `createNaru` and `NaruError`. A client has `collection()` and `auth`; an owner has `collection()`, `batch()`, `media.upload()` and `signOut()`. Media listing and deletion remain in the control panel. Features are added when a site needs them, not in advance.
 
-During 1.0.0 development the SDK dropped `createDatabase`, per-collection `parse`/`map`, `schemas`, `update` merge patches and `unset`, `count()`, `all()`, string `orderBy` with `direction`, `fresh`, `timeoutMs`, `createRequestChannel`, session events, client-side request and response validation, upload progress, image tuning options, and the file `get`, `update` and `usage` methods. The server removed the matching endpoints and parameters.
+During 1.0.0 development the SDK dropped `createDatabase`, per-collection `parse`/`map`, `schemas`, `update` merge patches and `unset`, `count()`, `all()`, string `orderBy` with `direction`, `fresh`, `timeoutMs`, `createRequestChannel`, session events, application schema parsing and response validation, upload progress, image tuning options, and the file `get`, `update` and `usage` methods. The server removed the obsolete public endpoints and options. The SDK still validates JSON values and uses private transport parameters for cache bypass.
 
 ## Internal HTTP protocol
 
@@ -171,7 +171,7 @@ Website root: `/api/data/v1/:site`. Control-plane root: `/api/account/database` 
 | PUT    | `/_files/:id`                            | Owner-only finalize; verifies the stored bytes                    |
 | DELETE | `/_files/:id`                            | Control panel only: `{ success: true }`                           |
 
-A response to an accepted owner request carries `Naru-Owner-Expires`, the renewed expiry as epoch milliseconds, exposed to the page through CORS; the SDK stores it so its own copy stays current. It is additive, so an SDK that ignores it simply holds an expiry no later than the true one. A public write result is `{ id, revision, createdAt, updatedAt }`. A delete, alone or batched, refuses an absence condition. `_batch` takes `set` and `delete` operations only (a server-assigned id is `add`'s, outside transactions) and reports nothing beyond success. A website token may only authorize and finalize uploads; the media library is listed and deleted from the control panel. A list accepts `filter` and `sort` (URL-encoded JSON, exactly as passed to the SDK), `size`, `after` and `includeTotal=1`. An upload authorization takes `{ name, contentType, size }` and returns `{ id, uploadUrl, headers }`: PUT the bytes to `uploadUrl` with those headers, then finalize with `PUT /_files/:id`. The SDK returns a file's `{ url, name, contentType, size }`; the control panel's library reads `{ id, name, contentType, size, url, createdAt, updatedAt }`. The public route does not accept `PATCH`.
+A response to an accepted owner request carries `Naru-Owner-Expires`, the renewed expiry as epoch milliseconds, exposed to the page through CORS; the SDK stores it so its own copy stays current. It is additive, so an SDK that ignores it simply holds an expiry no later than the true one. A public write result is `{ id, data, revision, createdAt, updatedAt }`. A delete, alone or batched, refuses an absence condition. `_batch` takes `set` and `delete` operations only (a server-assigned id is `add`'s, outside transactions) and reports nothing beyond success. A website token may only authorize and finalize uploads; the media library is listed and deleted from the control panel. A private `fresh=1` query flag forces a non-cacheable read; it is not an SDK option. A list accepts `filter` and `sort` (URL-encoded JSON, exactly as passed to the SDK), `size`, `after` and `includeTotal=1`. An upload authorization takes `{ name, contentType, size }` and returns `{ id, uploadUrl, headers }`: PUT the bytes to `uploadUrl` with those headers, then finalize with `PUT /_files/:id`. The SDK returns a file's `{ url, name, contentType, size }`; the control panel's library reads `{ id, name, contentType, size, url, createdAt, updatedAt }`. The public route does not accept `PATCH`.
 
 All JSON request bodies require `Content-Type: application/json`. Website errors return `{ error: { code, message } }`, where `code` is one of the v1 codes in the [SDK reference](sdk-v1-api.md#errors-and-cancellation); the server sets it, and the HTTP status is diagnostic. A `DataError` names its code only where the status alone would be wrong (a failed condition and a full quota are both 409, for instance); otherwise 401, 403, 404, 429 and 5xx map to `AUTH_REQUIRED`, `ACCESS_DENIED`, `NOT_FOUND`, `RATE_LIMITED` and `UNAVAILABLE`, and any other status to `INVALID_REQUEST`. The v1 code list is closed: a new code needs a new protocol version, and the SDK reads a code it does not know by its status. The control-plane root keeps `{ error }` with a plain message. Public preflight needs no authentication. Errors, writes, and authenticated reads are not cached; anonymous reads from `world`-readable collections may use the short shared cache described below.
 
@@ -196,10 +196,10 @@ There are at most 20 registrations per site, 20 pending codes and 50 live tokens
 - Maximum request body: 64 KiB, including the `{ data }` envelope; enforced while streaming, even without Content-Length.
 - Collection names and document IDs: 1–64 ASCII letters, numbers, underscores or hyphens.
 - Pages: 1–100 documents (default 50), defaulting to ID ascending under the database collation. See sorting below; pagination is not a snapshot across concurrent changes.
-- PostgreSQL JSONB semantics apply, including JavaScript number precision and no significant object key order.
+- Documents use JSON values with JavaScript number precision and no significant object key order. Application-visible ordering is defined by Naru, not by database collation.
 - Owner-row locks serialize permission checks, writes, and quota checks across server processes. Reads take no such lock. Deletes free quota; account deletion cascades through collections and documents.
 - A site holds at most 10,000 media files: the byte quota alone does not bound row count, since the smallest accepted file is one byte.
-- Each individual replacement or delete is atomic. `owner.transaction()` makes its ID-addressed sets and deletes one atomic server transaction. Writes are last-write-wins when no condition is supplied; `condition.revision` rejects stale writes and `condition.absent` guards creation. There are no realtime subscriptions, offline persistence, custom indexes, arbitrary query expressions, per-document rules, or visitor accounts in v1.
+- Each individual replacement or delete is atomic. `owner.batch()` makes its ID-addressed sets and deletes one atomic server transaction. Writes are last-write-wins when no condition is supplied; `condition.revision` rejects stale writes and `condition.absent` guards creation. There are no realtime subscriptions, offline persistence, custom indexes, arbitrary query expressions, per-document rules, or visitor accounts in v1.
 
 ## File uploads (SDK 1.0.0)
 
@@ -238,7 +238,7 @@ prefix. Upload authorizations that are not finalized, including ones whose
 transfer failed, are removed by the background cleanup after one hour.
 
 Bytes go from the browser straight to R2 on a signed URL, so the browser is the
-only place a photo can be made smaller before it is stored. The SDK shrinks a
+only place a photo can be made smaller before it is stored. The current implementation (not a frozen SDK guarantee) shrinks a
 JPEG, PNG, WebP or HEIC image before asking for an authorization when its long
 edge exceeds 2048 px or it is larger than 512 KiB: it draws it at most 2048 px
 on the long edge and encodes WebP at quality 0.82, or JPEG on a white background
@@ -246,8 +246,8 @@ where the browser cannot encode WebP. The declared size is the shrunk size, so
 quota and the 25 MiB limit count what is stored. The original is kept when
 re-encoding would not make it smaller; HEIC is always converted, since it is not
 an accepted type, which is how an iPhone photo uploads from Safari. Re-encoding
-drops EXIF: orientation is baked into the pixels and capture coordinates never
-reach the public origin. The stored name takes the new extension. There are no
+drops EXIF and bakes orientation into the pixels. Files retained unchanged may
+still contain metadata; upload is not a metadata-removal guarantee. The stored name takes the new extension. There are no
 options; the media library at `/media` uploads originals and does not resize.
 
 Public access intentionally permits callers from any origin. Every write that arrives without an owner credential — creates into a `create` collection and replacements or deletes in a `world`-writable one alike — uses database-backed fixed-minute limits of 60 successful writes per site and 20 per caller/IP per site, shared across collections and server processes. Owner writes do not consume these limits. Failed writes roll back their counters. A credential-less write that is already over either limit is refused with one unlocked read before it waits for the site's owner-row lock, so a burst past the limit does not queue behind legitimate writes; the locked count remains the authoritative check.
@@ -274,11 +274,13 @@ any shared cache honour it. Anything carrying a credential, every write, and
 every error stays `no-store`, so an intermediary that ignores `Vary` can never
 replay one caller's authorized response to somebody else.
 
-The SDK remembers every collection this browser writes — anonymous guestbook
-entries as well as owner edits, and writes whose response was lost — and reads
-that collection with `no-store` for the same ten seconds, so re-reading a list
-straight after your own write needs nothing extra. A write made in another
-browser can take up to ten seconds to appear in a cached public read.
+The SDK remembers every collection this loaded module writes, including writes
+whose response was lost. Its subsequent reads of those collections carry the
+private `fresh=1` transport flag and request `no-store`. The server answers
+these reads with `no-store` too; caches never store this separate query variant.
+This lasts until the module is reloaded and is independent of the server's
+cache lifetime. Unwritten collections continue to benefit from shared caching.
+Other browsers can see public writes after the shared cache expires.
 
 That window is also the lag on a permission change: changing a collection from
 `world` to `admin` stops new reads immediately, but a shared cache may keep
@@ -309,7 +311,7 @@ The Korean guides are served publicly at `/docs` (index), `/docs/database` and `
 
 ```js
 const naru = createNaru();
-const posts = naru.public.collection("posts");
+const posts = naru.collection("posts");
 const query = {
   sort: [
     ["publishedOn", "desc"],
@@ -323,9 +325,20 @@ const next = await posts.list({ ...query, after: first.nextCursor });
 
 `sort` is always a list of one or two `[field, direction]` pairs. User fields are named directly; metadata uses `{ metadata: "id" | "createdAt" | "updatedAt" }`, and the ID may only be the sole key. `direction` is `asc` or `desc`. The document ID is appended automatically as the final tie-breaker. Without `sort`, a list reads in ID order.
 
-Metadata timestamp ties use document ID in the last direction. JSON-field values use PostgreSQL JSONB ordering; missing fields sort at the same position as JSON null, followed by strings and then numbers. The metadata orders have composite collection/time/ID indexes; JSON-field sorting scans the narrowed collection and has no per-field index.
+Metadata timestamp ties use document ID in the last direction. IDs use ASCII
+order. User fields sort ascending as missing/null/non-scalars, strings, numbers,
+then booleans (false before true). Strings use Unicode code-point order without
+locale rules or normalization; numbers compare numerically. Descending reverses
+the order. Arrays and objects tie with null and missing fields. The SQL builds
+these keys explicitly rather than exposing PostgreSQL JSONB ordering.
+The explicit-document-ordering migration sets ID collation to C and rebuilds
+the existing primary and metadata indexes. It holds a table lock while doing so;
+allow a maintenance window for large installations. Its rollback restores the
+database default collation without changing document data.
+Metadata orders have composite collection/time/ID indexes; JSON-field sorting
+scans the narrowed collection and has no per-field index.
 
-`get` and `list` return `createdAt` as well as `updatedAt`. Server metadata is camelCase throughout the API; the underlying columns stay snake_case. Creation time is assigned by the server, preserved on replacement, and cannot be changed by fields in `data`. The migration backfills existing documents from their recorded modification time; their original creation time is unknown.
+`get`, `add`, `set`, and the documents in `list` return `data`, `createdAt`, and `updatedAt`. Server metadata is camelCase throughout the API; the underlying columns stay snake_case. Creation time is assigned by the server, preserved on replacement, and cannot be changed by fields in `data`. The migration backfills existing documents from their recorded modification time; their original creation time is unknown.
 
 Pass `nextCursor` unchanged as `after` with the same collection, ordering, and filters. Cursors are opaque, query-bound continuation state: applications must not inspect or construct them. The SDK and server may change their representation. They are not credentials; read permissions are checked on every request. Changing page size is allowed.
 
@@ -336,7 +349,7 @@ Cancel a superseded read with a standard `AbortController`, passing its `signal`
 ## Equality and range filters with automatic indexes
 
 ```js
-const page = await naru.public.collection("posts").list({
+const page = await naru.collection("posts").list({
   filter: {
     category: "일상",
     date: { gte: "2026-09-01", lt: "2026-10-01" },
@@ -356,17 +369,17 @@ Opaque cursors include a SHA-256 fingerprint of normalized filters. Reordering e
 
 ## Extended blog example
 
-Create `posts` (world/admin), `guestbook` (world/create), and **`drafts` (admin/admin)**. Register the callback with `posts` and `drafts`. Edit the existing callback in the control plane to include both collections; its grants are revoked immediately but its Client ID remains valid. New pages use the shared website Client ID. When upgrading from callback-specific IDs, replace them once with the shared website Client ID and sign in again.
+Create `posts` (world/admin), `guestbook` (world/create), and **`drafts` (admin/admin)**. Register the callback with `posts` and `drafts`. Edit the existing callback in the control plane to include both collections; its grants are revoked immediately. No Client ID is needed; site and registered page URL identify the page.
 
 The public list filters by exact `category`. The editor loads paginated posts/drafts, edits documents while preserving other JSON fields, saves private drafts, publishes, and deletes the selected document after confirmation. Local tab storage preserves the editor through the login redirect; explicit server draft saving persists across sessions. Signing out clears the editor and local draft.
 
-Draft and public copies share an ID. Saving a private draft does not unpublish or change an existing public post. Publication uses `owner.transaction()` to write the post and remove its draft atomically; failure preserves the draft and leaves the public post unchanged. Deletion affects only the selected collection. An editor returns the opaque revision it read as `condition.revision` to detect a concurrent change and receive `CONFLICT` instead of overwriting it. Guestbook moderation remains in the control panel.
+Draft and public copies share an ID. Saving a private draft does not unpublish or change an existing public post. Publication uses `owner.batch()` to write the post and remove its draft atomically; failure preserves the draft and leaves the public post unchanged. Deletion affects only the selected collection. An editor returns the opaque revision it read as `condition.revision` to detect a concurrent change and receive `CONFLICT` instead of overwriting it. Guestbook moderation remains in the control panel.
 
 ### Website identity and admin tokens
 
 Sign-in no longer uses a client ID; `site_data_site_clients`, which held one per owner, is unused and will be dropped. Each registered page retains its exact callback and collection IDs. Changing a callback URL or its collection permissions revokes all of its codes and access tokens, including when widening scope. Reducing its token lifetime also revokes them. Increasing only the lifetime preserves existing tokens with their original deadlines; pending codes retain the duration already approved. Saving an unchanged registration does not revoke access. Removing a callback cascades the same revocation.
 
-Every `/api/data-auth/v1/token` exchange returns `{ accessToken, expiresAt }`; the token is sent as `Authorization: Bearer <accessToken>`. `expiresAt` is the fixed expiry in Unix milliseconds; the token lasts no longer than the configured page lifetime, consented duration, platform maximum, or approving Naru session, whichever ends first. `POST /api/data-auth/v1/revoke` takes the bearer token and revokes it idempotently. The unpublished renewal tables and `/refresh` and `/end-session` endpoints have been removed; the existing access-token table is sufficient. Requests use explicit credentials and never ambient cookies.
+Every `/api/data-auth/v1/token` exchange returns `{ accessToken, expiresAt }`; the token is sent as `Authorization: Bearer <accessToken>`. `expiresAt` is the current expiry in Unix milliseconds. Accepted owner requests renew the idle window within the hard bounds described under authentication above; the `Naru-Owner-Expires` response header keeps the SDK current. `POST /api/data-auth/v1/revoke` takes the bearer token and revokes it idempotently. The unpublished renewal tables and `/refresh` and `/end-session` endpoints have been removed; the existing access-token table is sufficient. Requests use explicit credentials and never ambient cookies.
 
 ### Configuring token lifetime
 
@@ -378,11 +391,15 @@ Consent displays the configured duration and submits that displayed value. Appro
 
 `collection<Post>("posts")` and `owner.collection<Post>("posts")` type reads,
 lists and complete replacement writes. Types describe the application's
-schema; the SDK does not validate documents or server responses at runtime.
+schema; the SDK checks JSON values but does not validate application fields at runtime.
 
-Data is sent with `JSON.stringify`, so values it drops or coerces (undefined,
-functions, `Date`) are stored the way it serializes them. Convert dates to
-strings explicitly. `set()` replaces the entire document; there is no merge.
+Only JSON values are accepted: null, booleans, strings, finite numbers, dense
+arrays, and plain objects. Undefined, functions, symbols, bigint, dates, class
+instances, accessors, sparse arrays, and cycles throw `TypeError` before sending.
+Convert dates to strings explicitly. `set()` replaces the entire document;
+there is no merge. `get`, `add`, and `set` return the same document shape,
+including the stored data. A create-only visitor receives its own saved data,
+without gaining access to any previous or other document.
 Each successful document write returns an opaque `revision`. Pass a previously
 read revision as `condition.revision` to `set()` or `delete()` to reject a stale write
 with `code: "CONFLICT"`; `condition: { absent: true }` asserts that the document does not

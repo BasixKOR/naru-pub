@@ -7,7 +7,13 @@ let db,
   busy = false,
   cursor,
   listKind = "posts";
-let state = { id: null, kind: null, hasDraft: false, extra: {} };
+let state = {
+  id: null,
+  kind: null,
+  postRevision: null,
+  draftRevision: null,
+  extra: {},
+};
 let dirty = false;
 const draftKey = `naru:blog-draft:${config.site}:${location.pathname}`;
 function data() {
@@ -39,7 +45,10 @@ function updateUI() {
     "manage-more",
   ])
     $(id).disabled = busy || !owner;
-  $("delete-post").disabled = busy || !owner || !state.kind;
+  for (const id of ["publish", "save-draft", "delete-post"])
+    $(id).disabled ||= !!state.needsReload;
+  $("delete-post").disabled =
+    busy || !owner || !state.kind || !!state.needsReload;
   $("new-post").disabled = busy;
   $("login").hidden = !!owner;
   $("login").disabled = busy;
@@ -78,11 +87,31 @@ function canLeave() {
   return !dirty || window.confirm("저장하지 않은 내용을 버릴까요?");
 }
 function clearEditor() {
-  state = { id: null, kind: null, hasDraft: false, extra: {} };
+  state = {
+    id: null,
+    kind: null,
+    postRevision: null,
+    draftRevision: null,
+    extra: {},
+  };
   $("post-form").reset();
   dirty = false;
   sessionStorage.removeItem(draftKey);
   $("view-post").hidden = true;
+}
+async function revisionOf(kind, id) {
+  try {
+    return (await owner.collection(kind).get(id)).revision;
+  } catch (error) {
+    if (error.code === "NOT_FOUND") return null;
+    throw error;
+  }
+}
+function showDocument(doc) {
+  state.extra = doc.data;
+  $("title").value = text(doc.data.title);
+  $("body").value = text(doc.data.body);
+  $("category").value = text(doc.data.category);
 }
 async function loadList(reset = true) {
   if (!owner) return;
@@ -115,7 +144,14 @@ async function loadList(reset = true) {
         state = {
           id: latest.id,
           kind,
-          hasDraft: kind === "drafts",
+          postRevision:
+            kind === "posts"
+              ? latest.revision
+              : await revisionOf("posts", latest.id),
+          draftRevision:
+            kind === "drafts"
+              ? latest.revision
+              : await revisionOf("drafts", latest.id),
           extra: content,
         };
         $("title").value = text(content.title);
@@ -166,7 +202,13 @@ try {
           ? saved.id
           : null,
       kind: ["posts", "drafts"].includes(saved.kind) ? saved.kind : null,
-      hasDraft: saved.hasDraft === true,
+      postRevision:
+        typeof saved.postRevision === "string" ? saved.postRevision : null,
+      draftRevision:
+        typeof saved.draftRevision === "string" ? saved.draftRevision : null,
+      needsReload:
+        saved.needsReload === true ||
+        (!!saved.kind && !(saved.postRevision || saved.draftRevision)),
       extra:
         saved.extra &&
         typeof saved.extra === "object" &&
@@ -228,9 +270,14 @@ $("save-draft").addEventListener("click", () =>
     if (!owner) throw new Error("먼저 로그인하세요.");
     if (!$("title").value.trim()) throw new Error("제목을 입력하세요.");
     saveLocal();
-    await owner.collection("drafts").set(state.id, data());
+    const saved = await owner.collection("drafts").set(state.id, data(), {
+      condition: state.draftRevision
+        ? { revision: state.draftRevision }
+        : { absent: true },
+    });
+    state.draftRevision = saved.revision;
+    showDocument(saved);
     state.kind = "drafts";
-    state.hasDraft = true;
     dirty = false;
     saveLocal();
     await refreshAfterWrite("초안을 저장했습니다.");
@@ -243,9 +290,23 @@ $("post-form").addEventListener("submit", (event) => {
     if (!$("title").value.trim() || !$("body").value.trim())
       throw new Error("제목과 본문을 입력하세요.");
     saveLocal();
-    await publishPost(owner, state.id, data(), state.hasDraft);
+    await publishPost(
+      owner,
+      state.id,
+      data(),
+      state.postRevision,
+      state.kind === "drafts" ? state.draftRevision : null,
+    );
+    // The batch has committed. If reading its result fails, require a reload
+    // before another save; never pair old editor content with a new revision.
+    state.needsReload = true;
+    saveLocal();
+    const saved = await owner.collection("posts").get(state.id);
+    showDocument(saved);
+    state.postRevision = saved.revision;
+    if (state.kind === "drafts") state.draftRevision = null;
+    state.needsReload = false;
     state.kind = "posts";
-    state.hasDraft = false;
     dirty = false;
     saveLocal();
     $("view-post").href = `../post.html?id=${encodeURIComponent(state.id)}`;
@@ -262,7 +323,12 @@ $("delete-post").addEventListener("click", () =>
       )
     )
       return;
-    await owner.collection(state.kind).delete(state.id);
+    await owner.collection(state.kind).delete(state.id, {
+      condition: {
+        revision:
+          state.kind === "posts" ? state.postRevision : state.draftRevision,
+      },
+    });
     clearEditor();
     await refreshAfterWrite("지웠습니다.");
   }),

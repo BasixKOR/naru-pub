@@ -33,7 +33,7 @@ import {
   createNaru,
   type NaruClient,
   type Owner,
-} from "../../../../public/sdk/1.0.0/naru-data.js";
+} from "../../../../public/sdk/1.0.0/naru.js";
 
 const integration =
   process.env.NARU_DATA_TEST === "1" ? describe : describe.skip;
@@ -252,6 +252,12 @@ integration("SDK and data API contract", () => {
       version: 7,
     });
     expect(added).toEqual({
+      data: {
+        title: "한글",
+        nested: { value: null },
+        tags: [1, true],
+        version: 7,
+      },
       id: expect.any(String),
       revision: "r1.1",
       createdAt: expect.any(String),
@@ -278,6 +284,7 @@ integration("SDK and data API contract", () => {
     ).toEqual({
       id: added.id,
       revision: "r1.2",
+      data: { replaced: true },
       createdAt: first.createdAt,
       updatedAt: expect.any(String),
     });
@@ -310,7 +317,7 @@ integration("SDK and data API contract", () => {
       }),
     ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
     await expect(
-      owner.transaction([
+      owner.batch([
         {
           collection: "crud",
           delete: { id: added.id, condition: { absent: true } as never },
@@ -371,15 +378,13 @@ integration("SDK and data API contract", () => {
   });
 
   test("owner transactions return void and roll back conflicts across collections", async () => {
-    await expect(
-      naru.public.collection("private").list(),
-    ).rejects.toMatchObject({
+    await expect(naru.collection("private").list()).rejects.toMatchObject({
       code: "ACCESS_DENIED",
     });
     const privateWrite = await owner
       .collection("private")
       .add({ secret: true });
-    const result = await owner.transaction([
+    const result = await owner.batch([
       {
         collection: "atomic",
         set: { id: "one", data: { original: true } },
@@ -389,7 +394,7 @@ integration("SDK and data API contract", () => {
     expect(result).toBeUndefined();
     const privateId = privateWrite.id;
     await expect(
-      owner.transaction([
+      owner.batch([
         {
           collection: "atomic",
           set: {
@@ -549,7 +554,7 @@ integration("SDK and data API contract", () => {
       ).expires_at.getTime(),
     ).toBe(renewed);
     // An anonymous read carries no session to renew.
-    await naru.public.collection("crud").list();
+    await naru.collection("crud").list();
     expect(stored()).toBe(renewed);
   });
 

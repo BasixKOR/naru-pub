@@ -121,6 +121,25 @@ integration("site database integration", () => {
       status: 403,
     });
   });
+  test("create-only visitors receive their own stored document without gaining read access", async () => {
+    await call(
+      "POST",
+      [],
+      { name: "inquiries", read: "admin", write: "create" },
+      true,
+    );
+    const result = await call("POST", ["inquiries"], {
+      data: { message: "Hello" },
+    });
+    expect(result).toMatchObject({
+      id: expect.any(String),
+      data: { message: "Hello" },
+      version: 1,
+    });
+    await expect(call("GET", ["inquiries", result.id!])).rejects.toMatchObject({
+      status: 403,
+    });
+  });
   test("tenant isolation, pagination, replacement and cascade", async () => {
     other = (
       await sql<{

@@ -4,8 +4,8 @@ import { readFile } from "node:fs/promises";
 const routes = new Map([
   ["/", new URL("./sdk.html", import.meta.url)],
   [
-    "/sdk/1.0.0/naru-data.js",
-    new URL("../../public/sdk/1.0.0/naru-data.js", import.meta.url),
+    "/sdk/1.0.0/naru.js",
+    new URL("../../public/sdk/1.0.0/naru.js", import.meta.url),
   ],
 ]);
 createServer(async (req, res) => {

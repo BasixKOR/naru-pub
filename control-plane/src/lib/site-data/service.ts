@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { sql } from "kysely";
+import { sql, type RawBuilder } from "kysely";
 import { db, requestDeadline } from "@/lib/database";
 import {
   authorize,
@@ -61,7 +61,7 @@ const TIMESTAMPS = [
 ];
 /** Every accepted write reports the version a later conditional write quotes
  * and the stamps a caller renders, so it never guesses a timestamp. */
-const WRITTEN = ["version", "created_at", "updated_at"] as const;
+const WRITTEN = ["data", "version", "created_at", "updated_at"] as const;
 /** "Delete only if absent" could only ever do nothing, so it is refused. */
 function deletable(expected: number | undefined) {
   if (expected === 0)
@@ -83,6 +83,19 @@ function matchVersion(expected: number, actual: number | undefined) {
       "CONFLICT",
     );
 }
+/** Naru ordering: null/missing/non-scalars, strings, numbers, booleans.
+ * Explicit keys keep the contract independent of JSONB ordering and locale.
+ * Every component is non-null so cursor comparisons form a total order. */
+function scalarOrder(value: RawBuilder<unknown>) {
+  return sql`ROW(
+    CASE jsonb_typeof(${value}) WHEN 'string' THEN 1 WHEN 'number' THEN 2 WHEN 'boolean' THEN 3 ELSE 0 END,
+    (CASE WHEN jsonb_typeof(${value}) = 'string' THEN ${value} #>> '{}' ELSE '' END) COLLATE "C",
+    CASE WHEN jsonb_typeof(${value}) = 'number' THEN (${value})::numeric ELSE 0 END,
+    CASE WHEN jsonb_typeof(${value}) = 'boolean' THEN (${value})::boolean ELSE false END
+  )`;
+}
+const ID_ORDER = sql`id COLLATE "C"`;
+
 /** Filters address top-level fields of a document's `data`. */
 function filterConditions(filter: ReturnType<typeof filters>) {
   const target = sql.ref("data");
@@ -99,10 +112,12 @@ function filterConditions(filter: ReturnType<typeof filters>) {
   for (const [field, operator, bound] of filter.ranges) {
     // JSONB orders numbers above strings, so ranges compare within one type
     // only. Comparing JSONB rather than a cast never raises on other types.
+    const value = sql`${target} -> ${field}`;
+    conditions.push(sql<boolean>`jsonb_typeof(${value}) = ${typeof bound}`);
     conditions.push(
-      sql<boolean>`jsonb_typeof(${target} -> ${field}) = ${typeof bound} and ${target} -> ${field} ${sql.raw(
-        COMPARISONS[operator],
-      )} ${JSON.stringify(bound)}::jsonb`,
+      typeof bound === "string"
+        ? sql<boolean>`(${target} ->> ${field}) COLLATE "C" ${sql.raw(COMPARISONS[operator])} ${bound}`
+        : sql<boolean>`${value} ${sql.raw(COMPARISONS[operator])} ${JSON.stringify(bound)}::jsonb`,
     );
   }
   return conditions;
@@ -275,12 +290,17 @@ export async function executeData(command: DataCommand) {
             filter.fingerprint,
           )
         : decodeCursor(command.after, collection.id, sort, filter.fingerprint);
-      // A missing field collapses to JSON null, the lowest JSONB value, so the
-      // sort key is never SQL NULL and the tuple comparison stays a total order.
-      const sortValues = sorts.map((item) =>
+      const rawValues = sorts.map((item) =>
         item.field
           ? sql`coalesce(data -> ${item.field}, 'null'::jsonb)`
           : sql.ref(item.column),
+      );
+      const sortValues = sorts.map((item, index) =>
+        item.field
+          ? scalarOrder(rawValues[index])
+          : item.orderBy === "id"
+            ? ID_ORDER
+            : rawValues[index],
       );
       const sortValue = sortValues[0];
       let query = documents()
@@ -293,7 +313,7 @@ export async function executeData(command: DataCommand) {
           (item.orderBy === "id"
             ? sql<string | null>`null`
             : item.field
-              ? sql<string>`(${value})::text`
+              ? sql<string>`(${rawValues[index]})::text`
               : sql<string>`to_char(${value} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
           ).as(`cursor_value_${index}`),
         );
@@ -302,18 +322,18 @@ export async function executeData(command: DataCommand) {
       query = query.limit(limit + 1);
       for (const condition of conditions) query = query.where(condition);
       if (!sorts.some((item) => item.orderBy === "id"))
-        query = query.orderBy("id", sorts.at(-1)!.direction);
+        query = query.orderBy(ID_ORDER, sorts.at(-1)!.direction);
       if (cursor) {
         if (!multiple) {
           const single = cursor as { id: string; value: string | null };
           const comparison = sort.direction === "asc" ? ">" : "<";
           if (sort.orderBy === "id")
-            query = query.where("id", comparison, single.id);
+            query = query.where(ID_ORDER, comparison, single.id);
           else
             query = query.where(
-              sql<boolean>`(${sortValue}, id) ${sql.raw(comparison)} (${
+              sql<boolean>`(${sortValue}, ${ID_ORDER}) ${sql.raw(comparison)} (${
                 sort.field
-                  ? sql`${single.value}::jsonb`
+                  ? scalarOrder(sql`${single.value}::jsonb`)
                   : sql`${single.value}::timestamptz`
               }, ${single.id})`,
             );
@@ -321,7 +341,7 @@ export async function executeData(command: DataCommand) {
           const multi = cursor as { id: string; values: string[] };
           const cursorValues = sorts.map((item, index) =>
             item.field
-              ? sql`${multi.values[index]}::jsonb`
+              ? scalarOrder(sql`${multi.values[index]}::jsonb`)
               : sql`${multi.values[index]}::timestamptz`,
           );
           const branches = sorts.map((item, index) => {
@@ -348,7 +368,7 @@ export async function executeData(command: DataCommand) {
                   (value, index) =>
                     sql<boolean>`${value} = ${cursorValues[index]}`,
                 ),
-                sql<boolean>`id ${sql.raw(idComparison)} ${multi.id}`,
+                sql<boolean>`${ID_ORDER} ${sql.raw(idComparison)} ${multi.id}`,
               ],
               sql` and `,
             )})`,
@@ -356,7 +376,7 @@ export async function executeData(command: DataCommand) {
           query = query.where(sql<boolean>`(${sql.join(branches, sql` or `)})`);
         }
       }
-      const rows = (await query.execute()) as Array<{
+      type ListedRow = {
         id: string;
         data: unknown;
         version: number;
@@ -364,17 +384,35 @@ export async function executeData(command: DataCommand) {
         updatedAt: Date;
         cursor_value_0?: string | null;
         cursor_value_1?: string | null;
-      }>;
-      const page = rows.slice(0, limit);
-      const last = page.at(-1);
+      };
+      let rows: ListedRow[];
       let totalCount: number | undefined;
       if (command.includeTotal) {
         let counter = documents().select(
           tx.fn.countAll<string>().as("matched"),
         );
         for (const condition of conditions) counter = counter.where(condition);
-        totalCount = Number((await counter.executeTakeFirstOrThrow()).matched);
-      }
+        // One SQL statement gives the page and count the same snapshot without
+        // changing isolation or retrying the owner-token renewal transaction.
+        const result = await tx
+          .selectNoFrom([
+            sql<
+              ListedRow[]
+            >`coalesce((select json_agg(page) from (${query}) as page), '[]'::json)`.as(
+              "rows",
+            ),
+            counter.as("total"),
+          ])
+          .executeTakeFirstOrThrow();
+        rows = result.rows.map((row) => ({
+          ...row,
+          createdAt: new Date(row.createdAt),
+          updatedAt: new Date(row.updatedAt),
+        }));
+        totalCount = Number(result.total);
+      } else rows = (await query.execute()) as ListedRow[];
+      const page = rows.slice(0, limit);
+      const last = page.at(-1);
       return {
         documents: page.map((row) => {
           const document = { ...row };
@@ -493,11 +531,11 @@ export async function executeData(command: DataCommand) {
         .returning(WRITTEN)
         .executeTakeFirstOrThrow();
     }
-    // Do not read/return stored data: write-only callers may not read it.
-    // Version and timestamps are write metadata, not content. Spelled out here
-    // rather than built by a helper so the union of results stays discriminable.
+    // Return only the newly stored replacement, never the previous content.
+    // Create-only callers receive their own write without gaining read access.
     return {
       id,
+      data: row.data,
       version: row.version,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -625,7 +663,7 @@ export async function executeBatch(command: DataCommand) {
         "Site database quota exceeded.",
         "QUOTA_EXCEEDED",
       );
-    // The SDK resolves a transaction with nothing, so nothing is reported.
+    // The SDK resolves a batch with nothing, so nothing is reported.
     return { success: true };
   });
 }

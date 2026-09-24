@@ -70,7 +70,7 @@ export default function DatabaseManager({
     void run(refresh);
   }, []);
   // A page on the site's own subdomain needs no site option; custom domains do.
-  const snippet = `import { createNaru } from "${origin}/sdk/1/naru-data.js";\nconst naru = createNaru({ site: ${JSON.stringify(site)} });\nconst entries = naru.public.collection(${JSON.stringify(selected || "guestbook")});\nconst page = await entries.list();`;
+  const snippet = `import { createNaru } from "${origin}/sdk/1/naru.js";\nconst naru = createNaru({ site: ${JSON.stringify(site)} });\nconst entries = naru.collection(${JSON.stringify(selected || "guestbook")});\nconst page = await entries.list();`;
   return (
     <div className="mx-auto h-full w-full max-w-7xl overflow-auto p-4 space-y-6 sm:p-6 lg:p-8">
       <header className="flex flex-wrap items-start justify-between gap-4 border-b pb-6">

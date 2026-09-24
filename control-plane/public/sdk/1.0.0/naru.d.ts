@@ -17,6 +17,7 @@ declare const revisionBrand: unique symbol;
 /** An opaque concurrency token. Store and return it unchanged. */
 export type Revision = string & { readonly [revisionBrand]: true };
 
+/** A read or successful write: user data stays separate from server metadata. */
 export interface Document<T = Json> {
   id: string;
   data: T;
@@ -49,8 +50,6 @@ export type NaruErrorCode =
 export class NaruError extends Error {
   private constructor();
   readonly code: NaruErrorCode;
-  /** True for `RATE_LIMITED` and `UNAVAILABLE`. */
-  readonly retryable: boolean;
 }
 
 /** Top-level user fields, combined with AND. */
@@ -104,15 +103,7 @@ export type WriteCondition = { revision: Revision } | { absent: true };
 export interface PublicCollection<T = Json> {
   get(id: string, options?: { signal?: AbortSignal }): Promise<Document<T>>;
   list(options?: ListOptions): Promise<Page<T>>;
-  add(
-    data: T,
-    options?: { signal?: AbortSignal },
-  ): Promise<{
-    id: string;
-    revision: Revision;
-    createdAt: string;
-    updatedAt: string;
-  }>;
+  add(data: T, options?: { signal?: AbortSignal }): Promise<Document<T>>;
 }
 
 export interface OwnerCollection<T = Json> extends PublicCollection<T> {
@@ -121,12 +112,7 @@ export interface OwnerCollection<T = Json> extends PublicCollection<T> {
     id: string,
     data: T,
     options?: { condition?: WriteCondition; signal?: AbortSignal },
-  ): Promise<{
-    id: string;
-    revision: Revision;
-    createdAt: string;
-    updatedAt: string;
-  }>;
+  ): Promise<Document<T>>;
   /** Deleting a missing document succeeds unless a condition was supplied. */
   delete(
     id: string,
@@ -136,8 +122,8 @@ export interface OwnerCollection<T = Json> extends PublicCollection<T> {
 
 export interface Owner {
   collection<T = Json>(name: string): OwnerCollection<T>;
-  /** Commits every write or none. */
-  transaction(
+  /** Commits every write or none. Conditions guard individual documents. Does not retry. */
+  batch(
     writes: readonly (
       | {
           collection: string;
@@ -166,8 +152,8 @@ export interface Owner {
 }
 
 export interface NaruClient {
-  /** Operations that do not use owner credentials. */
-  public: { collection<T = Json>(name: string): PublicCollection<T> };
+  /** Visitor access, even when signed in. */
+  collection<T = Json>(name: string): PublicCollection<T>;
   auth: {
     session(): Promise<Owner | null>;
     /** Redirects to Naru for approval. */

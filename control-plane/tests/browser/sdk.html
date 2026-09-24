@@ -10,7 +10,7 @@
 <button id="reload">Check page reload</button>
 <pre id="results" role="status">Ready</pre>
 <script type="module">
-  import { createNaru, NaruError } from "/sdk/1.0.0/naru-data.js";
+  import { createNaru, NaruError } from "/sdk/1.0.0/naru.js";
   const naru = createNaru({ site: "sdk-browser-test" });
   const sessionKey = `naru:owner:https://naru.pub:sdk-browser-test:${location.origin}${location.pathname}`;
   const reloadKey = "naru-sdk-fixture-reload";
@@ -72,19 +72,28 @@
           init.method === "PUT"
             ? {
                 id: "one",
-                version: 2,
+                revision: "r1.2",
+                data: JSON.parse(init.body).data,
                 createdAt: "2026-01-01T00:00:00Z",
                 updatedAt: "2026-01-01T00:00:00Z",
               }
             : { documents: [], nextCursor: null },
         );
       };
-      const notes = naru.public.collection("notes");
+      const notes = naru.collection("notes");
       await notes.list({ filter: { tag: "한글" } });
-      await owner
+      const saved = await owner
         .collection("notes")
         .set("one", { title: "x" }, { condition: { revision: "r1.1" } });
       await notes.list({ filter: { tag: "한글" } });
+      check(
+        saved.data.title === "x" && saved.revision === "r1.2",
+        "writes return the stored document",
+      );
+      check(
+        calls[2].url.searchParams.get("fresh") === "1",
+        "read after write requests server-enforced freshness",
+      );
       check(
         JSON.parse(calls[0].url.searchParams.get("filter")).tag === "한글",
         "Korean filters survive URL encoding",

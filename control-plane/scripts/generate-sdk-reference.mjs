@@ -351,7 +351,7 @@ async function entry(child) {
 /* ----------------------------------------------------------------- run ---- */
 
 async function build(version) {
-  const entryPoint = join(root, "public", "sdk", version, "naru-data.d.ts");
+  const entryPoint = join(root, "public", "sdk", version, "naru.d.ts");
   // The declarations are standalone by design, so they are read on their own
   // terms rather than through the application's tsconfig.
   const app = await Application.bootstrap({

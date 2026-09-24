@@ -1,7 +1,21 @@
-// One transaction: the post is published and its draft removed, or neither.
-export function publishPost(owner, id, data, hasDraft) {
-  return owner.transaction([
-    { collection: "posts", set: { id, data } },
-    ...(hasDraft ? [{ collection: "drafts", delete: { id } }] : []),
+// Every replacement and deletion quotes the version the editor opened.
+export function publishPost(owner, id, data, postRevision, draftRevision) {
+  return owner.batch([
+    {
+      collection: "posts",
+      set: {
+        id,
+        data,
+        condition: postRevision ? { revision: postRevision } : { absent: true },
+      },
+    },
+    ...(draftRevision
+      ? [
+          {
+            collection: "drafts",
+            delete: { id, condition: { revision: draftRevision } },
+          },
+        ]
+      : []),
   ]);
 }

@@ -4,7 +4,7 @@ import { dispatchActorUpdate } from "@/lib/federation";
 import { s3Client } from "@/lib/s3";
 import { getHomepageUrl, getRenderedSiteUrl } from "@/lib/utils";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
-import { Browser, BrowserContext, chromium } from "playwright";
+import { Browser, chromium } from "playwright";
 
 // Usage:
 //   pnpm exec tsx src/cli/update-screenshots.tsx
@@ -17,9 +17,13 @@ import { Browser, BrowserContext, chromium } from "playwright";
 //   pnpm exec tsx src/cli/update-screenshots.tsx --user <login_name> --force
 //     → render that user, ignoring the predicate
 //   pnpm exec tsx src/cli/update-screenshots.tsx --concurrency 8
-//     → override the default parallel-render worker count (default: 6)
+//     → override the default parallel-render worker count (default: 2)
 
-const DEFAULT_CONCURRENCY = 6;
+// Each render holds an arbitrary user site open for ten seconds at 2x scale in
+// its own renderer, and this runs on the host every other service shares. Six
+// at once took the cron container from 64MB to 1.85GB. A run is normally a
+// handful of sites; anything the timeout cuts off is picked up next time.
+const DEFAULT_CONCURRENCY = 2;
 
 type TargetUser = { id: number; login_name: string };
 
@@ -78,18 +82,26 @@ async function purgeCloudflareCache(url: string): Promise<void> {
   }
 }
 
-async function renderUser(
-  context: BrowserContext,
-  user: TargetUser,
-): Promise<void> {
+async function takeScreenshot(browser: Browser, url: string): Promise<Buffer> {
+  // A context per site, closed whatever happens. One shared context kept every
+  // site's cache and storage for the whole run, and a page whose goto timed out
+  // was never closed, so its renderer stayed up until the browser did.
+  const context = await browser.newContext({ deviceScaleFactor: 2 });
+  try {
+    const page = await context.newPage();
+    await page.setViewportSize({ width: 640, height: 480 });
+    await page.goto(url, { timeout: 10 * 1000 });
+    await page.waitForTimeout(10 * 1000);
+    return await page.screenshot();
+  } finally {
+    await context.close();
+  }
+}
+
+async function renderUser(browser: Browser, user: TargetUser): Promise<void> {
   const homepageUrl = getHomepageUrl(user.login_name);
 
-  const page = await context.newPage();
-  page.setViewportSize({ width: 640, height: 480 });
-  await page.goto(homepageUrl, { timeout: 10 * 1000 });
-  await page.waitForTimeout(10 * 1000);
-  const screenshot = await page.screenshot();
-  await page.close();
+  const screenshot = await takeScreenshot(browser, homepageUrl);
 
   if (screenshot.length === 0) {
     console.log(`Skipping ${user.login_name}: screenshot is 0 bytes`);
@@ -148,7 +160,7 @@ async function main() {
     browser = await chromium.launch({
       executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
     });
-    const context = await browser.newContext({ deviceScaleFactor: 2 });
+    const launched = browser;
 
     let cursor = 0;
     const worker = async () => {
@@ -157,7 +169,7 @@ async function main() {
         if (index >= targets.length) return;
         const user = targets[index];
         try {
-          await renderUser(context, user);
+          await renderUser(launched, user);
         } catch (error) {
           console.error(`Failed to render ${user.login_name}: ${error}`);
         }
@@ -166,8 +178,6 @@ async function main() {
 
     const workerCount = Math.min(concurrency, targets.length);
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
-
-    await context.close();
   } finally {
     if (browser) await browser.close();
   }

@@ -111,6 +111,17 @@ async function admin(admin: Admin) {
   // A set reports its new revision; a delete reports null.
   const after: Revision | undefined = stored0?.revision;
   void [after, removed];
+  // Documents typed with interfaces go in a batch as they go in set(), even
+  // when the batch spans collections of different shapes.
+  const post: Post = { title: "x", published: true };
+  interface Category {
+    name: string;
+  }
+  const category: Category = { name: "news" };
+  await admin.batch([
+    { collection: "posts", set: { id: "one", data: post } },
+    { collection: "categories", set: { id: "news", data: category } },
+  ]);
   // @ts-expect-error A batch result carries metadata, not the data written.
   void stored0?.data;
   const file = await admin.media.upload(new Blob(["x"]), {

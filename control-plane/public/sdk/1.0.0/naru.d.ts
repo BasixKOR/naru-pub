@@ -138,7 +138,9 @@ export interface Admin {
     writes: readonly (
       | {
           collection: string;
-          set: { id: string; data: Json; condition?: WriteCondition };
+          // Any value, as one collection's own type would be: a batch spans
+          // collections, and is checked for JSON when it is called.
+          set: { id: string; data: unknown; condition?: WriteCondition };
         }
       | {
           collection: string;

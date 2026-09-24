@@ -44,7 +44,7 @@
         {
           "name": "batch",
           "optional": false,
-          "signature": "batch(\n  writes: readonly (\n    | {\n        collection: string;\n        set: { condition?: WriteCondition; data: Json; id: string };\n      }\n    | {\n        collection: string;\n        delete: { condition?: { revision: Revision }; id: string };\n      }\n  )[],\n  options?: { signal?: AbortSignal },\n): Promise<\n  ({\n    createdAt: string;\n    id: string;\n    revision: Revision;\n    updatedAt: string;\n  } | null)[]\n>",
+          "signature": "batch(\n  writes: readonly (\n    | {\n        collection: string;\n        set: { condition?: WriteCondition; data: unknown; id: string };\n      }\n    | {\n        collection: string;\n        delete: { condition?: { revision: Revision }; id: string };\n      }\n  )[],\n  options?: { signal?: AbortSignal },\n): Promise<\n  ({\n    createdAt: string;\n    id: string;\n    revision: Revision;\n    updatedAt: string;\n  } | null)[]\n>",
           "summary": [
             {
               "type": "paragraph",

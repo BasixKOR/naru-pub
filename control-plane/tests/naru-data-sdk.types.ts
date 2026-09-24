@@ -58,6 +58,18 @@ async function page() {
   } while (cursor);
   const loose: Json = (await other.get("one")).data;
 }
+async function walk() {
+  const total: number = await posts.count({ filter: { published: true } });
+  for await (const page of posts.pages({ sort: [["title", "asc"]], size: 100 }))
+    for (const document of page.documents) {
+      const title: string = document.data.title;
+      void title;
+    }
+  // @ts-expect-error A count has nothing to sort or page.
+  posts.count({ size: 10 });
+  void total;
+}
+void walk;
 // @ts-expect-error sort is always a list of pairs.
 posts.list({ sort: "createdAt" });
 // @ts-expect-error Arrays are not filter values.
@@ -89,13 +101,18 @@ async function admin(admin: Admin) {
   await drafts.delete("one", { condition: { absent: true } });
   await drafts.delete("one", { condition: { revision: next } });
   void [created, saved, expected];
-  await admin.batch([
+  const [stored0, removed] = await admin.batch([
     {
       collection: "posts",
       set: { id: "one", data: {}, condition: { absent: true } },
     },
     { collection: "drafts", delete: { id: "one" } },
   ]);
+  // A set reports its new revision; a delete reports null.
+  const after: Revision | undefined = stored0?.revision;
+  void [after, removed];
+  // @ts-expect-error A batch result carries metadata, not the data written.
+  void stored0?.data;
   const file = await admin.media.upload(new Blob(["x"]), {
     signal,
   });

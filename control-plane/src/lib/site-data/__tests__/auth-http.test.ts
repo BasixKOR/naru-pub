@@ -88,6 +88,7 @@ test("token exchange ignores ambient cookies and forwards origin to grant verifi
   expect(Object.keys(await response.json()).sort()).toEqual([
     "accessToken",
     "expiresAt",
+    "expiresIn",
   ]);
   expect(owner.exchangeCode).toHaveBeenCalledWith(
     body,

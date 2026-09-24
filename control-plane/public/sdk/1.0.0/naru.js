@@ -141,9 +141,11 @@ async function request(
     if (method !== "GET") for (const path of touches) written.add(path);
   }
   // A token's lifetime is an idle window the server pushes forward as the
-  // token is used, and this is the expiry it now has.
-  const renewed = Number(response.headers.get("Naru-Owner-Expires"));
-  if (renew && Number.isFinite(renewed)) renew(renewed);
+  // token is used, and this is the expiry it now has. It arrives as a duration
+  // so this browser's clock, however wrong, only measures it.
+  const renewed = response.headers.get("Naru-Owner-Expires-In");
+  if (renew && renewed !== null && Number.isFinite(Number(renewed)))
+    renew(Date.now() + Number(renewed) * 1000);
   const result = await response.json().catch(() => null);
   if (!response.ok)
     throw new NaruError(
@@ -174,8 +176,10 @@ function query({ filter, sort, size, after, includeTotal } = {}) {
   return text ? `?${text}` : "";
 }
 
-function condition(value) {
-  if (value === undefined) return "";
+// Shared by single writes and batches, so both refuse the same mistakes here.
+// A delete conditional on absence could only ever do nothing.
+function checkCondition(value, { deleting = false } = {}) {
+  if (value === undefined) return value;
   if (!value || typeof value !== "object")
     throw new TypeError("condition must contain revision or absent.");
   if (Object.keys(value).length !== 1)
@@ -183,25 +187,50 @@ function condition(value) {
   if (Object.hasOwn(value, "revision")) {
     if (typeof value.revision !== "string" || !value.revision)
       throw new TypeError("condition.revision must be returned by Naru.");
-    return `?ifRevision=${encodeURIComponent(value.revision)}`;
+    return value;
   }
-  if (value.absent === true) return "?ifAbsent=1";
-  throw new TypeError("condition must contain revision or absent.");
+  if (value.absent === true && !deleting) return value;
+  throw new TypeError(
+    deleting
+      ? "A delete can only be conditional on a revision."
+      : "condition must contain revision or absent.",
+  );
+}
+
+function condition(value, options) {
+  checkCondition(value, options);
+  if (value === undefined) return "";
+  return value.revision
+    ? `?ifRevision=${encodeURIComponent(value.revision)}`
+    : "?ifAbsent=1";
 }
 
 function documents(root, name, send) {
   const path = `${root}/${segment(name)}`;
   const touches = [path];
+  const list = (options = {}) =>
+    send(`${path}${query(options)}`, { signal: options.signal, touches });
   return Object.freeze({
     async get(id, { signal } = {}) {
       const result = await send(`${path}/${segment(id)}`, { signal, touches });
       return result.document;
     },
-    list(options = {}) {
-      return send(`${path}${query(options)}`, {
-        signal: options.signal,
-        touches,
-      });
+    list,
+    // A total rides along with a one-document page; the list request is all
+    // the server needs to support.
+    async count({ filter, signal } = {}) {
+      return (await list({ filter, size: 1, includeTotal: true, signal }))
+        .totalCount;
+    },
+    // Each page as it arrives, following nextCursor. Like the pages it walks,
+    // this is not a snapshot: writes in between can shift later pages.
+    async *pages(options = {}) {
+      let after = options.after;
+      do {
+        const page = await list({ ...options, after });
+        yield page;
+        after = page.nextCursor;
+      } while (after);
     },
     add(data, { signal } = {}) {
       jsonValue(data);
@@ -222,11 +251,14 @@ function documents(root, name, send) {
       });
     },
     async delete(id, { signal, condition: expected } = {}) {
-      await send(`${path}/${segment(id)}${condition(expected)}`, {
-        method: "DELETE",
-        signal,
-        touches,
-      });
+      await send(
+        `${path}/${segment(id)}${condition(expected, { deleting: true })}`,
+        {
+          method: "DELETE",
+          signal,
+          touches,
+        },
+      );
     },
   });
 }
@@ -237,6 +269,8 @@ function publicDocuments(root, name) {
   return Object.freeze({
     get: collection.get,
     list: collection.list,
+    count: collection.count,
+    pages: collection.pages,
     add: collection.add,
   });
 }
@@ -247,9 +281,13 @@ function publicDocuments(root, name) {
 // upload is authorized, so quota counts what is stored, and by re-encoding,
 // which drops EXIF so a photo's location never reaches the public URL.
 const MAX_EDGE = 2048;
+// Naru never stores HEIC, so a photo in it is converted or refused here. The
+// other types Naru stores are the server's to say, and may grow.
+const HEIC = /^image\/hei[cf]$/;
+const HEIC_NAME = /\.hei[cf]$/i;
 const SMALL_BYTES = 512 * 1024;
 async function shrink(file) {
-  const heic = /^image\/hei[cf]$/.test(file.type);
+  const heic = HEIC.test(file.type);
   if (
     !(heic || /^image\/(jpeg|png|webp)$/.test(file.type)) ||
     typeof createImageBitmap !== "function"
@@ -333,8 +371,10 @@ function admin(context, token, expiresAt) {
     expiresAt = at;
     remember(key, token, at);
   };
+  // After signOut this handle refuses to send, whatever became of the revoke.
+  let signedOut = false;
   const send = async (url, init) => {
-    if (Date.now() >= expiresAt) {
+    if (signedOut || Date.now() >= expiresAt) {
       forget(key, token);
       throw new NaruError("Sign in again.", "AUTH_REQUIRED");
     }
@@ -355,6 +395,7 @@ function admin(context, token, expiresAt) {
         if (set) jsonValue(set.data);
         segment(collection);
         segment(write.id);
+        checkCondition(write.condition, { deleting: !set });
         return {
           type: set ? "set" : "delete",
           collection,
@@ -366,16 +407,36 @@ function admin(context, token, expiresAt) {
       const touches = [
         ...new Set(operations.map((item) => `${root}/${item.collection}`)),
       ];
-      await send(`${root}/_batch`, {
+      const { results } = await send(`${root}/_batch`, {
         method: "POST",
         body: { operations },
         signal,
         touches,
       });
+      // In the order written: what each set stored, and null for a delete.
+      return results.map((result) =>
+        result
+          ? {
+              id: result.id,
+              revision: result.revision,
+              createdAt: result.createdAt,
+              updatedAt: result.updatedAt,
+            }
+          : null,
+      );
     },
     media: Object.freeze({
       async upload(source, { signal } = {}) {
-        const file = await shrink(source);
+        // Some browsers leave an iPhone photo's type empty.
+        const file = await shrink(
+          !source.type && HEIC_NAME.test(source.name ?? "")
+            ? new File([source], source.name, { type: "image/heic" })
+            : source,
+        );
+        if (HEIC.test(file.type))
+          throw new TypeError(
+            "This browser cannot convert HEIC photos. Upload from Safari, or convert the photo to JPEG first.",
+          );
         const authorization = await send(`${root}/_files`, {
           method: "POST",
           body: {
@@ -419,6 +480,7 @@ function admin(context, token, expiresAt) {
     }),
     /** Forgets the session here first, then asks Naru to revoke it. */
     async signOut() {
+      signedOut = true;
       forget(key, token);
       await request(`${origin}/api/data-auth/v1/revoke`, {
         method: "POST",
@@ -435,6 +497,8 @@ const base64url = (bytes) =>
     .replace(/\//g, "_")
     .replace(/=+$/, "");
 const random = () => base64url(crypto.getRandomValues(new Uint8Array(32)));
+// The exact address this tab is at. Naru matches it to the registered page and
+// sends the owner back to it, so the session below is found where it was left.
 const callback = () => location.origin + location.pathname;
 
 /**
@@ -473,8 +537,21 @@ async function signIn(context, collections) {
  * The signed-in admin client for this page, or null. Finishes a sign-in when
  * Naru has just redirected back, and otherwise restores this tab's session.
  * Call it before rendering: it removes the one-time code from the address bar.
+ *
+ * A sign-in that came back without completing (denied, stale, or a failed
+ * exchange) is an ordinary signed-out visit, never a page failure. The owner
+ * who denied it knows; anything else is fixed by signing in again.
  */
 async function adminSession(context) {
+  try {
+    return await finishSignIn(context);
+  } catch (error) {
+    if (error instanceof NaruError) return null;
+    throw error;
+  }
+}
+
+async function finishSignIn(context) {
   const key = sessionKey(context);
   const url = new URL(location.href);
   const code = url.searchParams.get("code");
@@ -512,6 +589,7 @@ async function adminSession(context) {
     );
   if (denied !== null)
     throw new NaruError("Sign-in was denied.", "ACCESS_DENIED");
+  const startedAt = Date.now();
   const token = await request(`${context.origin}/api/data-auth/v1/token`, {
     method: "POST",
     body: {
@@ -521,14 +599,16 @@ async function adminSession(context) {
     },
     touches: [],
   });
+  // The lifetime is measured on this browser's clock from before the request,
+  // so a clock set wrong can neither end the session early nor extend it.
+  const expiresAt = Number.isFinite(token.expiresIn)
+    ? startedAt + token.expiresIn * 1000
+    : token.expiresAt;
   sessionStorage.setItem(
     key,
-    JSON.stringify({
-      accessToken: token.accessToken,
-      expiresAt: token.expiresAt,
-    }),
+    JSON.stringify({ accessToken: token.accessToken, expiresAt }),
   );
-  return admin(context, token.accessToken, token.expiresAt);
+  return admin(context, token.accessToken, expiresAt);
 }
 
 /** Creates a client for one Naru site. */

@@ -326,6 +326,44 @@ integration("website owner authorization", () => {
       "accessToken",
     );
   });
+  test("every address of one page is one callback", async () => {
+    // Naru serves /blog, /blog/ and /blog/index.html as the page /blog/.
+    const page = await registerClient(owner, {
+      redirectUri: "https://alice.example/blog/index.html",
+      collections: ["posts"],
+    });
+    await expect(
+      registerClient(owner, {
+        redirectUri: "https://alice.example/blog",
+        collections: ["posts"],
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    const approved = await approveAuthorization(
+      owner,
+      "alice-session",
+      authInput({ redirectUri: "https://alice.example/blog" }),
+    );
+    // Back to the address the sign-in left from, where its tab keeps the
+    // pending sign-in, and exchanged from there.
+    const redirect = new URL(approved.redirect);
+    expect(redirect.origin + redirect.pathname).toBe(
+      "https://alice.example/blog",
+    );
+    await expect(
+      exchange(redirect.searchParams.get("code")!, {
+        redirectUri: "https://alice.example/blog",
+      }),
+    ).resolves.toHaveProperty("accessToken");
+    // A different file in that folder is a different page.
+    await expect(
+      approveAuthorization(
+        owner,
+        "alice-session",
+        authInput({ redirectUri: "https://alice.example/blog/other.html" }),
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    await removeClient(owner, page.id);
+  });
   test("consent explains an unregistered page and a wrong account on Naru", async () => {
     const unregistered = "https://alice.example/unknown.html";
     await expect(

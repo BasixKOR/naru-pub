@@ -66,8 +66,10 @@ export default function WebsiteAccess({
       </p>
       <p className="text-sm text-muted-foreground">
         본인의 나루 주소 또는 활성화된 인증 도메인만 사용할 수 있습니다. 콜백
-        URL에는 쿼리나 #을 넣지 마세요. 외부 스크립트가 없는 신뢰할 수 있는
-        관리자 페이지를 사용하세요.
+        URL에는 쿼리나 #을 넣지 마세요. <code>/admin/</code>과{" "}
+        <code>/admin/index.html</code>처럼 같은 페이지의 주소는 하나로
+        취급합니다. 외부 스크립트가 없는 신뢰할 수 있는 관리자 페이지를
+        사용하세요.
       </p>
       {error && (
         <p role="alert" className="text-destructive">

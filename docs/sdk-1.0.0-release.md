@@ -43,8 +43,12 @@ The blog tests exercise public browsing/guestbook and admin draft/publishing flo
 - Confirm the frozen shapes one last time, since a new versioned directory is
   the only way to change them afterwards. The surface is deliberately minimal:
   the runtime exports `createNaru` and `NaruError`; a client has `collection()`
-  and `auth`; an admin client has `collection()`, `batch()`, `media.upload()` and
-  `signOut()`. Server
+  and `auth`; a collection has `get`, `list`, `count`, `pages` and `add` (plus
+  `set` and `delete` for an admin); an admin client has `collection()`,
+  `batch()`, `media.upload()` and `signOut()`. `batch` resolves with each
+  write's `{ id, revision, createdAt, updatedAt }` (or `null` for a delete),
+  `session()` resolves `null` for a sign-in that did not complete, and a signed-
+  out handle refuses further calls. Server
   metadata is camelCase (`createdAt`/`updatedAt`), `add` and `set` return
   `{ id, data, revision, createdAt, updatedAt }`, `upload` returns
   `{ url, name, contentType, size }`, only the names an application writes

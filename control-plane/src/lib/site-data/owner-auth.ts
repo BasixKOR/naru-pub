@@ -71,6 +71,37 @@ export function callbackUrl(value: unknown): URL {
   return url;
 }
 
+/**
+ * The page the site proxy serves at a path: `/` and `/index.html` are one
+ * page, as are `/about`, `/about/` and `/about/index.html`. Kept here, beside
+ * the proxy it mirrors, rather than in the SDK, which cannot change with it.
+ */
+function page(url: URL) {
+  const path = url.pathname;
+  const last = path.slice(path.lastIndexOf("/") + 1);
+  const file =
+    last.includes(".") && !last.startsWith(".") && !last.endsWith(".");
+  const canonical =
+    last === "index.html"
+      ? path.slice(0, -last.length)
+      : file || path.endsWith("/")
+        ? path
+        : `${path}/`;
+  return url.origin + canonical;
+}
+
+/**
+ * A registration is for a page, so a callback matches it from any address
+ * that page is served at. Registrations are stored as the owner typed them.
+ */
+export function sameCallback(registered: string, requested: string) {
+  try {
+    return page(callbackUrl(registered)) === page(callbackUrl(requested));
+  } catch {
+    return false;
+  }
+}
+
 // Rechecked at registration, approval, exchange and every authenticated data call.
 // Removing or de-verifying a custom domain therefore invalidates its access.
 async function assertSiteOrigin(
@@ -164,14 +195,14 @@ export async function updateClient(
         ? current.redirect_uri
         : callbackUrl(body.redirectUri).href;
     await assertSiteOrigin(tx, userId, redirectUri);
-    const duplicate = await tx
+    const others = await tx
       .selectFrom("site_data_clients")
-      .select("id")
+      .select("redirect_uri")
       .where("user_id", "=", userId)
-      .where("redirect_uri", "=", redirectUri)
       .where("id", "!=", id)
-      .executeTakeFirst();
-    if (duplicate) throw new DataError(409, "Callback already registered.");
+      .execute();
+    if (others.some((c) => sameCallback(c.redirect_uri, redirectUri)))
+      throw new DataError(409, "Callback already registered.");
     const collections = names
       ? await scope(tx, userId, names)
       : current.collection_ids.map((id) => ({ id }));
@@ -216,19 +247,12 @@ export async function registerClient(
     await assertSiteOrigin(tx, userId, redirectUri);
     const existing = await tx
       .selectFrom("site_data_clients")
-      .select("id")
+      .select("redirect_uri")
       .where("user_id", "=", userId)
       .execute();
     if (existing.length >= 20)
       throw new DataError(409, "At most 20 website registrations are allowed.");
-    if (
-      await tx
-        .selectFrom("site_data_clients")
-        .select("id")
-        .where("user_id", "=", userId)
-        .where("redirect_uri", "=", redirectUri)
-        .executeTakeFirst()
-    ) {
+    if (existing.some((c) => sameCallback(c.redirect_uri, redirectUri))) {
       throw new DataError(
         409,
         "Callback already registered. Edit its registration to change access.",
@@ -308,12 +332,18 @@ async function authorizationDetails(
       403,
       `이 요청은 ${input.site} 사이트의 관리자 로그인입니다. 그 사이트의 나루 계정으로 로그인해 주세요.`,
     );
-  const client = await tx
-    .selectFrom("site_data_clients")
-    .select(["id", "redirect_uri", "collection_ids", "token_lifetime_seconds"])
-    .where("redirect_uri", "=", input.redirectUri)
-    .where("user_id", "=", userId)
-    .executeTakeFirst();
+  const client = (
+    await tx
+      .selectFrom("site_data_clients")
+      .select([
+        "id",
+        "redirect_uri",
+        "collection_ids",
+        "token_lifetime_seconds",
+      ])
+      .where("user_id", "=", userId)
+      .execute()
+  ).find((c) => sameCallback(c.redirect_uri, input.redirectUri));
   // Reported here, on Naru, rather than on the site: this is where it is fixed.
   // The address is shown as text only, never linked or redirected to, since
   // anyone can craft this request.
@@ -394,7 +424,9 @@ export async function approveAuthorization(
         expires_at: new Date(Date.now() + CODE_SECONDS * 1000),
       })
       .execute();
-    const redirect = new URL(client.redirect_uri);
+    // Back to the address the sign-in left from, which the SDK keeps its
+    // pending sign-in under. It matched the registered page just above.
+    const redirect = callbackUrl(input.redirectUri);
     redirect.searchParams.set("code", code);
     redirect.searchParams.set("state", input.state);
     return { redirect: redirect.href };
@@ -415,11 +447,11 @@ export async function exchangeCode(
     const client = await tx
       .selectFrom("site_data_auth_codes as g")
       .innerJoin("site_data_clients as c", "c.id", "g.client_id")
-      .select(["c.id", "c.user_id"])
+      .select(["c.id", "c.user_id", "c.redirect_uri"])
       .where("g.hash", "=", digest(code))
-      .where("c.redirect_uri", "=", redirectUri)
       .executeTakeFirst();
-    if (!client) throw denied();
+    if (!client || !sameCallback(client.redirect_uri, redirectUri))
+      throw denied();
     await lockOwner(tx, client.user_id);
     const current = await tx
       .selectFrom("site_data_clients")
@@ -428,7 +460,7 @@ export async function exchangeCode(
       .executeTakeFirst();
     if (
       !current ||
-      current.redirect_uri !== redirectUri ||
+      !sameCallback(current.redirect_uri, redirectUri) ||
       origin !== new URL(current.redirect_uri).origin
     )
       throw denied();
@@ -568,13 +600,15 @@ export async function tokenScope(
     throw denied();
   await assertSiteOrigin(tx, userId, grant.redirect_uri);
   const expiresAt = renewal(grant);
-  if (expiresAt !== new Date(grant.expires_at).getTime())
+  // Reported only when it moved: the SDK already holds the expiry otherwise.
+  if (expiresAt !== new Date(grant.expires_at).getTime()) {
     await tx
       .updateTable("site_data_access_tokens")
       .set({ expires_at: new Date(expiresAt) })
       .where("hash", "=", digest(token))
       .execute();
-  bearer.expiresAt = expiresAt;
+    bearer.expiresAt = expiresAt;
+  }
   return grant.collection_ids.filter((id) => grant.registered_ids.includes(id));
 }
 export async function revokeToken(token: string, origin: string | null) {

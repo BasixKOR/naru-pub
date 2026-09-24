@@ -254,9 +254,28 @@ integration("site database integration", () => {
         ifVersion: 1,
       },
       { type: "set", collection: "batched", id: "two", data: { title: "c" } },
+      { type: "delete", collection: "batched", id: "gone" },
     );
-    // The SDK resolves with nothing, so the server reports nothing.
-    expect(applied).toEqual({ success: true });
+    // In order: each set's new version and stamps, never its data; a delete
+    // reports null.
+    expect(applied).toEqual({
+      success: true,
+      results: [
+        {
+          id: "one",
+          version: 2,
+          createdAt: expect.any(Date),
+          updatedAt: expect.any(Date),
+        },
+        {
+          id: "two",
+          version: 1,
+          createdAt: expect.any(Date),
+          updatedAt: expect.any(Date),
+        },
+        null,
+      ],
+    });
     expect((await call("GET", ["batched", "one"])).document!.version).toBe(2);
     expect((await call("GET", ["batched", "one"])).document!.data).toEqual({
       title: "b",

@@ -219,6 +219,55 @@ test("list sends only the query options that constrain something", async () => {
   });
 });
 
+test("count asks for a one-document page and returns its total", async () => {
+  await browser(async ({ calls, respond }) => {
+    respond(() =>
+      Response.json({ documents: [{}], nextCursor: "c", totalCount: 42 }),
+    );
+    const filter = { published: true };
+    assert.equal(await collection("posts").count({ filter }), 42);
+    // Earlier tests wrote posts, so this module may add its fresh flag.
+    calls[0].url.searchParams.delete("fresh");
+    assert.deepEqual(Object.fromEntries(calls[0].url.searchParams), {
+      filter: JSON.stringify(filter),
+      size: "1",
+      includeTotal: "1",
+    });
+    assert.equal(await collection("posts").count(), 42);
+    assert.equal(calls[1].url.searchParams.has("filter"), false);
+  });
+});
+
+test("pages follows nextCursor with the same query until it runs out", async () => {
+  await browser(async ({ calls, respond }) => {
+    const cursors = ["c1", "c2", null];
+    respond(() =>
+      Response.json({ documents: [], nextCursor: cursors[calls.length - 1] }),
+    );
+    const sort = [["date", "desc"]];
+    const seen = [];
+    for await (const page of collection("posts").pages({ sort, size: 100 }))
+      seen.push(page.nextCursor);
+    assert.deepEqual(seen, ["c1", "c2", null]);
+    assert.deepEqual(
+      calls.map(({ url }) => url.searchParams.get("after")),
+      [null, "c1", "c2"],
+    );
+    for (const { url } of calls) {
+      assert.equal(url.searchParams.get("sort"), JSON.stringify(sort));
+      assert.equal(url.searchParams.get("size"), "100");
+    }
+    // Stopping early asks for nothing more; a given `after` is the start.
+    calls.length = 0;
+    for await (const page of collection("posts").pages({ after: "c1" })) {
+      void page;
+      break;
+    }
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url.searchParams.get("after"), "c1");
+  });
+});
+
 test("revisions are passed through without client-side parsing", async () => {
   await browser(async ({ calls, respond, storage }) => {
     saveSession(storage);
@@ -404,8 +453,16 @@ test("adminSession exchanges the returned code once and strips it from the addre
       }),
     );
     location.href = "https://alice.naru.pub/admin.html?tab=2&code=c1&state=s1";
-    const expiresAt = Date.now() + 3600000;
-    respond(() => Response.json({ accessToken: "t".repeat(43), expiresAt }));
+    // Naru's clock says the token expires in an hour; this device's clock is a
+    // day ahead. The session still lasts the hour, measured here.
+    const before = Date.now();
+    respond(() =>
+      Response.json({
+        accessToken: "t".repeat(43),
+        expiresIn: 3600,
+        expiresAt: before - 86400000 + 3600000,
+      }),
+    );
     const admin = await adminSession();
     assert.ok(admin);
     assert.equal(location.href, "https://alice.naru.pub/admin.html?tab=2");
@@ -416,28 +473,56 @@ test("adminSession exchanges the returned code once and strips it from the addre
       redirectUri: "https://alice.naru.pub/admin.html",
     });
     assert.equal(storage.has(`${SESSION}:pending`), false);
-    assert.deepEqual(JSON.parse(storage.get(SESSION)), {
-      accessToken: "t".repeat(43),
-      expiresAt,
-    });
+    const stored = JSON.parse(storage.get(SESSION));
+    assert.equal(stored.accessToken, "t".repeat(43));
+    assert.ok(
+      stored.expiresAt >= before + 3600000 &&
+        stored.expiresAt <= Date.now() + 3600000,
+    );
     // A reload restores the same deadline without a request.
     assert.ok(await adminSession());
     assert.equal(calls.length, 1);
   });
-  for (const query of [
-    "?code=c1&state=forged",
-    "?error=access_denied&state=s1",
+});
+
+test("a sign-in that did not complete is an ordinary signed-out visit", async () => {
+  for (const [query, startedAt] of [
+    ["?code=c1&state=forged", Date.now()],
+    // Consent took longer than the ten minutes a sign-in is kept.
+    ["?code=c1&state=s1", Date.now() - 11 * 60 * 1000],
+    ["?error=access_denied&state=s1", Date.now()],
   ])
     await browser(async ({ calls, storage, location }) => {
       storage.set(
         `${SESSION}:pending`,
-        JSON.stringify({ state: "s1", startedAt: Date.now() }),
+        JSON.stringify({ state: "s1", startedAt }),
       );
       location.href = `https://alice.naru.pub/admin.html${query}`;
-      await assert.rejects(adminSession(), NaruError);
+      const naru = createNaru();
+      assert.equal(await naru.auth.session(), null);
       assert.equal(calls.length, 0);
       assert.equal(location.href, "https://alice.naru.pub/admin.html");
+      // Reloading the page is an ordinary signed-out visit.
+      assert.equal(await naru.auth.session(), null);
     });
+  // An exchange that fails on the network is also only a failed sign-in.
+  await browser(async ({ calls, respond, storage, location }) => {
+    storage.set(
+      `${SESSION}:pending`,
+      JSON.stringify({
+        verifier: "v".repeat(43),
+        state: "s1",
+        startedAt: Date.now(),
+      }),
+    );
+    location.href = "https://alice.naru.pub/admin.html?code=c1&state=s1";
+    respond(() => {
+      throw new TypeError("offline");
+    });
+    const naru = createNaru();
+    assert.equal(await naru.auth.session(), null);
+    assert.equal(calls.length, 1);
+  });
 });
 
 test("a page's own ?code= is left alone when no sign-in was started here", async () => {
@@ -511,14 +596,22 @@ test("the admin client sends its token and forgets it when the session ends", as
 
 test("a renewed token keeps working past the expiry the session was stored with", async () => {
   await browser(async ({ respond, storage }) => {
-    const renewed = Date.now() + 7200000;
     saveSession(storage);
     const admin = await adminSession();
+    // The instant is for older SDK files; this one adds the duration to its
+    // own clock, so a server clock that disagrees does not matter.
+    const before = Date.now();
     respond(() =>
-      Response.json(written(), { headers: { "Naru-Owner-Expires": renewed } }),
+      Response.json(written(), {
+        headers: {
+          "Naru-Owner-Expires": before - 86400000,
+          "Naru-Owner-Expires-In": "7200",
+        },
+      }),
     );
     await admin.collection("posts").set("one", { title: "x" });
-    assert.equal(JSON.parse(storage.get(SESSION)).expiresAt, renewed);
+    const renewed = JSON.parse(storage.get(SESSION)).expiresAt;
+    assert.ok(renewed >= before + 7200000 && renewed <= Date.now() + 7200000);
     // The renewal survives a reload, and the client itself now runs that long.
     const restored = await adminSession();
     assert.ok(restored);
@@ -535,7 +628,7 @@ test("a renewed token keeps working past the expiry the session was stored with"
     );
     respond(() =>
       Response.json(written(), {
-        headers: { "Naru-Owner-Expires": Date.now() + 10800000 },
+        headers: { "Naru-Owner-Expires-In": "10800" },
       }),
     );
     await admin.collection("posts").set("three", { title: "z" });
@@ -557,6 +650,19 @@ test("signing out forgets the session before revoking, and never erases a newer 
     await assert.rejects(admin.signOut(), { code: "UNAVAILABLE" });
     assert.equal(calls[0].url.pathname, "/api/data-auth/v1/revoke");
     assert.equal(calls[0].headers.Authorization, `Bearer ${"t".repeat(43)}`);
+    // The revoke never arrived, but this handle is done all the same.
+    respond(() => Response.json(written()));
+    await assert.rejects(admin.collection("posts").set("one", {}), {
+      code: "AUTH_REQUIRED",
+    });
+    await assert.rejects(
+      admin.batch([{ collection: "posts", delete: { id: "one" } }]),
+      {
+        code: "AUTH_REQUIRED",
+      },
+    );
+    assert.equal(calls.length, 1);
+    calls.length = 0;
 
     saveSession(storage);
     const older = await adminSession();
@@ -573,12 +679,15 @@ test("signing out forgets the session before revoking, and never erases a newer 
   });
 });
 
-test("batch sends semantic writes and returns no transport results", async () => {
+test("batch sends semantic writes and resolves with each write's metadata", async () => {
   await browser(async ({ calls, respond, storage }) => {
     saveSession(storage);
     const admin = await adminSession();
     respond(() =>
-      Response.json({ results: [written("hello"), { success: true }] }),
+      Response.json({
+        success: true,
+        results: [{ ...written("hello"), data: {} }, null],
+      }),
     );
     const writes = [
       {
@@ -587,7 +696,8 @@ test("batch sends semantic writes and returns no transport results", async () =>
       },
       { collection: "drafts", delete: { id: "hello" } },
     ];
-    assert.equal(await admin.batch(writes), undefined);
+    // What the next conditional write quotes, without reading it back.
+    assert.deepEqual(await admin.batch(writes), [written("hello"), null]);
     assert.equal(calls[0].url.pathname, "/api/data/v1/alice/_batch");
     assert.deepEqual(JSON.parse(calls[0].body), {
       operations: [
@@ -605,6 +715,44 @@ test("batch sends semantic writes and returns no transport results", async () =>
     respond(emptyPage);
     await collection("drafts").list();
     assert.equal(calls.at(-1).cache, "no-store");
+  });
+});
+
+test("batch conditions are checked like single writes, before sending", async () => {
+  await browser(async ({ calls, storage }) => {
+    saveSession(storage);
+    const admin = await adminSession();
+    const posts = admin.collection("posts");
+    for (const condition of [
+      null,
+      {},
+      { revision: "" },
+      { absent: false },
+      { revision: "r1.1", absent: true },
+    ]) {
+      await assert.rejects(
+        admin.batch([
+          { collection: "posts", set: { id: "one", data: {}, condition } },
+        ]),
+        TypeError,
+      );
+      assert.throws(() => posts.set("one", {}, { condition }), TypeError);
+    }
+    // "Delete only if absent" could only ever do nothing.
+    await assert.rejects(
+      admin.batch([
+        {
+          collection: "posts",
+          delete: { id: "one", condition: { absent: true } },
+        },
+      ]),
+      TypeError,
+    );
+    await assert.rejects(
+      posts.delete("one", { condition: { absent: true } }),
+      TypeError,
+    );
+    assert.equal(calls.length, 0);
   });
 });
 
@@ -772,6 +920,34 @@ test("photos fall back to JPEG, and are left alone when shrinking would not help
     (await upload(heic, converted)).declared.contentType,
     "image/webp",
   );
+});
+
+test("a HEIC photo this browser cannot convert fails before anything is sent", async () => {
+  await browser(async ({ calls, storage }) => {
+    saveSession(storage);
+    const admin = await adminSession();
+    // No HEIC decoder here, as in Chrome and Firefox.
+    const old = globalThis.createImageBitmap;
+    globalThis.createImageBitmap = async () => {
+      throw new DOMException("unsupported", "InvalidStateError");
+    };
+    try {
+      await assert.rejects(
+        admin.media.upload(
+          new File([new Uint8Array(10)], "IMG.HEIC", { type: "image/heic" }),
+        ),
+        (error) => error instanceof TypeError && /Safari/.test(error.message),
+      );
+      // A typeless HEIC is recognized by its name and refused the same way.
+      await assert.rejects(
+        admin.media.upload(new File([new Uint8Array(10)], "IMG.heic")),
+        /Safari/,
+      );
+    } finally {
+      globalThis.createImageBitmap = old;
+    }
+    assert.equal(calls.length, 0);
+  });
 });
 
 test("a failed transfer is reported and not finalized", async () => {

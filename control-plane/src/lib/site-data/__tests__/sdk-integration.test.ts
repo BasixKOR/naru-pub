@@ -168,8 +168,13 @@ integration("SDK and data API contract", () => {
           write: name === "private" ? "admin" : "world",
         },
       });
+    // Registered as one address of the page and signed in from another; Naru
+    // serves both as the page /admin/, and returns to the one signed in from.
     const redirectUri = `${origin}/admin`;
-    await registerClient(userId, { redirectUri, collections });
+    await registerClient(userId, {
+      redirectUri: `${origin}/admin/index.html`,
+      collections,
+    });
     const verifier = "v".repeat(43);
     const approval = await approveAuthorization(
       userId,
@@ -311,11 +316,12 @@ integration("SDK and data API contract", () => {
     });
     await posts.delete(added.id);
     // "Delete only if absent" could only ever do nothing, alone or batched.
+    // The SDK refuses it before sending; the server refuses it regardless.
     await expect(
       posts.delete(added.id, {
         condition: { absent: true } as never,
       }),
-    ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    ).rejects.toThrow(TypeError);
     await expect(
       admin.batch([
         {
@@ -323,7 +329,15 @@ integration("SDK and data API contract", () => {
           delete: { id: added.id, condition: { absent: true } as never },
         },
       ]),
-    ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    ).rejects.toThrow(TypeError);
+    const absentDelete = await nativeFetch(
+      `${origin}/api/data/v1/alice/crud/${added.id}?ifAbsent=1`,
+      {
+        method: "DELETE",
+        headers: { Origin: origin, Authorization: `Bearer ${accessToken}` },
+      },
+    );
+    expect((await absentDelete.json()).error.code).toBe("INVALID_REQUEST");
     // Partial updates are not part of the contract.
     const patch = await nativeFetch(`${origin}/api/data/v1/alice/crud/new`, {
       method: "PATCH",
@@ -375,9 +389,15 @@ integration("SDK and data API contract", () => {
       includeTotal: true,
     });
     expect(everything.totalCount).toBe(5);
+    expect(await feed.count({ filter: query.filter })).toBe(3);
+    expect(await feed.count()).toBe(5);
+    const walked: string[] = [];
+    for await (const page of feed.pages({ ...query, size: 2 }))
+      walked.push(...page.documents.map((d) => d.id));
+    expect(walked).toEqual(["post_5", "post_4", "post_2"]);
   });
 
-  test("admin transactions return void and roll back conflicts across collections", async () => {
+  test("admin batches report each write and roll back conflicts across collections", async () => {
     await expect(naru.collection("private").list()).rejects.toMatchObject({
       code: "ACCESS_DENIED",
     });
@@ -391,7 +411,16 @@ integration("SDK and data API contract", () => {
       },
       { collection: "atomic", delete: { id: "missing" } },
     ]);
-    expect(result).toBeUndefined();
+    // A set reports what a later conditional write quotes; a delete, null.
+    expect(result).toEqual([
+      {
+        id: "one",
+        revision: "r1.1",
+        createdAt: expect.any(String),
+        updatedAt: expect.any(String),
+      },
+      null,
+    ]);
     const privateId = privateWrite.id;
     await expect(
       admin.batch([
@@ -544,15 +573,16 @@ integration("SDK and data API contract", () => {
     await admin.collection("crud").list();
     const renewed = stored();
     expect(renewed).toBeGreaterThan(Date.now() + 3500000);
-    expect(
-      (
-        await db
-          .selectFrom("site_data_access_tokens")
-          .select("expires_at")
-          .where("hash", "=", digest(accessToken))
-          .executeTakeFirstOrThrow()
-      ).expires_at.getTime(),
-    ).toBe(renewed);
+    // Measured on the browser's clock from a duration, so equal to the
+    // server's instant only to within the request's latency and rounding.
+    const serverExpiry = (
+      await db
+        .selectFrom("site_data_access_tokens")
+        .select("expires_at")
+        .where("hash", "=", digest(accessToken))
+        .executeTakeFirstOrThrow()
+    ).expires_at.getTime();
+    expect(Math.abs(renewed - serverExpiry)).toBeLessThan(5000);
     // An anonymous read carries no session to renew.
     await naru.collection("crud").list();
     expect(stored()).toBe(renewed);

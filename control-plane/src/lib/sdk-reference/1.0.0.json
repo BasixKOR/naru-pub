@@ -44,14 +44,38 @@
         {
           "name": "batch",
           "optional": false,
-          "signature": "batch(\n  writes: readonly (\n    | {\n        collection: string;\n        set: { condition?: WriteCondition; data: Json; id: string };\n      }\n    | {\n        collection: string;\n        delete: { condition?: { revision: Revision }; id: string };\n      }\n  )[],\n  options?: { signal?: AbortSignal },\n): Promise<void>",
+          "signature": "batch(\n  writes: readonly (\n    | {\n        collection: string;\n        set: { condition?: WriteCondition; data: Json; id: string };\n      }\n    | {\n        collection: string;\n        delete: { condition?: { revision: Revision }; id: string };\n      }\n  )[],\n  options?: { signal?: AbortSignal },\n): Promise<\n  ({\n    createdAt: string;\n    id: string;\n    revision: Revision;\n    updatedAt: string;\n  } | null)[]\n>",
           "summary": [
             {
               "type": "paragraph",
               "spans": [
                 {
                   "type": "text",
-                  "value": "Commits every write or none. Conditions guard individual documents. Does not retry."
+                  "value": "Commits every write or none. Conditions guard individual documents. Does not retry. Resolves, in the order written, with what each "
+                },
+                {
+                  "type": "code",
+                  "value": "set"
+                },
+                {
+                  "type": "text",
+                  "value": " stored and "
+                },
+                {
+                  "type": "code",
+                  "value": "null"
+                },
+                {
+                  "type": "text",
+                  "value": " for each "
+                },
+                {
+                  "type": "code",
+                  "value": "delete"
+                },
+                {
+                  "type": "text",
+                  "value": "."
                 }
               ]
             }
@@ -69,7 +93,17 @@
           "name": "signOut",
           "optional": false,
           "signature": "signOut(): Promise<void>",
-          "summary": [],
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "This handle stops working at once, even if the revoke request fails."
+                }
+              ]
+            }
+          ],
           "throws": []
         }
       ]
@@ -328,6 +362,31 @@
           "throws": []
         },
         {
+          "name": "count",
+          "optional": false,
+          "signature": "count(options?: {\n  filter?: Filter;\n  signal?: AbortSignal;\n}): Promise<number>",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "How many documents match "
+                },
+                {
+                  "type": "code",
+                  "value": "filter"
+                },
+                {
+                  "type": "text",
+                  "value": ", or the whole collection."
+                }
+              ]
+            }
+          ],
+          "throws": []
+        },
+        {
           "name": "get",
           "optional": false,
           "signature": "get(id: string, options?: { signal?: AbortSignal }): Promise<Document<T>>",
@@ -339,6 +398,39 @@
           "optional": false,
           "signature": "list(options?: ListOptions): Promise<Page<T>>",
           "summary": [],
+          "throws": []
+        },
+        {
+          "name": "pages",
+          "optional": false,
+          "signature": "pages(options?: ListOptions): AsyncIterable<Page<T>>",
+          "summary": [
+            {
+              "type": "paragraph",
+              "spans": [
+                {
+                  "type": "text",
+                  "value": "Every page of a query in turn, following "
+                },
+                {
+                  "type": "code",
+                  "value": "nextCursor"
+                },
+                {
+                  "type": "text",
+                  "value": " from "
+                },
+                {
+                  "type": "code",
+                  "value": "after"
+                },
+                {
+                  "type": "text",
+                  "value": " (or the start). Not a snapshot: writes in between can shift later pages."
+                }
+              ]
+            }
+          ],
           "throws": []
         }
       ]

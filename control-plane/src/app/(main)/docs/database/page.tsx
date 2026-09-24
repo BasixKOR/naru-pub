@@ -227,12 +227,16 @@ export default function DatabaseDocs() {
                 <li>
                   제어판의 ‘웹사이트 관리자 로그인’에 관리자 페이지 주소(예:{" "}
                   <code>https://내사이트.naru.pub/admin.html</code>)와 쓸
-                  컬렉션을 등록합니다.
+                  컬렉션을 등록합니다. <code>/admin/</code>, <code>/admin</code>
+                  , <code>/admin/index.html</code>처럼 같은 페이지의 주소는 모두
+                  같은 페이지로 취급합니다.
                 </li>
                 <li>
                   그 페이지에서 <code>naru.auth.signIn()</code>으로 로그인하고{" "}
                   <code>naru.auth.session()</code>으로 관리자 클라이언트를
-                  받습니다. 로그인 전이면 <code>null</code>입니다.
+                  받습니다. 로그인 전이면 <code>null</code>입니다. 소유자가
+                  승인을 거절했거나 로그인이 끝나지 못했을 때도{" "}
+                  <code>null</code>입니다.
                 </li>
               </ol>
               <Code language="html">{`<button id="login">관리자 로그인</button>
@@ -310,12 +314,16 @@ try {
                 <code>delete</code>를 최대 100개까지 묶어, 모두 반영하거나
                 하나도 반영하지 않습니다. 각 변경의 condition도 함께 검사합니다.
                 미리 읽은 값이 저절로 보호되는 것은 아니므로 고치는 문서의
-                revision을 넘기세요.
+                revision을 넘기세요. 결과는 쓴 순서대로, <code>set</code>은{" "}
+                <code>{"{ id, revision, createdAt, updatedAt }"}</code>,{" "}
+                <code>delete</code>는 <code>null</code>입니다. 다시 읽지 않고도
+                다음 condition에 쓸 revision을 알 수 있습니다.
               </p>
-              <Code>{`await admin.batch([
+              <Code>{`const [saved] = await admin.batch([
   { collection: "posts", set: { id, data: post, condition: { absent: true } } },
   { collection: "drafts", delete: { id, condition: { revision: draft.revision } } },
-]);`}</Code>
+]);
+// saved.revision → 다음 저장의 condition`}</Code>
             </Section>
 
             <Section id="read" title="05 · 목록과 페이지 나누기">
@@ -334,6 +342,14 @@ const page = await posts.list({ ...query, size: 20 });
 if (page.nextCursor) {
   const next = await posts.list({ ...query, size: 20, after: page.nextCursor });
   console.log(next.documents);
+}
+
+// 조건에 맞는 문서 수
+const total = await posts.count({ filter: query.filter });
+
+// 끝까지 한 쪽씩 (nextCursor를 대신 따라갑니다)
+for await (const page of posts.pages({ ...query, size: 100 })) {
+  console.log(page.documents);
 }`}</Code>
               <ul className="list-disc space-y-3 pl-6">
                 <li>
@@ -360,7 +376,10 @@ if (page.nextCursor) {
                   다음 페이지는 같은 filter·sort에 <code>nextCursor</code>를{" "}
                   <code>after</code>로 넘기고, <code>nextCursor</code>가{" "}
                   <code>null</code>이면 끝입니다.{" "}
-                  <code>includeTotal: true</code>면 전체 개수도 받습니다.
+                  <code>includeTotal: true</code>면 전체 개수도 받습니다. 개수만
+                  필요하면 <code>count()</code>를, 모든 쪽이 필요하면{" "}
+                  <code>pages()</code>를 쓰세요. 누구나 쓸 수 있는 컬렉션은
+                  끝까지 읽지 말고 필요한 만큼만 받으세요.
                 </li>
               </ul>
             </Section>

@@ -16,6 +16,12 @@ const nextConfig = {
           { key: "Cache-Control", value: "no-cache" },
         ],
       },
+      // Next types files by extension, and to it .ts is an MPEG transport
+      // stream; declarations are text an editor or a person reads.
+      {
+        source: "/sdk/:version/:file*.d.ts",
+        headers: [{ key: "Content-Type", value: "text/plain; charset=utf-8" }],
+      },
       {
         source: "/database/authorize",
         headers: [

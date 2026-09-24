@@ -106,7 +106,9 @@ await admin.collection("posts").set("hello", {
                 </li>
                 <li>
                   이미지(JPEG, PNG, WebP, AVIF, GIF), 오디오, PDF, ZIP, 텍스트를
-                  받습니다. <strong>HTML과 SVG는 받지 않습니다.</strong>
+                  받습니다. <strong>HTML과 SVG는 받지 않습니다.</strong> HEIC
+                  사진은 변환할 수 있는 Safari에서만 올릴 수 있고, 다른
+                  브라우저에서는 요청 전에 TypeError로 거절합니다.
                 </li>
               </ul>
             </Section>

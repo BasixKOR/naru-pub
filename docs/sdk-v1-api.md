@@ -73,7 +73,7 @@ const page = await posts.list({
 const created = await posts.add({ title: "Hello" }, { signal });
 ```
 
-`naru.collection(name)` has only `get`, `list`, and `add`. Collection policy
+`naru.collection(name)` has only `get`, `list`, `count`, `pages`, and `add`. Collection policy
 decides whether a particular anonymous operation is allowed. These handles always
 use visitor access, even while signed in.
 
@@ -90,9 +90,16 @@ if (!admin) {
 }
 ```
 
-`signIn` makes no request of its own. Register the page's exact URL in the
+`signIn` makes no request of its own. Register the page's URL in the
 control panel first; if it is not registered, Naru's consent page says so and
-links to the fix, so the site never sees that error.
+links to the fix, so the site never sees that error. A registration names a
+page, so it also matches the other addresses Naru serves that page at (`/` and
+`/index.html`; `/about`, `/about/` and `/about/index.html`), and sign-in
+returns to the address it left from.
+
+A sign-in that comes back without completing, because the owner denied it,
+took longer than ten minutes, or the code could not be exchanged, is an
+ordinary signed-out visit: `session()` resolves `null`.
 
 The browser leaves the page during `signIn`, and a page that holds unsaved
 input should put it somewhere that survives, such as `sessionStorage`, before
@@ -171,6 +178,18 @@ code-point comparison. Prefer one consistent scalar type per sortable field.
 sort. Pass it unchanged as `after`. Pagination is not a snapshot across
 separate requests, so concurrent writes can change later pages.
 
+Two helpers are built on `list`. `count({ filter })` resolves with how many
+documents match, from a one-document page with its total. `pages(options)` is
+an async iterable of every page in turn, following `nextCursor` from `after`
+(or the start) with the same options; stop early with `break`. It is not a
+snapshot either. Walk a collection anyone can write to only as far as needed.
+
+```js
+const drafts = await posts.count({ filter: { published: false } });
+for await (const page of posts.pages({ sort: [["date", "desc"]], size: 100 }))
+  render(page.documents);
+```
+
 ## Revisions and atomic batches
 
 Revisions are opaque concurrency tokens. Store and return them unchanged; their
@@ -197,9 +216,12 @@ await admin.batch(
 );
 ```
 
-It resolves with `undefined`. Any failed condition or write rolls back every
-write in the batch. The SDK does not automatically retry writes or
-batches.
+It resolves with one entry per write, in order: `{ id, revision, createdAt,
+updatedAt }` for a `set`, which a later conditional write can quote without
+reading the document back, and `null` for a `delete`. Any failed condition or
+write rolls back every write in the batch. Conditions are checked as they are
+for single writes, before anything is sent. The SDK does not automatically
+retry writes or batches.
 
 ## Media and sign-out
 
@@ -211,9 +233,14 @@ admin = null;
 
 `upload` returns `{ url, name, contentType, size }` as stored: shrinking may
 have renamed and re-encoded the file (HEIC becomes WebP, for instance).
-The SDK may resize supported images before upload. The website SDK deliberately
+The SDK may resize supported images before upload. Naru does not store HEIC,
+so a HEIC photo in a browser that cannot convert it (only Safari can today)
+throws a `TypeError` before a request is made. Which other types Naru stores is
+the server's to decide; a refused type fails with `INVALID_REQUEST`. The website SDK deliberately
 does not list or delete media; owners do that in Naru's media library. Sign-out
-forgets the tab's session before requesting remote revocation.
+forgets the tab's session before requesting remote revocation, and the admin
+handle refuses every later call with `AUTH_REQUIRED` even if the revocation
+request fails.
 
 ## Errors and cancellation
 
@@ -237,7 +264,8 @@ them with `instanceof`. There is no `retryable` flag and no automatic retry:
 a lost response can mean a write succeeded, so retrying `add()` can duplicate
 it. Reconcile a failed write before trying again.
 
-Invalid names, IDs, malformed single-write conditions, and non-JSON document values throw `TypeError`.
+Invalid names, IDs, malformed conditions (single or batched), and non-JSON
+document values throw `TypeError`.
 Documents accept null, booleans, strings, finite numbers, dense arrays, and plain
 objects containing these values. Undefined, functions, symbols, bigint, dates,
 class instances, accessors, sparse arrays, and cycles are refused before sending.

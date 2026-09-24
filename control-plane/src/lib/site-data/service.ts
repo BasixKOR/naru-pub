@@ -580,6 +580,7 @@ export async function executeBatch(command: DataCommand) {
       .selectAll()
       .where("user_id", "=", owner.id)
       .execute();
+    const results = [];
     for (const raw of operations) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw))
         throw new DataError(400, "Invalid batch operation.");
@@ -620,6 +621,7 @@ export async function executeBatch(command: DataCommand) {
           .where("collection_id", "=", collection.id)
           .where("id", "=", id)
           .execute();
+        results.push(null);
         continue;
       }
       if (operation.type !== "set" || !Object.hasOwn(operation, "data"))
@@ -634,7 +636,7 @@ export async function executeBatch(command: DataCommand) {
         data: sql`${encoded}::jsonb`,
         size_bytes: size,
       });
-      await insert
+      const row = await insert
         .onConflict((oc) =>
           oc.columns(["collection_id", "id"]).doUpdateSet({
             data: sql`${encoded}::jsonb`,
@@ -643,7 +645,15 @@ export async function executeBatch(command: DataCommand) {
             version: sql`site_data_documents.version + 1`,
           }),
         )
-        .execute();
+        .returning(["version", "created_at", "updated_at"])
+        .executeTakeFirstOrThrow();
+      // Metadata only: the caller already holds the data it wrote.
+      results.push({
+        id,
+        version: row.version,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      });
     }
     const usage = await tx
       .selectFrom("site_data_documents as d")
@@ -663,7 +673,7 @@ export async function executeBatch(command: DataCommand) {
         "Site database quota exceeded.",
         "QUOTA_EXCEEDED",
       );
-    // The SDK resolves a batch with nothing, so nothing is reported.
-    return { success: true };
+    // In operation order: a set's new revision and stamps, null for a delete.
+    return { success: true, results };
   });
 }

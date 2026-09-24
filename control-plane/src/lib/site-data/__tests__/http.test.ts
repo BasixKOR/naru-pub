@@ -114,6 +114,31 @@ test("website bearer is passed with origin without consulting owner cookies", as
   );
   expect(response.headers.get("access-control-allow-credentials")).toBeNull();
 });
+test("a renewed owner token is reported as an instant and as seconds from now", async () => {
+  const expiresAt = Date.now() + 3600000;
+  execute.mockImplementationOnce(async (command) => {
+    command.bearer!.expiresAt = expiresAt;
+    return { success: true } as never;
+  });
+  const response = await dataRequest(
+    new Request("https://naru.pub/api/data/v1/alice/posts", {
+      headers: {
+        Authorization: `Bearer ${"t".repeat(43)}`,
+        Origin: "https://alice.example",
+      },
+    }),
+    ["posts"],
+    "alice",
+  );
+  expect(response.headers.get("naru-owner-expires")).toBe(String(expiresAt));
+  const seconds = Number(response.headers.get("naru-owner-expires-in"));
+  expect(seconds).toBeGreaterThanOrEqual(3598);
+  expect(seconds).toBeLessThanOrEqual(3600);
+  expect(
+    response.headers.get("access-control-expose-headers")?.split(/,\s*/),
+  ).toEqual(["Naru-Owner-Expires", "Naru-Owner-Expires-In"]);
+});
+
 test.each(["", "Basic abc", "Bearer malformed"])(
   "invalid authorization never falls back to public access: %s",
   async (authorization) => {

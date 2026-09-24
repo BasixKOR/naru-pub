@@ -290,22 +290,19 @@ $("post-form").addEventListener("submit", (event) => {
     if (!$("title").value.trim() || !$("body").value.trim())
       throw new Error("제목과 본문을 입력하세요.");
     saveLocal();
-    await publishPost(
+    const content = data();
+    // The batch reports the post's new revision, so the next save can quote it
+    // without reading the post back.
+    const [published] = await publishPost(
       admin,
       state.id,
-      data(),
+      content,
       state.postRevision,
       state.kind === "drafts" ? state.draftRevision : null,
     );
-    // The batch has committed. If reading its result fails, require a reload
-    // before another save; never pair old editor content with a new revision.
-    state.needsReload = true;
-    saveLocal();
-    const saved = await admin.collection("posts").get(state.id);
-    showDocument(saved);
-    state.postRevision = saved.revision;
+    state.extra = content;
+    state.postRevision = published.revision;
     if (state.kind === "drafts") state.draftRevision = null;
-    state.needsReload = false;
     state.kind = "posts";
     dirty = false;
     saveLocal();

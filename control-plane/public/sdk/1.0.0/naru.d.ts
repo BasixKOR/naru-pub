@@ -103,6 +103,13 @@ export type WriteCondition = { revision: Revision } | { absent: true };
 export interface PublicCollection<T = Json> {
   get(id: string, options?: { signal?: AbortSignal }): Promise<Document<T>>;
   list(options?: ListOptions): Promise<Page<T>>;
+  /** How many documents match `filter`, or the whole collection. */
+  count(options?: { filter?: Filter; signal?: AbortSignal }): Promise<number>;
+  /**
+   * Every page of a query in turn, following `nextCursor` from `after` (or
+   * the start). Not a snapshot: writes in between can shift later pages.
+   */
+  pages(options?: ListOptions): AsyncIterable<Page<T>>;
   add(data: T, options?: { signal?: AbortSignal }): Promise<Document<T>>;
 }
 
@@ -122,7 +129,11 @@ export interface AdminCollection<T = Json> extends PublicCollection<T> {
 
 export interface Admin {
   collection<T = Json>(name: string): AdminCollection<T>;
-  /** Commits every write or none. Conditions guard individual documents. Does not retry. */
+  /**
+   * Commits every write or none. Conditions guard individual documents. Does
+   * not retry. Resolves, in the order written, with what each `set` stored and
+   * `null` for each `delete`.
+   */
   batch(
     writes: readonly (
       | {
@@ -135,9 +146,19 @@ export interface Admin {
         }
     )[],
     options?: { signal?: AbortSignal },
-  ): Promise<void>;
+  ): Promise<
+    ({
+      id: string;
+      revision: Revision;
+      createdAt: string;
+      updatedAt: string;
+    } | null)[]
+  >;
   media: {
-    /** Stores a file publicly. Large photos may be shrunk first. */
+    /**
+     * Stores a file publicly. Large photos may be shrunk first. A HEIC photo
+     * this browser cannot convert throws a `TypeError` before anything is sent.
+     */
     upload(
       file: File | Blob,
       options?: { signal?: AbortSignal },
@@ -148,6 +169,7 @@ export interface Admin {
       size: number;
     }>;
   };
+  /** This handle stops working at once, even if the revoke request fails. */
   signOut(): Promise<void>;
 }
 
@@ -155,6 +177,10 @@ export interface NaruClient {
   /** Visitor access, even when signed in. */
   collection<T = Json>(name: string): PublicCollection<T>;
   auth: {
+    /**
+     * The admin client for this page, or null. A sign-in that was denied,
+     * went stale or could not be exchanged also resolves null.
+     */
     session(): Promise<Admin | null>;
     /** Redirects to Naru for approval. */
     signIn(options: { collections: readonly string[] }): Promise<void>;

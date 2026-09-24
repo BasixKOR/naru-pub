@@ -197,6 +197,7 @@ test("admin preserves draft across login, retries same ID, fails closed on expir
       const operation = operations[0].set;
       writes.push({ id: operation.id, data: operation.data });
       if (failure) throw failure;
+      return [{ id: operation.id, revision: "r1.saved" }];
     },
   });
   const after = await page(
@@ -355,6 +356,14 @@ function editorBackend() {
             (versions[write.collection].get(operation.id) ?? 1) + 1,
           );
         }
+        return writes.map((write) =>
+          write.set
+            ? {
+                id: write.set.id,
+                revision: revision(write.collection, write.set.id),
+              }
+            : null,
+        );
       },
       collection(kind) {
         assert.ok(kind in rows);

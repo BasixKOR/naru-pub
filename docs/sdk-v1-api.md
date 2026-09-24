@@ -90,9 +90,11 @@ if (!admin) {
 }
 ```
 
-`signIn` makes no request of its own. Register the page's URL in the
-control panel first; if it is not registered, Naru's consent page says so and
-links to the fix, so the site never sees that error. A registration names a
+`signIn` makes no request of its own. A page can be registered in the control
+panel beforehand, but it need not be: when the page is not registered yet, or
+asks for collections the site does not have or its registration does not
+include, Naru's consent page offers to set that up on the owner's click before
+asking for approval. The site never sees that error. A registration names a
 page, so it also matches the other addresses Naru serves that page at (`/` and
 `/index.html`; `/about`, `/about/` and `/about/index.html`), and sign-in
 returns to the address it left from.

@@ -6,7 +6,9 @@ import { executeData } from "../service";
 import {
   approveAuthorization,
   authorizationInput,
+  authorizationSetup,
   digest,
+  prepareAuthorization,
   exchangeCode,
   updateClient,
   tokenLifetime,
@@ -325,6 +327,74 @@ integration("website owner authorization", () => {
     await expect(exchange(await issue())).resolves.toHaveProperty(
       "accessToken",
     );
+  });
+  test("the consent page can register a page and create what it asks for", async () => {
+    const page = "https://alice.example/editor.html";
+    const input = authInput({
+      redirectUri: page,
+      collections: ["posts", "notes"],
+    });
+    expect(await authorizationSetup(owner, input)).toEqual({
+      register: true,
+      create: ["notes"],
+      extend: [],
+    });
+    // Not the owner's to fix here: another account, or a page off the site.
+    expect(await authorizationSetup(bob, input)).toBeNull();
+    expect(
+      await authorizationSetup(
+        owner,
+        authInput({ redirectUri: "https://evil.example/editor.html" }),
+      ),
+    ).toBeNull();
+    await prepareAuthorization(owner, input);
+    expect(await authorizationSetup(owner, input)).toBeNull();
+    // A new collection starts private, as one made in the control panel does.
+    expect(
+      await db
+        .selectFrom("site_data_collections")
+        .select(["read_access", "write_access"])
+        .where("user_id", "=", owner)
+        .where("name", "=", "notes")
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ read_access: "admin", write_access: "admin" });
+    const approved = await approveAuthorization(owner, "alice-session", input);
+    const grant = await exchange(
+      new URL(approved.redirect).searchParams.get("code")!,
+      { redirectUri: page },
+    );
+    await expect(data(grant.accessToken, ["notes"])).resolves.toBeDefined();
+
+    // Asking the same page for another collection extends its registration,
+    // which signs out what it had issued, as editing it would.
+    const wider = authInput({
+      redirectUri: page,
+      collections: ["posts", "notes", "private"],
+    });
+    expect(await authorizationSetup(owner, wider)).toEqual({
+      register: false,
+      create: [],
+      extend: ["private"],
+    });
+    await prepareAuthorization(owner, wider);
+    await expect(data(grant.accessToken, ["notes"])).rejects.toMatchObject({
+      status: 401,
+    });
+    await expect(
+      approveAuthorization(owner, "alice-session", wider),
+    ).resolves.toHaveProperty("redirect");
+    // Nothing is done for a request that was not the owner's to fix.
+    await prepareAuthorization(
+      bob,
+      authInput({ redirectUri: page, collections: ["elsewhere"] }),
+    );
+    expect(
+      await db
+        .selectFrom("site_data_collections")
+        .select("id")
+        .where("name", "=", "elsewhere")
+        .executeTakeFirst(),
+    ).toBeUndefined();
   });
   test("every address of one page is one callback", async () => {
     // Naru serves /blog, /blog/ and /blog/index.html as the page /blog/.

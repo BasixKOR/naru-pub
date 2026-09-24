@@ -4,10 +4,12 @@ import Link from "next/link";
 import { userHasFeature } from "@/lib/entitlements";
 import {
   authorizationInput,
+  authorizationSetup,
   previewAuthorization,
 } from "@/lib/site-data/owner-auth";
 import { DataError } from "@/lib/site-data/validation";
 import Consent from "./Consent";
+import Setup from "./Setup";
 
 export default async function AuthorizePage({
   searchParams,
@@ -37,6 +39,9 @@ export default async function AuthorizePage({
       ...Object.fromEntries(query),
       collections: query.get("collections")?.split(","),
     });
+    // Setup the owner can finish here comes before consent, in its own step.
+    const setup = await authorizationSetup(user.id, input);
+    if (setup) return <Setup input={input} setup={setup} />;
     const { client, collections } = await previewAuthorization(user.id, input);
     return (
       <Consent

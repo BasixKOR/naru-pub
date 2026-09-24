@@ -229,6 +229,38 @@ integration("site database integration", () => {
       status: 404,
     });
   });
+  test("refusals name what was refused and where it is fixed", async () => {
+    await expect(call("GET", ["nowhere"])).rejects.toMatchObject({
+      status: 404,
+      message: expect.stringMatching(/nowhere does not exist.*control panel/),
+    });
+    await expect(
+      executeData({ site: "nobody", path: ["posts"], method: "GET" }),
+    ).rejects.toMatchObject({ message: "No Naru site is named nobody." });
+    await call("POST", [], { name: "secret" }, true);
+    await expect(call("GET", ["secret"])).rejects.toMatchObject({
+      status: 403,
+      message: expect.stringContaining("secret is not publicly readable"),
+    });
+    await expect(call("POST", ["secret"], { data: 1 })).rejects.toMatchObject({
+      message: expect.stringContaining(
+        "Visitors cannot add to collection secret",
+      ),
+    });
+    await call("PUT", ["secret", "one"], { data: 1 }, true);
+    await expect(
+      call("PUT", ["secret", "one"], { data: 2 }, true, { ifVersion: 0 }),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "The document already exists.",
+    });
+    await expect(
+      call("PUT", ["secret", "one"], { data: 2 }, true, { ifVersion: 7 }),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining("changed after that revision"),
+    });
+  });
   test("batch applies conditional writes atomically", async () => {
     const batch = (...operations: Record<string, unknown>[]) =>
       executeBatch({

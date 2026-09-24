@@ -230,7 +230,10 @@ export default function DatabaseDocs() {
                   <code>https://내사이트.naru.pub/admin.html</code>)와 쓸
                   컬렉션을 등록합니다. <code>/admin</code>, <code>/admin/</code>
                   , <code>/admin/index.html</code>은 모두 같은 페이지로
-                  취급하므로 어느 주소를 등록해도 됩니다.
+                  취급하므로 어느 주소를 등록해도 됩니다. 미리 등록하지 않았거나
+                  없는 컬렉션을 요청하면, 처음 로그인할 때 나루가 페이지 등록과
+                  컬렉션 만들기를 제안합니다. 새 컬렉션은 ‘관리자만’으로
+                  시작합니다.
                 </li>
                 <li>
                   그 페이지에서 <code>naru.auth.signIn()</code>으로 로그인하고{" "}

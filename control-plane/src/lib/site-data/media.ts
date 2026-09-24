@@ -114,7 +114,10 @@ function uploadInput(body: Record<string, unknown>) {
       "File name must contain 1–255 printable characters.",
     );
   if (!allowedTypes.has(contentType))
-    throw new DataError(415, "File type is not supported.");
+    throw new DataError(
+      415,
+      `${contentType ? `Naru does not store ${contentType} files` : "The file has no type"}. It stores ${[...allowedTypes].join(", ")}.`,
+    );
   if (
     !Number.isInteger(size) ||
     Number(size) < 1 ||
@@ -131,7 +134,8 @@ export async function executeMedia(command: MediaCommand) {
     .select(["id", "supporter_comp"])
     .where("login_name", "=", command.site)
     .executeTakeFirst();
-  if (!owner) throw new DataError(404, "Site not found.");
+  if (!owner)
+    throw new DataError(404, `No Naru site is named ${command.site}.`);
   const preview = previewFeatureAccess(!!owner.supporter_comp, "database");
   if (!(preview ?? (await userHasFeature(owner.id, "database"))))
     throw new DataError(403, "Database access is not enabled for this site.");
@@ -141,7 +145,7 @@ export async function executeMedia(command: MediaCommand) {
         .execute((tx) => tokenScope(tx, owner.id, command.bearer!))
     : undefined;
   const admin = command.adminUserId === owner.id || allowedIds !== undefined;
-  if (!admin) throw new DataError(403, "Owner access required.");
+  if (!admin) throw new DataError(403, "Uploading needs an owner sign-in.");
   if (command.adminUserId !== undefined && command.adminUserId !== owner.id)
     throw new DataError(403, "Permission denied.");
   // A website uploads; listing and deleting the library is the control

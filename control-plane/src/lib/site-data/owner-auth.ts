@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Kysely, sql } from "kysely";
 import type { DB } from "@/lib/db";
 import { db } from "@/lib/database";
-import { DataError, name } from "./validation";
+import { DataError, MAX_COLLECTIONS, name, unreservedName } from "./validation";
 
 export const TOKEN_SECONDS = 24 * 60 * 60;
 export function tokenLifetime(value: unknown): number {
@@ -158,7 +158,12 @@ async function scope(tx: Kysely<DB>, userId: number, names: string[]) {
     .where("name", "in", names)
     .execute();
   if (rows.length !== names.length)
-    throw new DataError(400, "Unknown collection.");
+    throw new DataError(
+      400,
+      `Collections do not exist: ${names
+        .filter((n) => !rows.some((row) => row.name === n))
+        .join(", ")}. Create them in the control panel.`,
+    );
   return rows;
 }
 
@@ -364,6 +369,135 @@ async function authorizationDetails(
     );
   return { client, collections };
 }
+/**
+ * What the owner could fix on the consent page itself, rather than being sent
+ * to the control panel: registering the page, creating collections the site
+ * asks for, or adding them to the page's registration. Null when there is
+ * nothing to fix, or when what is wrong is not the owner's to fix here (the
+ * wrong account, or a page off their site).
+ */
+export type AuthorizationSetup = {
+  register: boolean;
+  create: string[];
+  extend: string[];
+};
+async function setupNeeded(
+  tx: Kysely<DB>,
+  userId: number,
+  input: AuthorizationInput,
+): Promise<AuthorizationSetup | null> {
+  const owner = await tx
+    .selectFrom("users")
+    .select("login_name")
+    .where("id", "=", userId)
+    .executeTakeFirst();
+  if (owner?.login_name !== input.site) return null;
+  try {
+    await assertSiteOrigin(tx, userId, input.redirectUri);
+  } catch {
+    return null;
+  }
+  const rows = await tx
+    .selectFrom("site_data_collections")
+    .select(["id", "name"])
+    .where("user_id", "=", userId)
+    .where("name", "in", input.collections)
+    .execute();
+  const create = input.collections.filter(
+    (wanted) => !rows.some((row) => row.name === wanted),
+  );
+  const client = (
+    await tx
+      .selectFrom("site_data_clients")
+      .select(["redirect_uri", "collection_ids"])
+      .where("user_id", "=", userId)
+      .execute()
+  ).find((c) => sameCallback(c.redirect_uri, input.redirectUri));
+  const extend = client
+    ? rows
+        .filter((row) => !client.collection_ids.includes(row.id))
+        .map((row) => row.name)
+    : [];
+  if (client && !create.length && !extend.length) return null;
+  return { register: !client, create, extend };
+}
+export function authorizationSetup(userId: number, input: AuthorizationInput) {
+  return setupNeeded(db, userId, input);
+}
+
+/**
+ * Applies what authorizationSetup reported, in one transaction. New
+ * collections start private (admin read and write), like any collection made
+ * in the control panel. Changing a registration's collections revokes its
+ * outstanding sign-ins, as editing it in the control panel does.
+ */
+export async function prepareAuthorization(
+  userId: number,
+  input: AuthorizationInput,
+) {
+  await db.transaction().execute(async (tx) => {
+    await lockOwner(tx, userId);
+    const setup = await setupNeeded(tx, userId, input);
+    if (!setup) return;
+    if (setup.create.length) {
+      const names = setup.create.map(unreservedName);
+      const { count } = await tx
+        .selectFrom("site_data_collections")
+        .select(tx.fn.countAll<number>().as("count"))
+        .where("user_id", "=", userId)
+        .executeTakeFirstOrThrow();
+      if (Number(count) + names.length > MAX_COLLECTIONS)
+        throw new DataError(409, "Collection limit reached.", "QUOTA_EXCEEDED");
+      await tx
+        .insertInto("site_data_collections")
+        .values(
+          names.map((collection) => ({
+            user_id: userId,
+            name: collection,
+            read_access: "admin",
+            write_access: "admin",
+          })),
+        )
+        .execute();
+    }
+    const ids = (await scope(tx, userId, input.collections)).map((c) => c.id);
+    const clients = await tx
+      .selectFrom("site_data_clients")
+      .select(["id", "redirect_uri", "collection_ids"])
+      .where("user_id", "=", userId)
+      .execute();
+    if (setup.register) {
+      if (clients.length >= 20)
+        throw new DataError(
+          409,
+          "At most 20 website registrations are allowed.",
+        );
+      await tx
+        .insertInto("site_data_clients")
+        .values({
+          id: randomUUID(),
+          user_id: userId,
+          redirect_uri: callbackUrl(input.redirectUri).href,
+          token_lifetime_seconds: TOKEN_SECONDS,
+          collection_ids: ids,
+        })
+        .execute();
+      return;
+    }
+    const client = clients.find((c) =>
+      sameCallback(c.redirect_uri, input.redirectUri),
+    )!;
+    await clearClientGrants(tx, client.id);
+    await tx
+      .updateTable("site_data_clients")
+      .set({
+        collection_ids: [...new Set([...client.collection_ids, ...ids])],
+      })
+      .where("id", "=", client.id)
+      .execute();
+  });
+}
+
 export async function previewAuthorization(
   userId: number,
   input: AuthorizationInput,

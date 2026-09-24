@@ -81,9 +81,13 @@ export function permission(value: unknown): "admin" | "world" {
   return value;
 }
 
-export function authorize(access: string, admin: boolean) {
-  if (!admin && access !== "world")
-    throw new DataError(403, "Permission denied.");
+/** `refusal` says what a visitor cannot do, and where that is changed. */
+export function authorize(
+  access: string,
+  admin: boolean,
+  refusal = "Permission denied.",
+) {
+  if (!admin && access !== "world") throw new DataError(403, refusal);
 }
 
 export function writePermission(value: unknown): "admin" | "world" | "create" {

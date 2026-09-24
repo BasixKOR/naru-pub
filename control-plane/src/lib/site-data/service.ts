@@ -76,13 +76,26 @@ function expectedVersion(value: unknown) {
   return value;
 }
 function matchVersion(expected: number, actual: number | undefined) {
-  if (expected !== (actual ?? 0))
-    throw new DataError(
-      409,
-      "Document version does not match ifVersion.",
-      "CONFLICT",
-    );
+  if (expected === (actual ?? 0)) return;
+  throw new DataError(
+    409,
+    expected === 0
+      ? "The document already exists."
+      : actual === undefined
+        ? "The document was deleted after that revision was read."
+        : "The document changed after that revision was read. Read it again before saving.",
+    "CONFLICT",
+  );
 }
+/** A collection a sign-in did not ask for, named with how to get it. */
+const outsideScope = (name: string) =>
+  new DataError(
+    403,
+    `Collection ${name} was not approved for this sign-in. Add it to signIn({ collections }) and sign in again.`,
+    "ACCESS_DENIED",
+  );
+const noSite = (site: string) =>
+  new DataError(404, `No Naru site is named ${site}.`);
 /** Naru ordering: null/missing/non-scalars, strings, numbers, booleans.
  * Explicit keys keep the contract independent of JSONB ordering and locale.
  * Every component is non-null so cursor comparisons form a total order. */
@@ -152,7 +165,7 @@ export async function executeData(command: DataCommand) {
     const owner = await (
       reading ? ownerQuery : ownerQuery.forUpdate()
     ).executeTakeFirst();
-    if (!owner) throw new DataError(404, "Site not found.");
+    if (!owner) throw noSite(command.site);
     const preview = previewFeatureAccess(!!owner.supporter_comp, "database");
     // `tx`, never the pool: this runs inside the transaction, and taking a
     // second connection while holding the first is how the pool deadlocks.
@@ -217,13 +230,13 @@ export async function executeData(command: DataCommand) {
       .where("name", "=", path[0])
       .selectAll()
       .executeTakeFirst();
-    if (!collection) throw new DataError(404, "Collection not found.");
-    if (allowedIds !== undefined && !allowedIds.includes(collection.id))
+    if (!collection)
       throw new DataError(
-        403,
-        "Collection is outside the approved scope.",
-        "ACCESS_DENIED",
+        404,
+        `Collection ${path[0]} does not exist. Create it in the control panel.`,
       );
+    if (allowedIds !== undefined && !allowedIds.includes(collection.id))
+      throw outsideScope(collection.name);
     if (path.length === 1 && (method === "PATCH" || method === "DELETE")) {
       if (allowedIds !== undefined)
         throw new DataError(403, "Website tokens cannot manage collections.");
@@ -252,7 +265,11 @@ export async function executeData(command: DataCommand) {
         .selectFrom("site_data_documents")
         .where("collection_id", "=", collection.id);
     if (method === "GET") {
-      authorize(collection.read_access, admin);
+      authorize(
+        collection.read_access,
+        admin,
+        `Collection ${collection.name} is not publicly readable. Change its read access in the control panel, or sign in.`,
+      );
       // A world-readable collection returns identical rows whoever asks, so an
       // anonymous read of one is safe for a shared cache to hold and replay.
       // Requests carrying a credential are never marked: an intermediary that
@@ -448,7 +465,13 @@ export async function executeData(command: DataCommand) {
     }
     const creating = method === "POST" && path.length === 1;
     if (!(creating && collection.write_access === "create"))
-      authorize(collection.write_access, admin);
+      authorize(
+        collection.write_access,
+        admin,
+        creating
+          ? `Visitors cannot add to collection ${collection.name}. Change its write access in the control panel, or sign in.`
+          : `Only a signed-in owner can change documents in collection ${collection.name}.`,
+      );
     noteUse();
     // Every write below this point is reachable without an owner credential
     // when the collection allows it, so bound them all — not just creates.
@@ -562,7 +585,7 @@ export async function executeBatch(command: DataCommand) {
       .where("login_name", "=", command.site)
       .forUpdate()
       .executeTakeFirst();
-    if (!owner) throw new DataError(404, "Site not found.");
+    if (!owner) throw noSite(command.site);
     const preview = previewFeatureAccess(!!owner.supporter_comp, "database");
     // `tx`, never the pool: a second connection taken while this one is held
     // is what empties the pool under concurrency.
@@ -572,7 +595,7 @@ export async function executeBatch(command: DataCommand) {
       ? await tokenScope(tx, owner.id, command.bearer)
       : undefined;
     if (allowedIds === undefined && command.adminUserId !== owner.id)
-      throw new DataError(403, "Owner access required.");
+      throw new DataError(403, "A batch needs an owner sign-in.");
     // Authorized, so this is the owner's own data being written.
     noteSupporterFeatureUse(owner.id, "database");
     const collectionRows = await tx
@@ -591,13 +614,12 @@ export async function executeBatch(command: DataCommand) {
         (row) => row.name === collectionName,
       );
       if (!collection)
-        throw new DataError(404, `Collection ${collectionName} not found.`);
-      if (allowedIds !== undefined && !allowedIds.includes(collection.id))
         throw new DataError(
-          403,
-          `Collection ${collectionName} is outside the approved scope.`,
-          "ACCESS_DENIED",
+          404,
+          `Collection ${collectionName} does not exist. Create it in the control panel.`,
         );
+      if (allowedIds !== undefined && !allowedIds.includes(collection.id))
+        throw outsideScope(collectionName);
       authorize(collection.write_access, true);
       const expected = expectedVersion(operation.ifVersion);
       if (operation.type === "delete") deletable(expected);

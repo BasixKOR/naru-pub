@@ -6,6 +6,7 @@ import { noteSupporterFeatureUse } from "@/lib/feature-usage";
 import {
   approveAuthorization,
   authorizationInput,
+  prepareAuthorization,
   exchangeCode,
   updateClient,
   registerClient,
@@ -53,7 +54,7 @@ export async function ownerAuthRequest(request: Request, action: string) {
       await revokeToken(match[1], origin);
       return Response.json({ success: true }, { headers });
     }
-    if (action !== "authorize" && action !== "clients")
+    if (!["authorize", "prepare", "clients"].includes(action))
       throw new DataError(404, "Not found.");
     sameOrigin(request);
     const { user, session } = await validateRequest();
@@ -99,6 +100,11 @@ export async function ownerAuthRequest(request: Request, action: string) {
         ),
         { headers },
       );
+    // The consent page fixing the setup it found missing, on the owner's click.
+    if (action === "prepare" && request.method === "POST") {
+      await prepareAuthorization(user.id, authorizationInput(body));
+      return Response.json({ success: true }, { headers });
+    }
     if (action === "clients" && request.method === "POST")
       return Response.json(
         { client: await registerClient(user.id, body) },

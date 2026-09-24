@@ -63,6 +63,13 @@ The blog tests exercise public browsing/guestbook and admin draft/publishing flo
   compatible ones as 1.0.1 or 1.1.0, with the `/sdk/1/` rewrite in
   `next.config.mjs` moved to it; breaking ones as `/sdk/2/` with a new
   `/api/data/v2/` wire version beside v1.
+- A new version directory is added to `VERSIONS` in both
+  `scripts/generate-sdk-reference.mjs` (the `/docs/sdk/<version>` page) and
+  `scripts/check-sdk-types.mjs` (`pnpm sdk:check`, which `pnpm build` runs
+  first). The check fails the build when a version's `naru.js` drops, renames
+  or adds a method or export its `naru.d.ts` declares, or returns a result
+  missing a declared field. It cannot see option names or server results, so
+  the unit tests still cover those.
 
 ## Operational limitations
 

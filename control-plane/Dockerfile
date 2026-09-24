@@ -61,6 +61,9 @@ COPY components.json \
 # Copy static assets (less frequently changed)
 COPY public/ public/
 
+# The SDK contract check the build runs first
+COPY scripts/check-sdk-types.mjs scripts/
+
 # Copy source code (most frequently changed - should be last)
 COPY src/ src/
 

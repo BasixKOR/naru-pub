@@ -190,7 +190,8 @@ export default function DatabaseDocs() {
                     "읽기",
                     "누구나",
                     <>
-                      <code>get</code>·<code>list</code>로 누구나 읽습니다.
+                      <code>get</code>·<code>list</code>·<code>count</code>·
+                      <code>pages</code>로 누구나 읽습니다.
                     </>,
                   ],
                   ["쓰기", "관리자만", "방문자는 쓸 수 없습니다."],
@@ -227,9 +228,9 @@ export default function DatabaseDocs() {
                 <li>
                   제어판의 ‘웹사이트 관리자 로그인’에 관리자 페이지 주소(예:{" "}
                   <code>https://내사이트.naru.pub/admin.html</code>)와 쓸
-                  컬렉션을 등록합니다. <code>/admin/</code>, <code>/admin</code>
-                  , <code>/admin/index.html</code>처럼 같은 페이지의 주소는 모두
-                  같은 페이지로 취급합니다.
+                  컬렉션을 등록합니다. <code>/admin</code>, <code>/admin/</code>
+                  , <code>/admin/index.html</code>은 모두 같은 페이지로
+                  취급하므로 어느 주소를 등록해도 됩니다.
                 </li>
                 <li>
                   그 페이지에서 <code>naru.auth.signIn()</code>으로 로그인하고{" "}
@@ -260,6 +261,13 @@ export default function DatabaseDocs() {
                 페이지에는 신뢰하는 스크립트만 넣으세요. 로그인은 현재 페이지를
                 떠났다가 돌아옵니다. 쓰던 내용은 로그인 전에 sessionStorage 등에
                 보관하고 돌아온 뒤 복원하세요. 예제 블로그에 구현되어 있습니다.
+              </p>
+              <p>
+                <code>admin.signOut()</code>은 이 탭의 로그인을 지운 뒤 나루에
+                권한 취소를 요청합니다. 그 요청이 실패해도 그 <code>admin</code>
+                은 곧바로 쓸 수 없게 되어 모든 호출이 <code>AUTH_REQUIRED</code>
+                로 실패합니다. 화면의 관리자 도구는 <code>signOut()</code>을
+                기다리기 전에 닫으세요.
               </p>
             </Section>
 
@@ -348,8 +356,8 @@ if (page.nextCursor) {
 const total = await posts.count({ filter: query.filter });
 
 // 끝까지 한 쪽씩 (nextCursor를 대신 따라갑니다)
-for await (const page of posts.pages({ ...query, size: 100 })) {
-  console.log(page.documents);
+for await (const { documents } of posts.pages({ ...query, size: 100 })) {
+  console.log(documents);
 }`}</Code>
               <ul className="list-disc space-y-3 pl-6">
                 <li>

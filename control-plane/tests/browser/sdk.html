@@ -160,6 +160,35 @@
           /^big\.(webp|jpeg)$/.test(sent.name),
         `native canvas shrinks a 4096px PNG (${source.size} → ${sent.size} bytes, ${sent.contentType})`,
       );
+      // Real XMLHttpRequest against this server's /upload, which reads the
+      // whole body before answering.
+      const phases = [];
+      const withProgress = await uploader.media.upload(source, {
+        onProgress: (progress) => phases.push(progress),
+      });
+      const bytes = phases.filter((p) => p.phase === "uploading");
+      check(
+        withProgress.url === `${location.origin}/upload` &&
+          phases[0].phase === "preparing" &&
+          bytes.length >= 2 &&
+          bytes.at(-1).loaded === bytes.at(-1).total &&
+          bytes.at(-1).total === declared[1].size &&
+          phases.at(-1).phase === "finishing",
+        `native XMLHttpRequest reports upload progress (${bytes.length} byte events of ${bytes.at(-1)?.total} bytes)`,
+      );
+      const stopping = new AbortController();
+      let stopped = false;
+      try {
+        await uploader.media.upload(source, {
+          signal: stopping.signal,
+          onProgress: (progress) => {
+            if (progress.phase === "uploading") stopping.abort();
+          },
+        });
+      } catch (error) {
+        stopped = error.name === "AbortError";
+      }
+      check(stopped, "aborting an upload with progress is an AbortError");
       output.textContent += "\nALL CHECKS PASSED";
     } catch (error) {
       output.textContent += "\nFAIL " + error.message;

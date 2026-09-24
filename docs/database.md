@@ -251,7 +251,16 @@ asking for an authorization; a file named `.heic`/`.heif` with an empty type
 counts as HEIC. Every other type is left to the server's allowlist. Re-encoding
 drops EXIF and bakes orientation into the pixels. Files retained unchanged may
 still contain metadata; upload is not a metadata-removal guarantee. The stored name takes the new extension. There are no
-options; the media library at `/media` uploads originals and does not resize.
+image options; the media library at `/media` uploads originals and does not resize.
+
+Upload progress comes from the one step that has bytes to count, the PUT to R2.
+`fetch` exposes no upload progress, and streaming its body to count it would
+send no `Content-Length`, which a presigned PUT requires, so when a caller
+passes `onProgress` the SDK sends that same PUT with `XMLHttpRequest` (as the
+`/media` library does); without it, the SDK uses `fetch` as before. The request
+is the same, headers and CORS preflight included, so the bucket's existing CORS
+rule covers it. `XMLHttpRequest` cannot refuse a redirect, so a response whose
+`responseURL` is not the signed URL is treated as a failed upload.
 
 Public access intentionally permits callers from any origin. Every write that arrives without an owner credential — creates into a `create` collection and replacements or deletes in a `world`-writable one alike — uses database-backed fixed-minute limits of 60 successful writes per site and 20 per caller/IP per site, shared across collections and server processes. Owner writes do not consume these limits. Failed writes roll back their counters. A credential-less write that is already over either limit is refused with one unlocked read before it waits for the site's owner-row lock, so a burst past the limit does not queue behind legitimate writes; the locked count remains the authoritative check.
 

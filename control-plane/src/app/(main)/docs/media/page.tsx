@@ -91,6 +91,18 @@ await admin.collection("posts").set("hello", {
   coverImage: image.url,
 });`}</Code>
               <p>
+                진행 상황을 보여 주려면 <code>onProgress</code>를 넘기세요.
+                사진을 줄이고 준비하는 동안 <code>preparing</code>, 보내는 동안
+                보낸 바이트 수와 함께 <code>uploading</code>, 마무리하는 동안{" "}
+                <code>finishing</code>이 전달됩니다.
+              </p>
+              <Code>{`await admin.media.upload(file, {
+  onProgress(progress) {
+    if (progress.phase === "uploading")
+      bar.value = progress.loaded / progress.total;
+  },
+});`}</Code>
+              <p>
                 큰 사진은 자동으로 줄이거나 지원되는 형식으로 바꿀 수 있습니다.
                 구체적인 크기와 변환 방식은 바뀔 수 있으므로 돌려받은 파일
                 정보와 URL을 쓰세요. 변환 없이 저장하는 파일에는 원래 사진

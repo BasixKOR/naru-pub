@@ -115,6 +115,14 @@ async function admin(admin: Admin) {
   void stored0?.data;
   const file = await admin.media.upload(new Blob(["x"]), {
     signal,
+    onProgress(progress) {
+      if (progress.phase === "uploading") {
+        const share: number = progress.loaded / progress.total;
+        void share;
+      }
+      // @ts-expect-error Only an upload in progress has byte counts.
+      if (progress.phase === "finishing") void progress.loaded;
+    },
   });
   const url: string = file.url;
   const stored: [string, string, number] = [

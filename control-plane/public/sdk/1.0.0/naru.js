@@ -335,6 +335,61 @@ async function shrink(file) {
   }
 }
 
+// The bytes go from the browser straight to object storage on a signed URL.
+// fetch reports nothing of a body it sends, and streaming one to count it
+// would drop the Content-Length a signed PUT needs, so a caller who asked for
+// progress gets the same PUT through XMLHttpRequest. It answers like fetch:
+// { ok, status }, a TypeError for a network failure, and the signal's reason
+// for an abort.
+function put(url, headers, file, signal, uploading) {
+  if (!uploading)
+    return fetch(url, {
+      method: "PUT",
+      headers,
+      body: file,
+      signal,
+      credentials: "omit",
+      redirect: "error",
+    });
+  return new Promise((resolve, reject) => {
+    const aborted = () =>
+      signal?.reason ??
+      new DOMException("The upload was aborted.", "AbortError");
+    if (signal?.aborted) return reject(aborted());
+    const request = new XMLHttpRequest();
+    const abort = () => request.abort();
+    const settle = (finish) => {
+      signal?.removeEventListener("abort", abort);
+      finish();
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    request.open("PUT", url);
+    for (const [name, value] of Object.entries(headers))
+      request.setRequestHeader(name, value);
+    request.upload.onprogress = (event) =>
+      uploading(Math.min(event.loaded, file.size));
+    // XMLHttpRequest follows redirects it cannot be told to refuse. Storage
+    // never redirects a signed upload, so one that moved is not trusted.
+    request.onload = () =>
+      settle(() =>
+        resolve({
+          ok:
+            request.status >= 200 &&
+            request.status < 300 &&
+            request.responseURL === new URL(url).href,
+          status: request.status,
+        }),
+      );
+    request.onerror = request.ontimeout = () =>
+      settle(() => reject(new TypeError("The upload connection failed.")));
+    request.onabort = () => settle(() => reject(aborted()));
+    request.send(file);
+    // After send: an abort from this first report must reach a sent request,
+    // which fires abort, rather than an unsent one, which would not.
+    uploading(0);
+  });
+}
+
 // Each callback page keeps its own session in its own tab.
 const sessionKey = ({ origin, site }) =>
   `naru:owner:${origin}:${site}:${location.origin}${location.pathname}`;
@@ -426,7 +481,23 @@ function admin(context, token, expiresAt) {
       );
     },
     media: Object.freeze({
-      async upload(source, { signal } = {}) {
+      async upload(source, { signal, onProgress } = {}) {
+        if (onProgress !== undefined && typeof onProgress !== "function")
+          throw new TypeError("onProgress must be a function.");
+        // A caller's mistake in its progress handler is reported, never
+        // allowed to fail an upload partway through.
+        const report = (progress) => {
+          try {
+            onProgress?.(progress);
+          } catch (error) {
+            if (typeof reportError === "function") reportError(error);
+            else
+              setTimeout(() => {
+                throw error;
+              });
+          }
+        };
+        report({ phase: "preparing" });
         // Some browsers leave an iPhone photo's type empty.
         const file = await shrink(
           !source.type && HEIC_NAME.test(source.name ?? "")
@@ -449,14 +520,15 @@ function admin(context, token, expiresAt) {
         });
         let upload;
         try {
-          upload = await fetch(authorization.uploadUrl, {
-            method: "PUT",
-            headers: authorization.headers,
-            body: file,
+          upload = await put(
+            authorization.uploadUrl,
+            authorization.headers,
+            file,
             signal,
-            credentials: "omit",
-            redirect: "error",
-          });
+            onProgress &&
+              ((loaded) =>
+                report({ phase: "uploading", loaded, total: file.size })),
+          );
         } catch (cause) {
           if (cause?.name === "AbortError") throw cause;
           throw new NaruError("File upload failed.", "UNAVAILABLE", cause);
@@ -469,6 +541,7 @@ function admin(context, token, expiresAt) {
             `File upload failed (HTTP ${upload.status}).`,
             "UNAVAILABLE",
           );
+        report({ phase: "finishing" });
         const finished = await send(
           `${root}/_files/${segment(authorization.id)}`,
           { method: "PUT", body: {}, signal, touches: [] },

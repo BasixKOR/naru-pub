@@ -37,7 +37,7 @@
         {
           "name": "media",
           "optional": false,
-          "signature": "media: {\n  upload(\n    file: Blob | File,\n    options?: { signal?: AbortSignal },\n  ): Promise<{\n    contentType: string;\n    name: string;\n    size: number;\n    url: string;\n  }>;\n}",
+          "signature": "media: {\n  upload(\n    file: Blob | File,\n    options?: {\n      onProgress?: (\n        progress:\n          | { phase: \"preparing\" }\n          | { loaded: number; phase: \"uploading\"; total: number }\n          | { phase: \"finishing\" },\n      ) => void;\n      signal?: AbortSignal;\n    },\n  ): Promise<{\n    contentType: string;\n    name: string;\n    size: number;\n    url: string;\n  }>;\n}",
           "summary": [],
           "throws": []
         },

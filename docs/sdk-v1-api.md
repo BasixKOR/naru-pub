@@ -228,7 +228,13 @@ retry writes or batches.
 ## Media and sign-out
 
 ```js
-const media = await admin.media.upload(file, { signal });
+const media = await admin.media.upload(file, {
+  signal,
+  onProgress(progress) {
+    if (progress.phase === "uploading")
+      bar.value = progress.loaded / progress.total;
+  },
+});
 await admin.signOut();
 admin = null;
 ```
@@ -238,7 +244,15 @@ have renamed and re-encoded the file (HEIC becomes WebP, for instance).
 The SDK may resize supported images before upload. Naru does not store HEIC,
 so a HEIC photo in a browser that cannot convert it (only Safari can today)
 throws a `TypeError` before a request is made. Which other types Naru stores is
-the server's to decide; a refused type fails with `INVALID_REQUEST`. The website SDK deliberately
+the server's to decide; a refused type fails with `INVALID_REQUEST`.
+
+`onProgress` is called with `{ phase: "preparing" }` while a photo is shrunk
+and the upload authorized, then `{ phase: "uploading", loaded, total }` as the
+bytes go to storage (`total` is the size actually sent, after shrinking), then
+`{ phase: "finishing" }` while storage confirms and Naru records the file.
+`loaded` can reach `total` before storage answers, and a small file may report
+only its start and end. An error thrown by the handler is reported like any
+uncaught error and does not stop the upload. The website SDK deliberately
 does not list or delete media; owners do that in Naru's media library. Sign-out
 forgets the tab's session before requesting remote revocation, and the admin
 handle refuses every later call with `AUTH_REQUIRED` even if the revocation

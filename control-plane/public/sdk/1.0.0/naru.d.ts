@@ -161,7 +161,22 @@ export interface Admin {
      */
     upload(
       file: File | Blob,
-      options?: { signal?: AbortSignal },
+      options?: {
+        signal?: AbortSignal;
+        /**
+         * Called as the upload moves along: `preparing` while a photo is
+         * shrunk and the upload authorized, `uploading` with the bytes sent
+         * so far of the `total` actually sent (after shrinking), then
+         * `finishing` while storage confirms and Naru records the file.
+         * `loaded` can reach `total` before storage has answered.
+         */
+        onProgress?: (
+          progress:
+            | { phase: "preparing" }
+            | { phase: "uploading"; loaded: number; total: number }
+            | { phase: "finishing" },
+        ) => void;
+      },
     ): Promise<{
       url: string;
       name: string;

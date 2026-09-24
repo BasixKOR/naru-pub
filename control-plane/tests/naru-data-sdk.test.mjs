@@ -950,6 +950,181 @@ test("a HEIC photo this browser cannot convert fails before anything is sent", a
   });
 });
 
+// Stands in for the browser's XMLHttpRequest; each test drives what storage
+// does with the request it sent.
+function fakeXhr(respond) {
+  const sent = [];
+  const old = globalThis.XMLHttpRequest;
+  globalThis.XMLHttpRequest = class {
+    upload = {};
+    headers = {};
+    open(method, url) {
+      Object.assign(this, { method, url });
+    }
+    setRequestHeader(name, value) {
+      this.headers[name] = value;
+    }
+    // As the specification has it: aborting a request not yet sent fires
+    // nothing, and sending it afterwards throws.
+    abort() {
+      this.aborted = true;
+      if (this.body !== undefined) queueMicrotask(() => this.onabort?.());
+    }
+    send(body) {
+      if (this.aborted)
+        throw new DOMException("Not opened.", "InvalidStateError");
+      this.body = body;
+      sent.push(this);
+      queueMicrotask(() => respond(this));
+    }
+  };
+  return {
+    sent,
+    restore() {
+      globalThis.XMLHttpRequest = old;
+    },
+  };
+}
+const answer = (request, status = 200, responseURL = request.url) =>
+  Object.assign(request, { status, responseURL }).onload();
+
+async function uploadWithProgress(respond, options = {}) {
+  const xhr = fakeXhr(respond);
+  const progress = [];
+  let calls;
+  try {
+    await browser(async (page) => {
+      calls = page.calls;
+      saveSession(page.storage);
+      const admin = await adminSession();
+      page.respond(({ method }) =>
+        method === "POST"
+          ? Response.json({
+              id: "f1",
+              uploadUrl: "https://upload.example/signed?x=1",
+              headers: { "Content-Type": "text/plain" },
+            })
+          : Response.json({
+              file: {
+                url: "https://media",
+                name: "a.txt",
+                contentType: "text/plain",
+                size: 5,
+              },
+            }),
+      );
+      options.result = await admin.media
+        .upload(new File(["hello"], "a.txt", { type: "text/plain" }), {
+          onProgress: (event) => progress.push(event),
+          ...options,
+        })
+        .catch((error) => ({ error }));
+    });
+  } finally {
+    xhr.restore();
+  }
+  return { progress, calls, sent: xhr.sent, result: options.result };
+}
+
+test("upload reports its phases and the bytes sent to storage", async () => {
+  const { progress, calls, sent, result } = await uploadWithProgress(
+    (request) => {
+      request.upload.onprogress({ loaded: 2 });
+      request.upload.onprogress({ loaded: 5 });
+      answer(request);
+    },
+  );
+  assert.equal(result.url, "https://media");
+  assert.deepEqual(progress, [
+    { phase: "preparing" },
+    { phase: "uploading", loaded: 0, total: 5 },
+    { phase: "uploading", loaded: 2, total: 5 },
+    { phase: "uploading", loaded: 5, total: 5 },
+    { phase: "finishing" },
+  ]);
+  // The same PUT fetch would send: the signed headers, the file, no cookies.
+  assert.equal(sent[0].method, "PUT");
+  assert.equal(sent[0].url, "https://upload.example/signed?x=1");
+  assert.deepEqual(sent[0].headers, { "Content-Type": "text/plain" });
+  assert.equal(sent[0].body.name, "a.txt");
+  assert.equal(sent[0].withCredentials, undefined);
+  // Authorized and finalized through fetch; only the bytes went by XHR.
+  assert.deepEqual(
+    calls.map(({ method, url }) => [method, url.pathname]),
+    [
+      ["POST", "/api/data/v1/alice/_files"],
+      ["PUT", "/api/data/v1/alice/_files/f1"],
+    ],
+  );
+});
+
+test("an upload with progress fails the way one without it does", async () => {
+  for (const [respond, expected] of [
+    [(request) => request.onerror(), { code: "UNAVAILABLE" }],
+    [(request) => answer(request, 403), { code: "UNAVAILABLE" }],
+    // Storage never redirects a signed upload, so one that did is refused.
+    [
+      (request) => answer(request, 200, "https://elsewhere.example/"),
+      { code: "UNAVAILABLE" },
+    ],
+  ]) {
+    const { result, calls, progress } = await uploadWithProgress(respond);
+    assert.ok(result.error instanceof NaruError);
+    assert.equal(result.error.code, expected.code);
+    // Not finalized, and never reported as finishing.
+    assert.equal(calls.length, 1);
+    assert.equal(progress.at(-1).phase, "uploading");
+  }
+});
+
+test("aborting from the first progress report still aborts the upload", async () => {
+  const controller = new AbortController();
+  const { result, sent } = await uploadWithProgress(() => {}, {
+    signal: controller.signal,
+    onProgress: (progress) => {
+      if (progress.phase === "uploading") controller.abort();
+    },
+  });
+  assert.equal(result.error.name, "AbortError");
+  assert.equal(sent[0].aborted, true);
+});
+
+test("aborting an upload with progress stops the transfer natively", async () => {
+  const controller = new AbortController();
+  const { result, sent } = await uploadWithProgress(() => controller.abort(), {
+    signal: controller.signal,
+  });
+  assert.equal(result.error.name, "AbortError");
+  assert.equal(sent[0].aborted, true);
+});
+
+test("a throwing progress handler does not fail the upload", async () => {
+  // Reported the way a browser reports an uncaught error, to window.onerror.
+  const thrown = [];
+  const old = globalThis.reportError;
+  globalThis.reportError = (error) => thrown.push(error.message);
+  try {
+    const { result } = await uploadWithProgress(answer, {
+      onProgress: () => {
+        throw new Error("handler bug");
+      },
+    });
+    assert.equal(result.url, "https://media");
+    assert.ok(thrown.length >= 3 && thrown.every((m) => m === "handler bug"));
+  } finally {
+    globalThis.reportError = old;
+  }
+  await browser(async ({ calls, storage }) => {
+    saveSession(storage);
+    const admin = await adminSession();
+    await assert.rejects(
+      admin.media.upload(new Blob(["x"]), { onProgress: "yes" }),
+      TypeError,
+    );
+    assert.equal(calls.length, 0);
+  });
+});
+
 test("a failed transfer is reported and not finalized", async () => {
   await browser(async ({ calls, respond, storage }) => {
     saveSession(storage);

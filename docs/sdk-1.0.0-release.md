@@ -51,7 +51,7 @@ The blog tests exercise public browsing/guestbook and admin draft/publishing flo
   out handle refuses further calls. Server
   metadata is camelCase (`createdAt`/`updatedAt`), `add` and `set` return
   `{ id, data, revision, createdAt, updatedAt }`, `upload` returns
-  `{ url, name, contentType, size }`, only the names an application writes
+  `{ url, name, contentType, size }` and takes `{ signal, onProgress }`, only the names an application writes
   itself (including option types its helpers pass along) are exported, `sort` is always a list of
   `[field, direction]` pairs, `list` takes flat `size`/`after`/`includeTotal`,
   and pagination uses opaque cursors. Errors carry one of eight closed v1 codes,

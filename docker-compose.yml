@@ -1,6 +1,11 @@
+# Built on another machine and loaded here by deploy.sh; deploy-server.sh
+# points the :current tags at the release before recreating anything. There is
+# deliberately no `build:`: a build here is what ran this machine out of memory.
+# Without one, a missing image would send compose to Docker Hub, so fail
+# instead.
 x-control-plane: &control-plane
-  image: naru-pub-control-plane:latest
-  build: ./control-plane
+  image: naru-pub-control-plane:current
+  pull_policy: never
   # deploy.sh stops the slot that is not serving. `always` would bring it back
   # whenever the Docker daemon restarts; this leaves it stopped.
   restart: unless-stopped
@@ -18,8 +23,8 @@ x-control-plane: &control-plane
     start_period: 5s
 
 x-proxy: &proxy
-  image: naru-pub-proxy:latest
-  build: ./proxy
+  image: naru-pub-proxy:current
+  pull_policy: never
   restart: unless-stopped
   init: true
   env_file: .env
@@ -61,7 +66,8 @@ services:
     <<: *proxy
 
   cron:
-    image: naru-pub-control-plane:latest
+    image: naru-pub-control-plane:current
+    pull_policy: never
     restart: always
     # Not `pnpm run cron`, which is pnpm, then the tsx CLI, then node: three
     # resident processes where one does the work.
@@ -72,7 +78,8 @@ services:
       - "host.docker.internal:host-gateway"
 
   worker:
-    image: naru-pub-control-plane:latest
+    image: naru-pub-control-plane:current
+    pull_policy: never
     restart: always
     # Not `pnpm run worker`, which is pnpm, then the tsx CLI, then node: three
     # resident processes where one does the work.

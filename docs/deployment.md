@@ -1,26 +1,38 @@
 # Production deployment
 
-`deploy.sh` uses blue-green HTTP deployments. A stable nginx gateway owns host
+Deploy from the development machine, not the server:
+
+```bash
+./deploy.sh
+```
+
+It builds `naru-pub-control-plane:<commit>` and `naru-pub-proxy:<commit>` from
+`origin/main` in a clean checkout of its own (`~/.cache/naru-pub-deploy`),
+ships both images over ssh to the host named by the `naru-pub-deploy` alias in
+`~/.ssh/config`, and runs `deploy-server.sh <commit>` there. Nothing compiles
+on the server, and its Compose file has no `build:` on purpose: a Next.js build
+and a release Cargo build there ran the Docker VM that every other service on
+the host shares out of memory. Push first; only `origin/main` is deployed.
+
+`deploy-server.sh` uses blue-green HTTP deployments. A stable nginx gateway owns host
 ports `40000` (control plane) and `40001` (hosted-site proxy). The blue and green
 application slots have no published host ports.
 
-For each deployment, the script:
+For each deployment, `deploy-server.sh`:
 
-1. pulls the latest commit with a fast-forward-only pull;
-2. builds the inactive control-plane and site-proxy slot;
+1. fast-forwards the server checkout to exactly the commit the images were
+   built from;
+2. points the `:current` tags at that commit's images;
 3. runs database migrations from the new control-plane image;
 4. starts the inactive slot and waits for the control plane, database, and
    hosted-site proxy to become healthy;
-5. reloads nginx to atomically direct new requests to the healthy slot; and
-6. recreates the cron and worker processes from the new image.
+5. reloads nginx to atomically direct new requests to the healthy slot;
+6. recreates the cron and worker processes from the new image; and
+7. stops the previous slot and removes release images nothing can come back to.
 
-After pulling, the deploy command re-executes the checked-in script once before
-it reads the Compose topology. This keeps a deployment safe when the deployment
-script or Compose file itself changes in the pulled commit.
-
-Both images are built one after the other rather than together: a Next.js
-build and a release Cargo build at once can exhaust the memory of the Docker VM
-that the live slot shares with every other service on the host.
+After the checkout moves, the script re-executes the checked-in copy once
+before it reads the Compose topology. This keeps a deployment safe when the
+deployment script or Compose file itself changes in that commit.
 
 The previous HTTP slot is stopped once traffic has left it. nginx finishes
 in-flight requests on its old workers after a reload, so the script waits for
@@ -29,7 +41,8 @@ stopping the slot. Its containers are kept, not removed, so an immediate
 traffic rollback starts them again without a rebuild:
 
 ```bash
-./deploy.sh rollback
+./deploy.sh rollback             # from the development machine
+./deploy-server.sh rollback      # or on the server itself
 ```
 
 A rollback starts the stopped slot, waits for it to become healthy, switches

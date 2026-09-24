@@ -1,338 +1,151 @@
 #!/bin/bash
+# Deploy what is on origin/main: build its images on this machine, load them on
+# the server, and have the server switch to them.
+#
+#   ./deploy.sh            build, ship, and switch the inactive slot live
+#   ./deploy.sh rollback   switch HTTP traffic back to the stopped slot
+#
+#   fetch origin/main into a clean build checkout -> build
+#   naru-pub-control-plane:<commit> and naru-pub-proxy:<commit> -> ship them
+#   over ssh -> run deploy-server.sh <commit> on the server
+#
+# The builds used to run on the server, where a Next.js build and a release
+# Cargo build ran the Docker VM out of memory under every other service on that
+# host. Both machines are arm64, so an image built here runs there as is.
+#
+# The server is reached by the ssh alias in DEPLOY_HOST, so its address lives
+# in ~/.ssh/config and not in this public repository:
+#
+#   Host naru-pub-deploy
+#       HostName <the server's address>
+#
+# Docker here has to be running. OrbStack is started if it is not.
 set -Eeuo pipefail
 
-export PATH="$HOME/.orbstack/bin:$PATH"
+DEPLOY_HOST=${DEPLOY_HOST:-naru-pub-deploy}
+# Expanded by the server's shell, not this one.
+REMOTE_DIR=${REMOTE_DIR:-'~/Git/naru-pub'}
+# A checkout of its own rather than the one this script was run from: that one
+# holds node_modules, .next, target and the rest of a working tree, and it may
+# not be what was pushed. This one is cleaned to exactly the commit deployed.
+BUILD_DIR=${DEPLOY_BUILD_DIR:-$HOME/.cache/naru-pub-deploy}
+LOCK_DIR=$BUILD_DIR.lock
 
-cd "$(dirname "$0")"
+SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-STATE_DIR=.deploy-state
-NGINX_DIR="$STATE_DIR/nginx"
-ACTIVE_FILE="$STATE_DIR/active-slot"
-mkdir -p "$NGINX_DIR"
+# A login shell, so the server's PATH has docker and zstd on it.
+remote() {
+  ssh "$DEPLOY_HOST" "zsh -l -c '$1'"
+}
 
-active_slot() {
-  if [[ -f "$ACTIVE_FILE" ]]; then
-    cat "$ACTIVE_FILE"
-  else
-    printf 'none'
+case "${1:-deploy}" in
+  deploy) ;;
+  rollback)
+    remote "$REMOTE_DIR/deploy-server.sh rollback"
+    exit 0
+    ;;
+  *)
+    echo "Usage: $0 [deploy|rollback]" >&2
+    exit 2
+    ;;
+esac
+
+mkdir -p "$(dirname "$BUILD_DIR")"
+# One deploy at a time: two would share the build checkout.
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  echo "Another deploy is in progress (remove $LOCK_DIR if it is not)." >&2
+  exit 1
+fi
+trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+
+if ! docker info >/dev/null 2>&1; then
+  if command -v orb >/dev/null; then
+    echo "Starting OrbStack..."
+    orb start
   fi
-}
-
-other_slot() {
-  case "$1" in
-    blue) printf 'green' ;;
-    green) printf 'blue' ;;
-    none) printf 'blue' ;;
-    *) echo "Invalid active slot: $1" >&2; exit 1 ;;
-  esac
-}
-
-render_gateway_config() {
-  local slot=$1
-  local destination=$2
-
-  cat > "$destination" <<EOF
-map \$http_x_forwarded_proto \$naru_forwarded_proto {
-    default \$http_x_forwarded_proto;
-    ""      \$scheme;
-}
-
-map \$http_upgrade \$naru_connection_upgrade {
-    default upgrade;
-    ""      "";
-}
-
-# The site database API is the one control-plane surface a stranger can drive at
-# will: it is public, CORS-open, and every request costs a PostgreSQL round trip
-# on the pool the whole control plane shares. These buckets keep a burst against
-# one site from becoming a sign-in outage for everyone else. Per-client, so a
-# busy site with many real visitors is unaffected.
-#
-# Every request reaches this gateway through the Cloudflare Tunnel running on the
-# host, so the peer address is the tunnel, identical for the whole internet. A
-# limit keyed on it would be one bucket for every visitor at once — which is not
-# a rate limit, it is an outage waiting for a busy afternoon.
-#
-# The real address is recovered per server block (see below), so these zones key
-# on the visitor rather than on the tunnel every request shares.
-#
-# The gateway overwrites CF-Connecting-IP before proxying to the application.
-# This gives the database write limiter the same verified address while making
-# a value supplied by an internet client irrelevant.
-limit_req_zone \$binary_remote_addr zone=naru_data:16m rate=30r/s;
-limit_req_zone \$binary_remote_addr zone=naru_data_auth:8m rate=2r/s;
-limit_req_status 429;
-limit_conn_zone \$binary_remote_addr zone=naru_conn:16m;
-limit_conn_status 429;
-
-# Docker assigns a new address whenever a blue/green container is recreated.
-# Resolve upstream names through Docker's embedded DNS at runtime so the
-# long-lived gateway never keeps sending traffic to a recycled container IP.
-resolver 127.0.0.11 ipv6=off valid=10s;
-
-upstream naru_control_plane {
-    zone naru_control_plane 64k;
-    server control-plane-$slot:3000 resolve;
-    keepalive 32;
-}
-
-upstream naru_site_proxy {
-    zone naru_site_proxy 64k;
-    server proxy-$slot:5000 resolve;
-    keepalive 32;
-}
-
-server {
-    listen 3000;
-    client_max_body_size 0;
-
-    # Recover the visitor's address before the limits below are keyed on it.
-    # Trusted only when the peer is the private tunnel address: cloudflared
-    # connects outbound and these ports are not routable from off the host's
-    # network, so an internet caller cannot supply this header themselves.
-    # Scoped to this server block, leaving the hosted-site proxy on :5000
-    # exactly as it was. real_ip runs before limit_req, so \$binary_remote_addr
-    # is already the visitor by the time a bucket is chosen.
-    set_real_ip_from 10.0.0.0/8;
-    set_real_ip_from 172.16.0.0/12;
-    set_real_ip_from 192.168.0.0/16;
-    set_real_ip_from 127.0.0.0/8;
-    set_real_ip_from ::1/128;
-    set_real_ip_from fd00::/8;
-    # CF-Connecting-IP does not survive this tunnel; X-Forwarded-For does, and
-    # recursion walks it right to left past trusted hops so a value a client
-    # prepended itself cannot win.
-    real_ip_header X-Forwarded-For;
-    real_ip_recursive on;
-
-    # A document is capped at 64 KiB and the largest body the data API accepts
-    # is one batch of them, so nothing on these routes needs megabytes.
-    location /api/data/ {
-        limit_req zone=naru_data burst=60 nodelay;
-        limit_conn naru_conn 24;
-        client_max_body_size 1m;
-        proxy_pass http://naru_control_plane;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$http_host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header CF-Connecting-IP \$remote_addr;
-        proxy_set_header X-Forwarded-Proto \$naru_forwarded_proto;
-        proxy_read_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_buffering off;
-    }
-
-    # Sign-in is a human action a few times a day, never a page-load cost, so
-    # this can be far tighter than the data API. Token exchange and revocation
-    # both live here, and both are worth bounding against guessing.
-    location /api/data-auth/ {
-        limit_req zone=naru_data_auth burst=10 nodelay;
-        limit_conn naru_conn 24;
-        client_max_body_size 64k;
-        proxy_pass http://naru_control_plane;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$http_host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header CF-Connecting-IP \$remote_addr;
-        proxy_set_header X-Forwarded-Proto \$naru_forwarded_proto;
-        proxy_read_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_buffering off;
-    }
-
-    location / {
-        proxy_pass http://naru_control_plane;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$http_host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header CF-Connecting-IP \$remote_addr;
-        proxy_set_header X-Forwarded-Proto \$naru_forwarded_proto;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$naru_connection_upgrade;
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-        proxy_buffering off;
-    }
-}
-
-server {
-    listen 5000;
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://naru_site_proxy;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$http_host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$naru_forwarded_proto;
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-        proxy_buffering off;
-    }
-}
-EOF
-}
-
-wait_for_healthy() {
-  local service=$1
-  local container_id
-  local status
-
-  container_id=$(docker compose ps -q "$service")
-  if [[ -z "$container_id" ]]; then
-    echo "$service did not start." >&2
-    return 1
-  fi
-
-  for _ in $(seq 1 60); do
-    status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id")
-    case "$status" in
-      healthy) return 0 ;;
-      unhealthy|exited|dead)
-        docker compose logs --tail=100 "$service" >&2
-        return 1
-        ;;
-    esac
-    sleep 1
-  done
-
-  echo "$service did not become healthy within 60 seconds." >&2
-  docker compose logs --tail=100 "$service" >&2
-  return 1
-}
-
-switch_gateway() {
-  local slot=$1
-  local config="$NGINX_DIR/default.conf"
-  local next_config="$STATE_DIR/default.conf.next"
-  local previous_config="$STATE_DIR/default.conf.previous"
-
-  render_gateway_config "$slot" "$next_config"
-  if [[ -f "$config" ]]; then
-    cp "$config" "$previous_config"
-  fi
-  cp "$next_config" "$config"
-
-  if docker compose ps --status running --services | grep -qx gateway; then
-    if ! docker compose exec -T gateway nginx -t; then
-      [[ -f "$previous_config" ]] && cp "$previous_config" "$config"
-      return 1
-    fi
-    docker compose exec -T gateway nginx -s reload
-  else
-    # The first blue-green deployment replaces the two legacy containers that
-    # own the public ports. Every later deployment keeps the gateway running.
-    docker compose pull gateway
-    docker compose create gateway
-    docker rm -f naru-pub-control-plane naru-pub-proxy 2>/dev/null || true
-    docker compose start gateway
-    wait_for_healthy gateway
-  fi
-
-  printf '%s\n' "$slot" > "$ACTIVE_FILE"
-  rm -f "$next_config" "$previous_config"
-}
-
-# After a reload, nginx keeps its old workers until their requests finish, and
-# those requests are still going to the slot traffic just left. Stopping that
-# slot is safe once they are gone. The wait is bounded because a long upload or
-# a held-open connection could keep an old worker for the full 300s timeout;
-# anything still running then is cut, as it would be by the next deploy anyway.
-DRAIN_TIMEOUT_SECONDS=${DRAIN_TIMEOUT_SECONDS:-120}
-
-stop_slot() {
-  local slot=$1
-
-  echo "Waiting for requests to the $slot slot to finish..."
-  for _ in $(seq 1 "$DRAIN_TIMEOUT_SECONDS"); do
-    if [[ "$(docker compose exec -T gateway ps -o args 2>/dev/null)" != *"shutting down"* ]]; then
-      break
-    fi
-    sleep 1
-  done
-
-  # A stopped slot costs no memory. Its containers are kept, so a rollback
-  # starts them again rather than rebuilding.
-  echo "Stopping the $slot slot..."
-  docker compose stop "control-plane-$slot" "proxy-$slot"
-}
-
-rollback() {
-  local current target
-  current=$(active_slot)
-  if [[ "$current" == none ]]; then
-    echo "No previous blue-green deployment is available." >&2
+  if ! docker info >/dev/null 2>&1; then
+    echo "Docker is not running on this machine." >&2
     exit 1
   fi
-  target=$(other_slot "$current")
-  if [[ -z "$(docker compose ps -a -q "control-plane-$target")" ]]; then
-    echo "The $target slot has no containers to roll back to." >&2
-    exit 1
-  fi
-  docker compose start "control-plane-$target" "proxy-$target"
-  wait_for_healthy "control-plane-$target"
-  wait_for_healthy "proxy-$target"
-  switch_gateway "$target"
-  stop_slot "$current"
-  echo "Traffic rolled back from $current to $target."
-}
-
-if [[ "${BASH_SOURCE[0]:-$0}" != "$0" ]]; then
-  return 0
 fi
 
-if [[ "${1:-deploy}" == rollback ]]; then
-  rollback
-  exit 0
+echo "Fetching origin/main..."
+if [[ ! -d $BUILD_DIR/.git ]]; then
+  git clone --quiet "$(git -C "$SOURCE_DIR" remote get-url origin)" "$BUILD_DIR"
 fi
-if [[ "${1:-deploy}" != deploy ]]; then
-  echo "Usage: $0 [deploy|rollback]" >&2
-  exit 2
-fi
+git -C "$BUILD_DIR" fetch --quiet origin main
+COMMIT="$(git -C "$BUILD_DIR" rev-parse FETCH_HEAD)"
+git -C "$BUILD_DIR" checkout --quiet --detach "$COMMIT"
+git -C "$BUILD_DIR" clean -qffdx
+CONTROL_PLANE_IMAGE="naru-pub-control-plane:$COMMIT"
+PROXY_IMAGE="naru-pub-proxy:$COMMIT"
+echo "Deploying $(git -C "$BUILD_DIR" log -1 --format='%h %s')"
 
-if [[ "${NARU_DEPLOY_AFTER_PULL:-0}" != 1 ]]; then
-  echo "Pulling latest changes..."
-  git pull --ff-only
-  exec env NARU_DEPLOY_AFTER_PULL=1 "$0" "$@"
-fi
-
-current=$(active_slot)
-target=$(other_slot "$current")
-control_plane_service="control-plane-$target"
-proxy_service="proxy-$target"
-
-echo "Building the $target slot while $current continues serving traffic..."
-# One at a time. Together, `next build` and a release `cargo build` on every
-# core are what ran the Docker VM out of memory while the live slot, and every
-# other site on this host, was sharing it.
-docker compose build "$control_plane_service"
-docker compose build "$proxy_service"
-
-echo "Running backward-compatible migrations..."
-docker compose run --rm --no-deps "$control_plane_service" pnpm migrate
-
-echo "Starting and checking the $target slot..."
-docker compose up -d --no-deps --force-recreate "$control_plane_service" "$proxy_service"
-wait_for_healthy "$control_plane_service"
-wait_for_healthy "$proxy_service"
-
-echo "Switching traffic to the $target slot..."
-switch_gateway "$target"
-
-echo "Updating background processes..."
-docker compose up -d --no-deps --force-recreate cron worker
-
-if [[ "$current" != none ]]; then
-  stop_slot "$current"
+# Only what has been pushed goes out, because the server checks out the same
+# commit for its compose file and deploy-server.sh.
+if [[ "$(git -C "$SOURCE_DIR" rev-parse HEAD)" != "$COMMIT" ]]; then
+  echo "  (not this checkout's HEAD, $(git -C "$SOURCE_DIR" rev-parse --short HEAD); push first to deploy that)"
 fi
 
-echo "Deployment complete. Active slot: $target (previous slot: $current)."
-if [[ "$current" != none ]]; then
-  echo "The $current slot is stopped; ./deploy.sh rollback starts it and switches HTTP traffic back."
+# A deploy that failed after shipping can be retried without rebuilding or
+# sending the images again.
+if remote "docker image inspect $CONTROL_PLANE_IMAGE $PROXY_IMAGE" >/dev/null 2>&1; then
+  echo "The server already has both images for $COMMIT."
 else
-  echo "The first rollback slot will become available after the next deployment."
+  # NEXT_PUBLIC_* are compiled into the client bundle, so the build needs them.
+  # The server's .env stays their one source of truth; only these public
+  # values are read from it. The Dockerfile's defaults apply to any it lacks.
+  echo "Reading build-time settings from the server..."
+  BUILD_ARGS=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    value=${line#*=}
+    # Compose strips the quotes .env values may carry; do the same.
+    if [[ $value == \"*\" || $value == \'*\' ]]; then
+      value=${value:1:${#value}-2}
+    fi
+    BUILD_ARGS+=(--build-arg "${line%%=*}=$value")
+  done < <(remote "grep ^NEXT_PUBLIC_ $REMOTE_DIR/.env || true")
+
+  echo "Building $CONTROL_PLANE_IMAGE..."
+  DOCKER_BUILDKIT=1 docker build \
+    --platform linux/arm64 \
+    ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} \
+    --tag "$CONTROL_PLANE_IMAGE" \
+    "$BUILD_DIR/control-plane"
+
+  echo "Building $PROXY_IMAGE..."
+  DOCKER_BUILDKIT=1 docker build \
+    --platform linux/arm64 \
+    --tag "$PROXY_IMAGE" \
+    "$BUILD_DIR/proxy"
+
+  # One stream for both, so the layers they share are sent once.
+  echo "Shipping both images to $DEPLOY_HOST..."
+  docker save "$CONTROL_PLANE_IMAGE" "$PROXY_IMAGE" \
+    | zstd -T0 -3 -q \
+    | remote "zstd -dcq | docker load --quiet"
 fi
+
+# One-time: a server checkout from before this script existed has no
+# deploy-server.sh to run, so bring it up to the commit being deployed first.
+# Every later deploy leaves moving the checkout to deploy-server.sh, which does
+# it under its lock.
+if ! remote "test -x $REMOTE_DIR/deploy-server.sh"; then
+  echo "Bringing the server checkout up to $COMMIT for its first deploy-server.sh..."
+  remote "cd $REMOTE_DIR && git fetch --quiet origin && git merge --ff-only --quiet $COMMIT"
+fi
+
+echo "Switching the server to $COMMIT..."
+remote "$REMOTE_DIR/deploy-server.sh $COMMIT"
+
+# The server has the images now, and these copies only existed to be sent
+# there. Keeping the ones just deployed makes a retry cheap; the build cache
+# that makes the next build fast is separate and stays.
+for repository in naru-pub-control-plane naru-pub-proxy; do
+  for tag in $(docker image ls "$repository" --format '{{.Tag}}'); do
+    if [[ "$tag" != "$COMMIT" ]]; then
+      docker rmi "$repository:$tag" >/dev/null 2>&1 || true
+    fi
+  done
+done

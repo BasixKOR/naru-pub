@@ -31,7 +31,10 @@ function runWithTimeout(
     const scriptPath = `src/cli/${script}`;
     console.log(`[cron] Starting ${script}`);
 
-    const child = spawn("tsx", [scriptPath], {
+    // tsx as a loader in this same node binary, not the tsx CLI: that one is
+    // a second node process which only exists to start the real one, and it is
+    // on PATH only when pnpm put it there.
+    const child = spawn(process.execPath, ["--import", "tsx", scriptPath], {
       cwd: process.cwd(),
       stdio: "inherit",
       env: process.env,

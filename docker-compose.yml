@@ -1,7 +1,12 @@
 x-control-plane: &control-plane
   image: naru-pub-control-plane:latest
   build: ./control-plane
-  restart: always
+  # deploy.sh stops the slot that is not serving. `always` would bring it back
+  # whenever the Docker daemon restarts; this leaves it stopped.
+  restart: unless-stopped
+  # Forwards SIGTERM to the app, which as PID 1 would otherwise be exempt from
+  # the default action and sit out the ten seconds until Docker kills it.
+  init: true
   env_file: .env
   extra_hosts:
     - "host.docker.internal:host-gateway"
@@ -15,7 +20,8 @@ x-control-plane: &control-plane
 x-proxy: &proxy
   image: naru-pub-proxy:latest
   build: ./proxy
-  restart: always
+  restart: unless-stopped
+  init: true
   env_file: .env
   extra_hosts:
     - "host.docker.internal:host-gateway"
@@ -57,7 +63,10 @@ services:
   cron:
     image: naru-pub-control-plane:latest
     restart: always
-    command: ["pnpm", "run", "cron"]
+    # Not `pnpm run cron`, which is pnpm, then the tsx CLI, then node: three
+    # resident processes where one does the work.
+    command: ["node", "--import", "tsx", "src/cli/cron.ts"]
+    init: true
     env_file: .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -65,7 +74,10 @@ services:
   worker:
     image: naru-pub-control-plane:latest
     restart: always
-    command: ["pnpm", "run", "worker"]
+    # Not `pnpm run worker`, which is pnpm, then the tsx CLI, then node: three
+    # resident processes where one does the work.
+    command: ["node", "--import", "tsx", "src/cli/worker.ts"]
+    init: true
     env_file: .env
     extra_hosts:
       - "host.docker.internal:host-gateway"

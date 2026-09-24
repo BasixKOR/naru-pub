@@ -237,6 +237,30 @@ switch_gateway() {
   rm -f "$next_config" "$previous_config"
 }
 
+# After a reload, nginx keeps its old workers until their requests finish, and
+# those requests are still going to the slot traffic just left. Stopping that
+# slot is safe once they are gone. The wait is bounded because a long upload or
+# a held-open connection could keep an old worker for the full 300s timeout;
+# anything still running then is cut, as it would be by the next deploy anyway.
+DRAIN_TIMEOUT_SECONDS=${DRAIN_TIMEOUT_SECONDS:-120}
+
+stop_slot() {
+  local slot=$1
+
+  echo "Waiting for requests to the $slot slot to finish..."
+  for _ in $(seq 1 "$DRAIN_TIMEOUT_SECONDS"); do
+    if [[ "$(docker compose exec -T gateway ps -o args 2>/dev/null)" != *"shutting down"* ]]; then
+      break
+    fi
+    sleep 1
+  done
+
+  # A stopped slot costs no memory. Its containers are kept, so a rollback
+  # starts them again rather than rebuilding.
+  echo "Stopping the $slot slot..."
+  docker compose stop "control-plane-$slot" "proxy-$slot"
+}
+
 rollback() {
   local current target
   current=$(active_slot)
@@ -245,9 +269,15 @@ rollback() {
     exit 1
   fi
   target=$(other_slot "$current")
+  if [[ -z "$(docker compose ps -a -q "control-plane-$target")" ]]; then
+    echo "The $target slot has no containers to roll back to." >&2
+    exit 1
+  fi
+  docker compose start "control-plane-$target" "proxy-$target"
   wait_for_healthy "control-plane-$target"
   wait_for_healthy "proxy-$target"
   switch_gateway "$target"
+  stop_slot "$current"
   echo "Traffic rolled back from $current to $target."
 }
 
@@ -276,7 +306,11 @@ control_plane_service="control-plane-$target"
 proxy_service="proxy-$target"
 
 echo "Building the $target slot while $current continues serving traffic..."
-docker compose build "$control_plane_service" "$proxy_service"
+# One at a time. Together, `next build` and a release `cargo build` on every
+# core are what ran the Docker VM out of memory while the live slot, and every
+# other site on this host, was sharing it.
+docker compose build "$control_plane_service"
+docker compose build "$proxy_service"
 
 echo "Running backward-compatible migrations..."
 docker compose run --rm --no-deps "$control_plane_service" pnpm migrate
@@ -292,9 +326,13 @@ switch_gateway "$target"
 echo "Updating background processes..."
 docker compose up -d --no-deps --force-recreate cron worker
 
+if [[ "$current" != none ]]; then
+  stop_slot "$current"
+fi
+
 echo "Deployment complete. Active slot: $target (previous slot: $current)."
 if [[ "$current" != none ]]; then
-  echo "Run ./deploy.sh rollback to switch HTTP traffic back before the next deployment."
+  echo "The $current slot is stopped; ./deploy.sh rollback starts it and switches HTTP traffic back."
 else
   echo "The first rollback slot will become available after the next deployment."
 fi

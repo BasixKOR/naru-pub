@@ -1,0 +1,3 @@
+# The local build directory is well over a gigabyte, and the image compiles its
+# own; without this every build sends it to the daemon as context.
+target/

@@ -18,13 +18,24 @@ After pulling, the deploy command re-executes the checked-in script once before
 it reads the Compose topology. This keeps a deployment safe when the deployment
 script or Compose file itself changes in the pulled commit.
 
-The previous HTTP slot stays running after the switch. Existing nginx workers
-can finish in-flight requests against it, and it remains available for an
-immediate traffic rollback:
+Both images are built one after the other rather than together: a Next.js
+build and a release Cargo build at once can exhaust the memory of the Docker VM
+that the live slot shares with every other service on the host.
+
+The previous HTTP slot is stopped once traffic has left it. nginx finishes
+in-flight requests on its old workers after a reload, so the script waits for
+those workers to exit (at most `DRAIN_TIMEOUT_SECONDS`, 120 by default) before
+stopping the slot. Its containers are kept, not removed, so an immediate
+traffic rollback starts them again without a rebuild:
 
 ```bash
 ./deploy.sh rollback
 ```
+
+A rollback starts the stopped slot, waits for it to become healthy, switches
+traffic to it, and stops the slot it left. The slots use
+`restart: unless-stopped`, so a stopped slot also stays stopped across a Docker
+restart.
 
 Rollback only switches the HTTP services. It does not reverse database
 migrations or roll back cron and worker code. Migrations deployed through this

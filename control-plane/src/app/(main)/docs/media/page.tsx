@@ -44,7 +44,7 @@ export default function MediaDocs() {
             사이트가 올린 이미지와 파일을 다루세요.
           </h1>
           <p className="text-lg leading-8 text-muted-foreground">
-            글에 넣을 사진, 방명록에 첨부한 이미지처럼 데이터베이스 문서와 함께
+            글에 넣을 사진 등 데이터베이스 문서와 함께
             쓰는 파일을 보관합니다.
           </p>
           <div className="flex flex-wrap gap-5 text-sm underline underline-offset-4">
@@ -103,24 +103,21 @@ await admin.collection("posts").set("hello", {
   },
 });`}</Code>
               <p>
-                큰 사진은 자동으로 줄이거나 지원되는 형식으로 바꿀 수 있습니다.
+                큰 사진은 자동으로 줄여지거나 지원되는 형식으로 변환될 수 있습니다.
                 구체적인 크기와 변환 방식은 바뀔 수 있으므로 돌려받은 파일
-                정보와 URL을 쓰세요. 변환 없이 저장하는 파일에는 원래 사진
-                정보가 남을 수 있습니다.
+                정보와 URL을 쓰세요.
               </p>
             </Section>
 
             <Section id="limits" title="02 · 한도와 허용 형식">
               <ul className="list-disc space-y-3 pl-6">
                 <li>
-                  파일 하나 <strong>25 MiB</strong>, 사이트당{" "}
-                  <strong>250 MiB</strong>. 데이터베이스와 따로 셉니다.
+                  파일당 <strong>25 MiB</strong>, 사이트당{" "}
+                  <strong>250 MiB</strong>의 한도가 있습니다.
                 </li>
                 <li>
                   이미지(JPEG, PNG, WebP, AVIF, GIF), 오디오, PDF, ZIP, 텍스트를
-                  받습니다. <strong>HTML과 SVG는 받지 않습니다.</strong> HEIC
-                  사진은 변환할 수 있는 Safari에서만 올릴 수 있고, 다른
-                  브라우저에서는 요청 전에 TypeError로 거절합니다.
+                  지원합니다.
                 </li>
               </ul>
             </Section>
@@ -131,11 +128,6 @@ await admin.collection("posts").set("hello", {
                 사용량을 확인하고, URL을 복사하고, 지울 수 있습니다. 사이트를
                 이루는 HTML·CSS 파일은 <a href="/files">파일</a>에서 따로
                 관리합니다.
-              </p>
-              <p>
-                글을 지워도 그 글의 이미지는 남습니다. 쓰지 않는 파일은 직접
-                지우세요. 지운 파일은 되돌릴 수 없고, 그 URL을 쓰던 이미지는
-                깨집니다.
               </p>
             </Section>
           </article>

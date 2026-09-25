@@ -17,7 +17,7 @@ the deploy action at `naru-pub/actions/deploy@v1` is also a good shape.
 2. `POST /api/deploy/github/plan`
    - verifies the OIDC token,
    - finds a matching enabled deploy target,
-   - validates the manifest and quota,
+   - validates the manifest,
    - creates a planned deployment,
    - returns signed R2 upload URLs for staging keys.
 3. The Action uploads every manifest file to the returned staging URLs.

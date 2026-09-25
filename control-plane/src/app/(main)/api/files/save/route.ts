@@ -78,9 +78,17 @@ export async function POST(request: NextRequest) {
 
     const { filename, contents } = await request.json();
 
-    if (!filename || contents === undefined) {
+    if (!filename || typeof contents !== "string") {
       return NextResponse.json(
         { success: false, message: "파일명과 내용이 필요합니다." },
+        { status: 400 },
+      );
+    }
+
+    // The same cap as uploads, so the editor is not a way around it.
+    if (Buffer.byteLength(contents) > 1024 * 1024 * 10) {
+      return NextResponse.json(
+        { success: false, message: "10MB 이하의 파일만 저장할 수 있습니다." },
         { status: 400 },
       );
     }

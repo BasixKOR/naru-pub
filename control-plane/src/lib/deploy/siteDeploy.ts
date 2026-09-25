@@ -22,7 +22,6 @@ import { s3Client } from "@/lib/s3";
 import { getUserHomeDirectory } from "@/lib/utils";
 import { GitHubActionsClaims } from "./githubOidc";
 
-const MAX_USER_DIRECTORY_SIZE_BYTES = 1024 * 1024 * 1024;
 const MAX_DEPLOY_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const DEPLOYMENT_TTL_MS = 60 * 60 * 1000;
 const UPLOAD_URL_TTL_SECONDS = 15 * 60;
@@ -196,10 +195,6 @@ function manifestFiles(value: unknown): DeployManifestFile[] {
 // wrong for a long time and fail the first time it carries anything.
 const asJsonb = (value: unknown) => sql`${JSON.stringify(value)}::jsonb`;
 
-function manifestTotalSize(files: DeployManifestFile[]) {
-  return files.reduce((sum, file) => sum + file.size, 0);
-}
-
 async function calculateUserHomeDirectorySize(loginName: string) {
   const prefix = `${getUserHomeDirectory(loginName)}/`;
   let totalSize = 0;
@@ -348,10 +343,6 @@ export async function createGitHubDeploymentPlan(params: {
 }) {
   const targetPrefix = normalizeTargetPrefix(params.targetPrefix);
   const manifest = validateManifest(params.manifest);
-  const requestedBytes = manifestTotalSize(manifest.files);
-  if (requestedBytes > MAX_USER_DIRECTORY_SIZE_BYTES) {
-    throw new Error("Deploy exceeds the maximum user directory size");
-  }
 
   const target = await db
     .selectFrom("github_deploy_targets")
@@ -388,14 +379,7 @@ export async function createGitHubDeploymentPlan(params: {
 
   assertGitHubClaimsAllowed(params.claims, target);
 
-  const currentSize = await calculateUserHomeDirectorySize(target.login_name);
   const previousFiles = manifestFiles(target.last_manifest);
-  const previousBytes = manifestTotalSize(previousFiles);
-  const estimatedFinalSize =
-    Math.max(0, currentSize - previousBytes) + requestedBytes;
-  if (estimatedFinalSize > MAX_USER_DIRECTORY_SIZE_BYTES) {
-    throw new Error("Deploy would exceed the maximum user directory size");
-  }
 
   const previousPaths = new Set(previousFiles.map((file) => file.path));
   const nextPaths = new Set(manifest.files.map((file) => file.path));

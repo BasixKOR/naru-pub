@@ -158,6 +158,38 @@ server {
         proxy_buffering off;
     }
 
+    # A saved file is capped at 10 MiB, which JSON escaping can at most about
+    # double; the cap stops Node from parsing a body it will reject anyway.
+    location = /api/files/save {
+        client_max_body_size 25m;
+        proxy_pass http://naru_control_plane;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header CF-Connecting-IP \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$naru_forwarded_proto;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_buffering off;
+    }
+
+    # One upload request carries every selected file, each capped at 10 MiB,
+    # so this matches Cloudflare's own request limit rather than one file.
+    location /api/files/ {
+        client_max_body_size 100m;
+        proxy_pass http://naru_control_plane;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header CF-Connecting-IP \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$naru_forwarded_proto;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_buffering off;
+    }
+
     location / {
         proxy_pass http://naru_control_plane;
         proxy_http_version 1.1;

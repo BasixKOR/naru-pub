@@ -14,7 +14,8 @@
 # `build` is the manual path, for when CI is unavailable: it builds
 # naru-pub-control-plane:<commit> and naru-pub-proxy:<commit> from origin/main
 # here, ships them over ssh, and runs the same deploy-server.sh <commit>, which
-# then finds them already loaded and pulls nothing. `mise run deploy` runs it.
+# then finds them already loaded and pulls nothing. `mise run deploy` runs the
+# default path and `mise run deploy:local` this one.
 #
 # Neither path compiles on the server, where a Next.js build and a release
 # Cargo build ran the Docker VM out of memory under every other service on that

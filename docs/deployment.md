@@ -12,7 +12,7 @@ ghcr.io/naru-pub/naru-pub-proxy:git-<commit>-arm64
 To deploy, push to `main` and run this from the development machine:
 
 ```bash
-./deploy.sh
+mise run deploy        # same as ./deploy.sh
 ```
 
 It resolves `origin/main`, waits with `gh` for that commit's CI run to succeed,
@@ -53,7 +53,7 @@ different value, deploy with the manual build below instead.
 When CI is unavailable, or an image has to be built from this machine, run:
 
 ```bash
-mise run deploy        # same as ./deploy.sh build
+mise run deploy:local  # same as ./deploy.sh build
 ```
 
 It builds both images from `origin/main` in a clean checkout of its own

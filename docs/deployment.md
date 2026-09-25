@@ -28,8 +28,22 @@ every `CI_POLL_SECONDS` (30 by default), and sends one ssh command. The images,
 several GB, go from ghcr.io to the server and never through the development
 machine.
 
-The server has to be signed in to ghcr.io with a token that can read the
-packages while they are private (`docker login ghcr.io`, `read:packages`).
+The packages are private, so the server needs a token to pull them. `docker
+login` does not work for this: Docker on the server keeps its logins in the
+macOS keychain, which the ssh session `deploy.sh` uses cannot unlock. Pulls
+instead use a Docker config of their own at `~/.config/naru-pub/docker`, which
+holds the token in the file. Set it up once on the server with a classic
+personal access token that has only the `read:packages` scope:
+
+```bash
+mkdir -p ~/.config/naru-pub/docker && chmod 700 ~/.config/naru-pub/docker
+read -rs "TOKEN?ghcr.io token: " && printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$(printf 'yangnaru:%s' "$TOKEN" | base64)" > ~/.config/naru-pub/docker/config.json; unset TOKEN
+chmod 600 ~/.config/naru-pub/docker/config.json
+```
+
+Replace the token file when the token expires. `PULL_DOCKER_CONFIG` points
+`deploy-server.sh` at another directory.
+
 CI builds with the Dockerfile's default `NEXT_PUBLIC_DOMAIN` (`naru.pub`), which
 is compiled into the client bundle. If the server's `.env` ever sets a
 different value, deploy with the manual build below instead.

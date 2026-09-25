@@ -350,13 +350,10 @@ fi
 
 # Where CI pushes the images for each commit on main (.github/workflows/main.yml).
 IMAGE_REGISTRY=${IMAGE_REGISTRY:-ghcr.io/naru-pub/naru-pub}
-# The packages are private. `docker login` on this Mac keeps its credentials in
-# the login keychain, which the non-interactive ssh session deploy.sh runs this
-# in cannot open. Pulls use a Docker config of their own instead, whose
-# config.json holds a read:packages token for ghcr.io in the file. With an
-# `auths` entry present Docker reads that file and never asks the keychain.
-# docs/deployment.md has the one-time setup.
-PULL_DOCKER_CONFIG=${PULL_DOCKER_CONFIG:-$HOME/.config/naru-pub/docker}
+# The packages are private, so this pulls with the `docker login ghcr.io` in
+# ~/.docker/config.json. That login has to be kept in the file, not the macOS
+# keychain, which the ssh session deploy.sh runs this in cannot open; see
+# docs/deployment.md.
 
 # Pulled under the registry name, then renamed to the local one, so everything
 # below and the cleanup at the end only ever see naru-pub-*:<commit> and
@@ -366,20 +363,11 @@ for repository in naru-pub-control-plane naru-pub-proxy; do
   if docker image inspect "$image" >/dev/null 2>&1; then
     continue
   fi
-  if [[ ! -f "$PULL_DOCKER_CONFIG/config.json" ]]; then
-    echo "$PULL_DOCKER_CONFIG/config.json is missing, so $image cannot be pulled." >&2
-    echo "Set it up as docs/deployment.md describes, or deploy with \`deploy.sh build\`." >&2
-    exit 1
-  fi
-  # The other config also leaves the Docker context behind, so name the daemon
-  # the usual one talks to.
-  docker_host=${docker_host:-$(docker context inspect --format '{{.Endpoints.docker.Host}}')}
   remote_image="$IMAGE_REGISTRY-${repository#naru-pub-}:git-$COMMIT-arm64"
   echo "Pulling $remote_image..."
-  if ! DOCKER_CONFIG="$PULL_DOCKER_CONFIG" DOCKER_HOST="$docker_host" \
-    docker pull --quiet --platform linux/arm64 "$remote_image" >/dev/null; then
-    echo "Could not pull $remote_image. Check that CI built it and that the token" >&2
-    echo "in $PULL_DOCKER_CONFIG/config.json can read it, or deploy with \`deploy.sh build\`." >&2
+  if ! docker pull --quiet --platform linux/arm64 "$remote_image" >/dev/null; then
+    echo "Could not pull $remote_image. Check that CI built it and that this" >&2
+    echo "machine's ghcr.io login can read it, or deploy with \`deploy.sh build\`." >&2
     exit 1
   fi
   docker tag "$remote_image" "$image"

@@ -28,21 +28,21 @@ every `CI_POLL_SECONDS` (30 by default), and sends one ssh command. The images,
 several GB, go from ghcr.io to the server and never through the development
 machine.
 
-The packages are private, so the server needs a token to pull them. `docker
-login` does not work for this: Docker on the server keeps its logins in the
-macOS keychain, which the ssh session `deploy.sh` uses cannot unlock. Pulls
-instead use a Docker config of their own at `~/.config/naru-pub/docker`, which
-holds the token in the file. Set it up once on the server with a classic
-personal access token that has only the `read:packages` scope:
+The packages are private, so the server pulls with its own `docker login
+ghcr.io`, using a classic personal access token with only the `read:packages`
+scope. Docker on the server must keep that login in `~/.docker/config.json`
+rather than the macOS keychain, because the ssh session `deploy.sh` uses
+cannot unlock the keychain. Set it up once on the server:
 
 ```bash
-mkdir -p ~/.config/naru-pub/docker && chmod 700 ~/.config/naru-pub/docker
-read -rs "TOKEN?ghcr.io token: " && printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$(printf 'yangnaru:%s' "$TOKEN" | base64)" > ~/.config/naru-pub/docker/config.json; unset TOKEN
-chmod 600 ~/.config/naru-pub/docker/config.json
+jq 'del(.credsStore)' ~/.docker/config.json > ~/.docker/config.json.new && mv ~/.docker/config.json.new ~/.docker/config.json
+docker login ghcr.io -u yangnaru
 ```
 
-Replace the token file when the token expires. `PULL_DOCKER_CONFIG` points
-`deploy-server.sh` at another directory.
+Removing `credsStore` alone is not enough when `auths` is empty: Docker then
+falls back to the keychain again. An existing `ghcr.io` entry, which a
+keychain login leaves behind, is enough to keep it on the file. Log in again
+the same way when the token expires.
 
 CI builds with the Dockerfile's default `NEXT_PUBLIC_DOMAIN` (`naru.pub`), which
 is compiled into the client bundle. If the server's `.env` ever sets a

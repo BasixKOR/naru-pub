@@ -1,18 +1,57 @@
 # Production deployment
 
-Deploy from the development machine, not the server:
+Production runs the images GitHub Actions builds. Every push to `main` runs
+[`.github/workflows/main.yml`](../.github/workflows/main.yml) in
+[naru-pub/naru-pub](https://github.com/naru-pub/naru-pub), which pushes:
+
+```
+ghcr.io/naru-pub/naru-pub-control-plane:git-<commit>-arm64
+ghcr.io/naru-pub/naru-pub-proxy:git-<commit>-arm64
+```
+
+To deploy, push to `main` and run this from the development machine:
 
 ```bash
 ./deploy.sh
 ```
 
-It builds `naru-pub-control-plane:<commit>` and `naru-pub-proxy:<commit>` from
-`origin/main` in a clean checkout of its own (`~/.cache/naru-pub-deploy`),
-ships both images over ssh to the host named by the `naru-pub-deploy` alias in
-`~/.ssh/config`, and runs `deploy-server.sh <commit>` there. Nothing compiles
-on the server, and its Compose file has no `build:` on purpose: a Next.js build
-and a release Cargo build there ran the Docker VM that every other service on
-the host shares out of memory. Push first; only `origin/main` is deployed.
+It resolves `origin/main`, waits with `gh` for that commit's CI run to succeed,
+and runs `deploy-server.sh <commit>` on the host named by the `naru-pub-deploy`
+alias in `~/.ssh/config`. The server pulls both images from ghcr.io and tags
+them `naru-pub-control-plane:<commit>` and `naru-pub-proxy:<commit>`. Only
+`origin/main` is deployed, so push first. `./deploy-server.sh <commit>` on the
+server does the same deployment without the CI wait.
+
+This path is meant for a metered connection such as a phone hotspot. The
+development machine reads one ref with `git ls-remote`, polls the run's status
+every `CI_POLL_SECONDS` (30 by default), and sends one ssh command. The images,
+several GB, go from ghcr.io to the server and never through the development
+machine.
+
+The server has to be signed in to ghcr.io with a token that can read the
+packages while they are private (`docker login ghcr.io`, `read:packages`).
+CI builds with the Dockerfile's default `NEXT_PUBLIC_DOMAIN` (`naru.pub`), which
+is compiled into the client bundle. If the server's `.env` ever sets a
+different value, deploy with the manual build below instead.
+
+### Manual build
+
+When CI is unavailable, or an image has to be built from this machine, run:
+
+```bash
+mise run deploy        # same as ./deploy.sh build
+```
+
+It builds both images from `origin/main` in a clean checkout of its own
+(`~/.cache/naru-pub-deploy`), using the server's `NEXT_PUBLIC_*` values, ships
+them over ssh, and runs the same `deploy-server.sh <commit>`. The server then
+finds the images already loaded and pulls nothing. Docker must be running on
+the development machine, and it uploads both compressed images from there, so
+avoid it on a metered connection.
+
+Neither path compiles on the server, and its Compose file has no `build:` on
+purpose: a Next.js build and a release Cargo build there ran the Docker VM that
+every other service on the host shares out of memory.
 
 `deploy-server.sh` uses blue-green HTTP deployments. A stable nginx gateway owns host
 ports `40000` (control plane) and `40001` (hosted-site proxy). The blue and green
@@ -22,13 +61,14 @@ For each deployment, `deploy-server.sh`:
 
 1. fast-forwards the server checkout to exactly the commit the images were
    built from;
-2. points the `:current` tags at that commit's images;
-3. runs database migrations from the new control-plane image;
-4. starts the inactive slot and waits for the control plane, database, and
+2. pulls that commit's images from ghcr.io unless they are already loaded;
+3. points the `:current` tags at that commit's images;
+4. runs database migrations from the new control-plane image;
+5. starts the inactive slot and waits for the control plane, database, and
    hosted-site proxy to become healthy;
-5. reloads nginx to atomically direct new requests to the healthy slot;
-6. recreates the cron and worker processes from the new image; and
-7. stops the previous slot and removes release images nothing can come back to.
+6. reloads nginx to atomically direct new requests to the healthy slot;
+7. recreates the cron and worker processes from the new image; and
+8. stops the previous slot and removes release images nothing can come back to.
 
 After the checkout moves, the script re-executes the checked-in copy once
 before it reads the Compose topology. This keeps a deployment safe when the

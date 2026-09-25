@@ -1,10 +1,16 @@
 #!/bin/bash
-# The server half of a deploy, blue/green. deploy.sh runs this over ssh once it
-# has built the images on the development machine and loaded them here as
-# naru-pub-control-plane:<commit> and naru-pub-proxy:<commit>:
+# The server half of a deploy, blue/green. deploy.sh runs this over ssh, and it
+# can also be run here directly:
 #
 #   ./deploy-server.sh <commit>
 #   ./deploy-server.sh rollback
+#
+# It deploys naru-pub-control-plane:<commit> and naru-pub-proxy:<commit>. When
+# `deploy.sh build` has already loaded them, those are used. Otherwise they are
+# pulled from the images GitHub Actions built for <commit>:
+#
+#   ghcr.io/naru-pub/naru-pub-control-plane:git-<commit>-arm64
+#   ghcr.io/naru-pub/naru-pub-proxy:git-<commit>-arm64
 #
 # Nothing is compiled here. The builds used to run on this machine, where a
 # Next.js build and a release Cargo build ran the Docker VM out of memory while
@@ -342,11 +348,26 @@ if [[ "${NARU_DEPLOY_AFTER_PULL:-0}" != 1 ]]; then
   exec env NARU_DEPLOY_AFTER_PULL=1 NARU_DEPLOY_LOCK_HELD=1 "$0" "$@"
 fi
 
-for image in "$CONTROL_PLANE_IMAGE" "$PROXY_IMAGE"; do
-  if ! docker image inspect "$image" >/dev/null 2>&1; then
-    echo "$image is not loaded here; deploy.sh ships it before running this." >&2
+# Where CI pushes the images for each commit on main (.github/workflows/main.yml).
+IMAGE_REGISTRY=${IMAGE_REGISTRY:-ghcr.io/naru-pub/naru-pub}
+
+# Pulled under the registry name, then renamed to the local one, so everything
+# below and the cleanup at the end only ever see naru-pub-*:<commit> and
+# naru-pub-*:current. An image `deploy.sh build` shipped is used as is.
+for repository in naru-pub-control-plane naru-pub-proxy; do
+  image="$repository:$COMMIT"
+  if docker image inspect "$image" >/dev/null 2>&1; then
+    continue
+  fi
+  remote_image="$IMAGE_REGISTRY-${repository#naru-pub-}:git-$COMMIT-arm64"
+  echo "Pulling $remote_image..."
+  if ! docker pull --quiet --platform linux/arm64 "$remote_image" >/dev/null; then
+    echo "Could not pull $remote_image. Check that CI built it and that this" >&2
+    echo "machine is signed in to ghcr.io, or deploy with \`deploy.sh build\`." >&2
     exit 1
   fi
+  docker tag "$remote_image" "$image"
+  docker rmi "$remote_image" >/dev/null
 done
 
 current=$(active_slot)

@@ -1,0 +1,6 @@
+# Production normally runs the images CI builds: push to main, then ./deploy.sh.
+# This task is the manual path, for when CI is down or an image must be built
+# here. See docs/deployment.md.
+[tasks.deploy]
+description = "Build origin/main's images on this machine and deploy them"
+run = "./deploy.sh build"

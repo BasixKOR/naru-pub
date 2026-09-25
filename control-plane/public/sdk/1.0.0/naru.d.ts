@@ -1,8 +1,8 @@
-/** Browser SDK for data owned by one Naru site. @packageDocumentation */
-
-// Only the names an application writes itself, including in helpers that pass
-// options along, are exported: every exported name is one v1 can never rename.
-// The rest are spelled out where they are used.
+/**
+ * Naru Data SDK 1.0.0: browser SDK for data owned by one Naru site. This
+ * release is still under active development.
+ * @packageDocumentation
+ */
 
 export type Json =
   | null
@@ -47,7 +47,7 @@ export type NaruErrorCode =
   | "UNAVAILABLE";
 
 /** A Naru operation that could not be completed. Check it with `instanceof`. */
-export class NaruError extends Error {
+export declare class NaruError extends Error {
   private constructor();
   readonly code: NaruErrorCode;
 }
@@ -138,8 +138,6 @@ export interface Admin {
     writes: readonly (
       | {
           collection: string;
-          // Any value, as one collection's own type would be: a batch spans
-          // collections, and is checked for JSON when it is called.
           set: { id: string; data: unknown; condition?: WriteCondition };
         }
       | {
@@ -205,6 +203,6 @@ export interface NaruClient {
 }
 
 /** Creates a client bound to one site. */
-export function createNaru(options?: { site?: string }): NaruClient;
+export declare function createNaru(options?: { site?: string }): NaruClient;
 
 export {};

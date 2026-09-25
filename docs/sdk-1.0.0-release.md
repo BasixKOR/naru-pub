@@ -63,13 +63,17 @@ The blog tests exercise public browsing/guestbook and admin draft/publishing flo
   compatible ones as 1.0.1 or 1.1.0, with the `/sdk/1/` rewrite in
   `next.config.mjs` moved to it; breaking ones as `/sdk/2/` with a new
   `/api/data/v2/` wire version beside v1.
-- A new version directory is added to `VERSIONS` in both
-  `scripts/generate-sdk-reference.mjs` (the `/docs/sdk/<version>` page) and
-  `scripts/check-sdk-types.mjs` (`pnpm sdk:check`, which `pnpm build` runs
-  first). The check fails the build when a version's `naru.js` drops, renames
-  or adds a method or export its `naru.d.ts` declares, or returns a result
-  missing a declared field. It cannot see option names or server results, so
-  the unit tests still cover those.
+- A version's source is `sdk/<version>/naru.ts`; `pnpm sdk:build` emits its
+  `public/sdk/<version>/naru.js` and `naru.d.ts`, which are committed and are
+  what is tested and served. A new version starts as a copy of the previous
+  source and is added to `VERSIONS` in both `scripts/build-sdk.mjs` and
+  `scripts/generate-sdk-reference.mjs` (the `/docs/sdk/<version>` page).
+  `pnpm sdk:check`, which `pnpm build` runs first, fails the build when the
+  committed files are not what the source emits now. Nothing rebuilds them at
+  deploy time, so a compiler or formatter upgrade can only change served
+  bytes through a commit that shows the change. When a version is frozen it
+  is removed from `VERSIONS` in `scripts/build-sdk.mjs`, so its files stay as
+  released whatever later tooling would emit.
 
 ## Operational limitations
 

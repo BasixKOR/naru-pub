@@ -61,8 +61,10 @@ COPY components.json \
 # Copy static assets (less frequently changed)
 COPY public/ public/
 
-# The SDK contract check the build runs first
-COPY scripts/check-sdk-types.mjs scripts/
+# The SDK source and the check, run first by the build, that public/sdk/ is
+# what it emits. The served files are the committed ones, never rebuilt here.
+COPY sdk/ sdk/
+COPY scripts/build-sdk.mjs scripts/
 
 # Copy source code (most frequently changed - should be last)
 COPY src/ src/

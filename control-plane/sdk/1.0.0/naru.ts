@@ -4,18 +4,289 @@
  * @packageDocumentation
  */
 
+// This file is the SDK. `pnpm sdk:build` emits public/sdk/1.0.0/naru.js and
+// naru.d.ts from it, and those emitted files are what is committed, served and
+// tested; `pnpm build` refuses to proceed while they are stale. Only the names
+// an application writes itself, including in helpers that pass options along,
+// are exported: every exported name is one v1 can never rename. The rest are
+// spelled out where they are used.
+
+export type Json =
+  | null
+  | boolean
+  | number
+  | string
+  | Json[]
+  | { [key: string]: Json };
+
+/** @internal */
+declare const revisionBrand: unique symbol;
+/** An opaque concurrency token. Store and return it unchanged. */
+export type Revision = string & { readonly [revisionBrand]: true };
+
+/** A read or successful write: user data stays separate from server metadata. */
+export interface Document<T = Json> {
+  id: string;
+  data: T;
+  createdAt: string;
+  updatedAt: string;
+  revision: Revision;
+}
+
+export interface Page<T = Json> {
+  documents: Document<T>[];
+  nextCursor: string | null;
+  totalCount?: number;
+}
+
+/**
+ * Why an operation failed. The list is closed for v1: a code a later server
+ * adds reaches this version as the nearest code here.
+ */
+export type NaruErrorCode =
+  | "CONFLICT"
+  | "QUOTA_EXCEEDED"
+  | "AUTH_REQUIRED"
+  | "ACCESS_DENIED"
+  | "NOT_FOUND"
+  | "RATE_LIMITED"
+  | "INVALID_REQUEST"
+  | "UNAVAILABLE";
+
 /** A Naru operation that could not be completed. Check it with `instanceof`. */
 export class NaruError extends Error {
-  constructor(message, code, cause) {
+  private constructor(message: string, code: NaruErrorCode, cause?: unknown) {
     super(message, cause === undefined ? undefined : { cause });
     this.name = "NaruError";
     this.code = code;
   }
+  declare readonly code: NaruErrorCode;
 }
+
+// The constructor is private to applications, and TypeScript keeps it to the
+// class body. This module is where errors are made, so it names the runtime
+// constructor as a type and reaches it through that. The cast emits nothing,
+// and goes through `unknown` because whether a private constructor compares
+// to a public one depends on which ambient declarations are loaded.
+type Fail = new (
+  message: string,
+  code: NaruErrorCode,
+  cause?: unknown,
+) => NaruError;
+
+/** Top-level user fields, combined with AND. */
+export type Filter = Record<
+  string,
+  | string
+  | number
+  | boolean
+  | null
+  | {
+      gt?: string | number;
+      gte?: string | number;
+      lt?: string | number;
+      lte?: string | number;
+    }
+>;
+
+/** One or two keys: a user field by name, or document metadata. */
+export type Sort =
+  | readonly [
+      readonly [
+        string | { metadata: "id" | "createdAt" | "updatedAt" },
+        "asc" | "desc",
+      ],
+    ]
+  | readonly [
+      readonly [
+        string | { metadata: "id" | "createdAt" | "updatedAt" },
+        "asc" | "desc",
+      ],
+      readonly [
+        string | { metadata: "id" | "createdAt" | "updatedAt" },
+        "asc" | "desc",
+      ],
+    ];
+
+export interface ListOptions {
+  filter?: Filter;
+  sort?: Sort;
+  /** Default 50; maximum 100. */
+  size?: number;
+  /** Opaque cursor returned by the preceding page. */
+  after?: string | null;
+  includeTotal?: boolean;
+  signal?: AbortSignal;
+}
+
+/** Write only at this revision, or only if the document does not exist yet. */
+export type WriteCondition = { revision: Revision } | { absent: true };
+
+export interface PublicCollection<T = Json> {
+  get(id: string, options?: { signal?: AbortSignal }): Promise<Document<T>>;
+  list(options?: ListOptions): Promise<Page<T>>;
+  /** How many documents match `filter`, or the whole collection. */
+  count(options?: { filter?: Filter; signal?: AbortSignal }): Promise<number>;
+  /**
+   * Every page of a query in turn, following `nextCursor` from `after` (or
+   * the start). Not a snapshot: writes in between can shift later pages.
+   */
+  pages(options?: ListOptions): AsyncIterable<Page<T>>;
+  add(data: T, options?: { signal?: AbortSignal }): Promise<Document<T>>;
+}
+
+export interface AdminCollection<T = Json> extends PublicCollection<T> {
+  /** Replaces the whole document or creates it. */
+  set(
+    id: string,
+    data: T,
+    options?: { condition?: WriteCondition; signal?: AbortSignal },
+  ): Promise<Document<T>>;
+  /** Deleting a missing document succeeds unless a condition was supplied. */
+  delete(
+    id: string,
+    options?: { condition?: { revision: Revision }; signal?: AbortSignal },
+  ): Promise<void>;
+}
+
+export interface Admin {
+  collection<T = Json>(name: string): AdminCollection<T>;
+  /**
+   * Commits every write or none. Conditions guard individual documents. Does
+   * not retry. Resolves, in the order written, with what each `set` stored and
+   * `null` for each `delete`.
+   */
+  batch(
+    writes: readonly (
+      | {
+          collection: string;
+          // Any value, as one collection's own type would be: a batch spans
+          // collections, and is checked for JSON when it is called.
+          set: { id: string; data: unknown; condition?: WriteCondition };
+        }
+      | {
+          collection: string;
+          delete: { id: string; condition?: { revision: Revision } };
+        }
+    )[],
+    options?: { signal?: AbortSignal },
+  ): Promise<
+    ({
+      id: string;
+      revision: Revision;
+      createdAt: string;
+      updatedAt: string;
+    } | null)[]
+  >;
+  media: {
+    /**
+     * Stores a file publicly. Large photos may be shrunk first. A HEIC photo
+     * this browser cannot convert throws a `TypeError` before anything is sent.
+     */
+    upload(
+      file: File | Blob,
+      options?: {
+        signal?: AbortSignal;
+        /**
+         * Called as the upload moves along: `preparing` while a photo is
+         * shrunk and the upload authorized, `uploading` with the bytes sent
+         * so far of the `total` actually sent (after shrinking), then
+         * `finishing` while storage confirms and Naru records the file.
+         * `loaded` can reach `total` before storage has answered.
+         */
+        onProgress?: (
+          progress:
+            | { phase: "preparing" }
+            | { phase: "uploading"; loaded: number; total: number }
+            | { phase: "finishing" },
+        ) => void;
+      },
+    ): Promise<{
+      url: string;
+      name: string;
+      contentType: string;
+      size: number;
+    }>;
+  };
+  /** This handle stops working at once, even if the revoke request fails. */
+  signOut(): Promise<void>;
+}
+
+export interface NaruClient {
+  /** Visitor access, even when signed in. */
+  collection<T = Json>(name: string): PublicCollection<T>;
+  auth: {
+    /**
+     * The admin client for this page, or null. A sign-in that was denied,
+     * went stale or could not be exchanged also resolves null.
+     */
+    session(): Promise<Admin | null>;
+    /** Redirects to Naru for approval. */
+    signIn(options: { collections: readonly string[] }): Promise<void>;
+  };
+}
+
+/* ----------------------------------------------------------- the wire ---- */
+
+// What one request needs beyond its URL. `touches` names the collection paths
+// a write lands in, so later reads of them skip caches.
+interface Transport {
+  method?: "GET" | "POST" | "PUT" | "DELETE";
+  body?: unknown;
+  token?: string;
+  signal?: AbortSignal;
+  touches: readonly string[];
+  renew?: (expiresAt: number) => void;
+}
+type Send = <Result>(
+  url: string,
+  init: Omit<Transport, "token" | "renew">,
+) => Promise<Result>;
+
+// The server's answers, in the shapes v1 fixes. Only the fields read here are
+// named; the server may add more.
+type Written = Pick<Document, "id" | "revision" | "createdAt" | "updatedAt">;
+interface Authorization {
+  id: string;
+  uploadUrl: string;
+  headers: Record<string, string>;
+}
+interface Stored {
+  file: { url: string; name: string; contentType: string; size: number };
+}
+interface Token {
+  accessToken: string;
+  expiresIn?: number;
+  expiresAt: number;
+}
+interface Context {
+  site: string;
+  origin: string;
+  root: string;
+}
+// A pending or finished sign-in, as this tab's storage holds it.
+interface Pending {
+  verifier: string;
+  state: string;
+  startedAt: number;
+}
+interface Session {
+  accessToken: string;
+  expiresAt: number;
+}
+// Everything a batch write may carry; which of `set` and `delete` is present
+// is checked when the batch is called, so one shape serves both.
+interface BatchWrite {
+  collection: string;
+  set?: { id: string; data: unknown; condition?: WriteCondition };
+  delete?: { id: string; condition?: { revision: Revision } };
+}
+// A Blob has no name, and a File's may be empty.
+type Source = Blob & { name?: string };
 
 // The server names the code. Only the codes this version knows are passed on,
 // so a code added later reads as the nearest one this version has.
-const CODES = new Set([
+const CODES = new Set<string>([
   "CONFLICT",
   "QUOTA_EXCEEDED",
   "AUTH_REQUIRED",
@@ -25,8 +296,8 @@ const CODES = new Set([
   "INVALID_REQUEST",
   "UNAVAILABLE",
 ]);
-const errorCode = (status, code) => {
-  if (CODES.has(code)) return code;
+const errorCode = (status: number, code: unknown): NaruErrorCode => {
+  if (CODES.has(code as string)) return code as NaruErrorCode;
   if (status === 401) return "AUTH_REQUIRED";
   if (status === 403) return "ACCESS_DENIED";
   if (status === 404) return "NOT_FOUND";
@@ -39,7 +310,7 @@ const SITE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const ID = /^[a-zA-Z0-9_-]{1,64}$/;
 // Where requests go: always naru.pub. A page on alice.naru.pub belongs to the
 // site alice, so only custom domains and local development say which site.
-function target({ site } = {}) {
+function target({ site }: { site?: string } = {}): Context {
   site ||= /^([a-z0-9-]+)\.naru\.pub$/.exec(
     globalThis.location?.hostname ?? "",
   )?.[1];
@@ -56,7 +327,7 @@ function target({ site } = {}) {
 
 // A document ID becomes a path segment. Checking it here keeps "..", which a
 // URL would resolve away, from ever addressing something else.
-function segment(value) {
+function segment(value: unknown): string {
   if (typeof value !== "string" || !ID.test(value))
     throw new TypeError(
       "Names and IDs are 1-64 ASCII letters, digits, underscores or hyphens.",
@@ -66,10 +337,14 @@ function segment(value) {
 
 // Once this module writes a collection, its subsequent reads bypass caches.
 // No cache lifetime is baked into deployed SDKs; the server may change it.
-const written = new Set();
+const written = new Set<string>();
 
 // Accept only JSON values, without silently dropping or converting input.
-function jsonValue(value, ancestors = new Set(), path = "data") {
+function jsonValue(
+  value: unknown,
+  ancestors = new Set<object>(),
+  path = "data",
+): void {
   if (value === null || typeof value === "string" || typeof value === "boolean")
     return;
   if (typeof value === "number" && Number.isFinite(value)) return;
@@ -94,7 +369,10 @@ function jsonValue(value, ancestors = new Set(), path = "data") {
   if (array && keys.length !== value.length)
     throw new TypeError(`${path} must be a dense JSON array.`);
   for (const key of keys) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    const descriptor = Object.getOwnPropertyDescriptor(
+      value,
+      key,
+    ) as PropertyDescriptor;
     if (
       typeof key !== "string" ||
       !descriptor.enumerable ||
@@ -109,10 +387,10 @@ function jsonValue(value, ancestors = new Set(), path = "data") {
   ancestors.delete(value);
 }
 
-async function request(
-  url,
-  { method = "GET", body, token, signal, touches, renew },
-) {
+async function request<Result>(
+  url: string,
+  { method = "GET", body, token, signal, touches, renew }: Transport,
+): Promise<Result> {
   const fresh =
     token || method !== "GET" || touches.some((path) => written.has(path));
   // An explicit transport flag makes cache bypass enforceable by the server.
@@ -138,8 +416,12 @@ async function request(
       body: encoded,
     });
   } catch (cause) {
-    if (cause?.name === "AbortError") throw cause;
-    throw new NaruError("Naru is unavailable.", "UNAVAILABLE", cause);
+    if ((cause as Error)?.name === "AbortError") throw cause;
+    throw new (NaruError as unknown as Fail)(
+      "Naru is unavailable.",
+      "UNAVAILABLE",
+      cause,
+    );
   } finally {
     // Also when the response was lost: the write may still have landed.
     if (method !== "GET") for (const path of touches) written.add(path);
@@ -152,7 +434,7 @@ async function request(
     renew(Date.now() + Number(renewed) * 1000);
   const result = await response.json().catch(() => null);
   if (!response.ok)
-    throw new NaruError(
+    throw new (NaruError as unknown as Fail)(
       typeof result?.error?.message === "string"
         ? result.error.message
         : `Database request failed (HTTP ${response.status}).`,
@@ -161,14 +443,20 @@ async function request(
   // A proxy or challenge page can answer 200 with HTML. Handing that back as
   // an empty result would make a missing document look like a present one.
   if (result === null || typeof result !== "object")
-    throw new NaruError(
+    throw new (NaruError as unknown as Fail)(
       `The data API did not answer with JSON (HTTP ${response.status}).`,
       "UNAVAILABLE",
     );
   return result;
 }
 
-function query({ filter, sort, size, after, includeTotal } = {}) {
+function query({
+  filter,
+  sort,
+  size,
+  after,
+  includeTotal,
+}: ListOptions = {}): string {
   const parameters = new URLSearchParams();
   if (filter && Object.keys(filter).length)
     parameters.set("filter", JSON.stringify(filter));
@@ -182,19 +470,23 @@ function query({ filter, sort, size, after, includeTotal } = {}) {
 
 // Shared by single writes and batches, so both refuse the same mistakes here.
 // A delete conditional on absence could only ever do nothing.
-function checkCondition(value, { deleting = false } = {}) {
+function checkCondition(
+  value: WriteCondition | undefined,
+  { deleting = false } = {},
+): WriteCondition | undefined {
   if (value === undefined) return value;
   if (!value || typeof value !== "object")
     throw new TypeError("condition must contain revision or absent.");
   if (Object.keys(value).length !== 1)
     throw new TypeError("condition must contain only revision or absent.");
   if (Object.hasOwn(value, "revision")) {
-    const { revision } = value;
+    const { revision } = value as { revision: unknown };
     if (typeof revision !== "string" || !revision)
       throw new TypeError("condition.revision must be returned by Naru.");
     return value;
   }
-  if (value.absent === true && !deleting) return value;
+  if ((value as { absent?: unknown }).absent === true && !deleting)
+    return value;
   throw new TypeError(
     deleting
       ? "A delete can only be conditional on a revision."
@@ -202,35 +494,48 @@ function checkCondition(value, { deleting = false } = {}) {
   );
 }
 
-function condition(value, options) {
+function condition(
+  value: WriteCondition | undefined,
+  options?: { deleting?: boolean },
+): string {
   checkCondition(value, options);
   if (value === undefined) return "";
-  const { revision } = value;
+  const { revision } = value as { revision?: Revision };
   return revision
     ? `?ifRevision=${encodeURIComponent(revision)}`
     : "?ifAbsent=1";
 }
 
-function documents(root, name, send) {
+function documents<T>(
+  root: string,
+  name: string,
+  send: Send,
+): AdminCollection<T> {
   const path = `${root}/${segment(name)}`;
   const touches = [path];
-  const list = (options = {}) =>
+  const list: AdminCollection<T>["list"] = (options = {}) =>
     send(`${path}${query(options)}`, { signal: options.signal, touches });
   return Object.freeze({
-    async get(id, { signal } = {}) {
-      const result = await send(`${path}/${segment(id)}`, { signal, touches });
+    async get(id: string, { signal }: { signal?: AbortSignal } = {}) {
+      const result = await send<{ document: Document<T> }>(
+        `${path}/${segment(id)}`,
+        { signal, touches },
+      );
       return result.document;
     },
     list,
     // A total rides along with a one-document page; the list request is all
     // the server needs to support.
-    async count({ filter, signal } = {}) {
+    async count({
+      filter,
+      signal,
+    }: { filter?: Filter; signal?: AbortSignal } = {}) {
       return (await list({ filter, size: 1, includeTotal: true, signal }))
-        .totalCount;
+        .totalCount as number;
     },
     // Each page as it arrives, following nextCursor. Like the pages it walks,
     // this is not a snapshot: writes in between can shift later pages.
-    async *pages(options = {}) {
+    async *pages(options: ListOptions = {}) {
       let after = options.after;
       do {
         const page = await list({ ...options, after });
@@ -238,25 +543,38 @@ function documents(root, name, send) {
         after = page.nextCursor;
       } while (after);
     },
-    add(data, { signal } = {}) {
+    add(data: T, { signal }: { signal?: AbortSignal } = {}) {
       jsonValue(data);
-      return send(path, {
+      return send<Document<T>>(path, {
         method: "POST",
         body: { data },
         signal,
         touches,
       });
     },
-    set(id, data, { signal, condition: expected } = {}) {
+    set(
+      id: string,
+      data: T,
+      {
+        signal,
+        condition: expected,
+      }: { condition?: WriteCondition; signal?: AbortSignal } = {},
+    ) {
       jsonValue(data);
-      return send(`${path}/${segment(id)}${condition(expected)}`, {
+      return send<Document<T>>(`${path}/${segment(id)}${condition(expected)}`, {
         method: "PUT",
         body: { data },
         signal,
         touches,
       });
     },
-    async delete(id, { signal, condition: expected } = {}) {
+    async delete(
+      id: string,
+      {
+        signal,
+        condition: expected,
+      }: { condition?: { revision: Revision }; signal?: AbortSignal } = {},
+    ) {
       await send(
         `${path}/${segment(id)}${condition(expected, { deleting: true })}`,
         {
@@ -270,8 +588,8 @@ function documents(root, name, send) {
 }
 
 /** A collection of the site this page belongs to. Nothing is requested yet. */
-function publicDocuments(root, name) {
-  const collection = documents(root, name, request);
+function publicDocuments<T>(root: string, name: string): PublicCollection<T> {
+  const collection = documents<T>(root, name, request);
   return Object.freeze({
     get: collection.get,
     list: collection.list,
@@ -292,7 +610,7 @@ const MAX_EDGE = 2048;
 const HEIC = /^image\/hei[cf]$/;
 const HEIC_NAME = /\.hei[cf]$/i;
 const SMALL_BYTES = 512 * 1024;
-async function shrink(file) {
+async function shrink(file: Source): Promise<Source> {
   const heic = HEIC.test(file.type);
   if (
     !(heic || /^image\/(jpeg|png|webp)$/.test(file.type)) ||
@@ -326,7 +644,9 @@ async function shrink(file) {
       context.drawImage(bitmap, 0, 0, width, height);
       const blob = await ("convertToBlob" in canvas
         ? canvas.convertToBlob({ type, quality: 0.82 })
-        : new Promise((resolve) => canvas.toBlob(resolve, type, 0.82)));
+        : new Promise<Blob | null>((resolve) =>
+            canvas.toBlob(resolve, type, 0.82),
+          ));
       // A browser that cannot encode a type quietly returns PNG instead.
       if (blob?.type !== type) continue;
       // HEIC is not accepted as is, so its conversion is kept even if larger.
@@ -348,7 +668,13 @@ async function shrink(file) {
 // progress gets the same PUT through XMLHttpRequest. It answers like fetch:
 // { ok, status }, a TypeError for a network failure, and the signal's reason
 // for an abort.
-function put(url, headers, file, signal, uploading) {
+function put(
+  url: string,
+  headers: Record<string, string>,
+  file: Blob,
+  signal: AbortSignal | undefined,
+  uploading: ((loaded: number) => void) | undefined,
+): Promise<{ ok: boolean; status: number }> {
   if (!uploading)
     return fetch(url, {
       method: "PUT",
@@ -365,7 +691,7 @@ function put(url, headers, file, signal, uploading) {
     if (signal?.aborted) return reject(aborted());
     const request = new XMLHttpRequest();
     const abort = () => request.abort();
-    const settle = (finish) => {
+    const settle = (finish: () => void) => {
       signal?.removeEventListener("abort", abort);
       finish();
     };
@@ -398,26 +724,27 @@ function put(url, headers, file, signal, uploading) {
 }
 
 // Each callback page keeps its own session in its own tab.
-const sessionKey = ({ origin, site }) =>
+const sessionKey = ({ origin, site }: Context) =>
   `naru:owner:${origin}:${site}:${location.origin}${location.pathname}`;
 
 // An older client must not erase or outlive a newer sign-in made on the same
 // page, so both of these only touch a stored session that is still this one.
-function mine(key, token) {
+function mine(key: string, token: string): boolean {
   try {
     return (
-      JSON.parse(sessionStorage.getItem(key) ?? "null")?.accessToken === token
+      (JSON.parse(sessionStorage.getItem(key) ?? "null") as Session | null)
+        ?.accessToken === token
     );
   } catch {
     return false; /* unreadable, so not this session */
   }
 }
 
-function forget(key, token) {
+function forget(key: string, token: string): void {
   if (mine(key, token)) sessionStorage.removeItem(key);
 }
 
-function remember(key, token, expiresAt) {
+function remember(key: string, token: string, expiresAt: number): void {
   if (mine(key, token))
     sessionStorage.setItem(
       key,
@@ -425,33 +752,42 @@ function remember(key, token, expiresAt) {
     );
 }
 
-function admin(context, token, expiresAt) {
+function admin(context: Context, token: string, expiresAt: number): Admin {
   const { origin, root } = context;
   const key = sessionKey(context);
   // The server renews the token as it is used; a tab left open while its owner
   // keeps working is not signed out mid-edit.
-  const renew = (at) => {
+  const renew = (at: number) => {
     if (!(at > expiresAt)) return;
     expiresAt = at;
     remember(key, token, at);
   };
   // After signOut this handle refuses to send, whatever became of the revoke.
   let signedOut = false;
-  const send = async (url, init) => {
+  const send: Send = async <Result>(
+    url: string,
+    init: Omit<Transport, "token" | "renew">,
+  ) => {
     if (signedOut || Date.now() >= expiresAt) {
       forget(key, token);
-      throw new NaruError("Sign in again.", "AUTH_REQUIRED");
+      throw new (NaruError as unknown as Fail)(
+        "Sign in again.",
+        "AUTH_REQUIRED",
+      );
     }
     try {
-      return await request(url, { ...init, token, renew });
+      return await request<Result>(url, { ...init, token, renew });
     } catch (error) {
-      if (error.code === "AUTH_REQUIRED") forget(key, token);
+      if ((error as NaruError).code === "AUTH_REQUIRED") forget(key, token);
       throw error;
     }
   };
   return Object.freeze({
-    collection: (name) => documents(root, name, send),
-    async batch(writes, { signal } = {}) {
+    collection: <T = Json>(name: string) => documents<T>(root, name, send),
+    async batch(
+      writes: readonly BatchWrite[],
+      { signal }: { signal?: AbortSignal } = {},
+    ) {
       const operations = writes.map(({ collection, set, delete: remove }) => {
         const write = set ?? remove;
         if (!write || Boolean(set) === Boolean(remove))
@@ -471,12 +807,15 @@ function admin(context, token, expiresAt) {
       const touches = [
         ...new Set(operations.map((item) => `${root}/${item.collection}`)),
       ];
-      const { results } = await send(`${root}/_batch`, {
-        method: "POST",
-        body: { operations },
-        signal,
-        touches,
-      });
+      const { results } = await send<{ results: (Written | null)[] }>(
+        `${root}/_batch`,
+        {
+          method: "POST",
+          body: { operations },
+          signal,
+          touches,
+        },
+      );
       // In the order written: what each set stored, and null for a delete.
       return results.map((result) =>
         result
@@ -490,12 +829,28 @@ function admin(context, token, expiresAt) {
       );
     },
     media: Object.freeze({
-      async upload(source, { signal, onProgress } = {}) {
+      async upload(
+        source: Source,
+        {
+          signal,
+          onProgress,
+        }: {
+          signal?: AbortSignal;
+          onProgress?: (
+            progress:
+              | { phase: "preparing" }
+              | { phase: "uploading"; loaded: number; total: number }
+              | { phase: "finishing" },
+          ) => void;
+        } = {},
+      ) {
         if (onProgress !== undefined && typeof onProgress !== "function")
           throw new TypeError("onProgress must be a function.");
         // A caller's mistake in its progress handler is reported, never
         // allowed to fail an upload partway through.
-        const report = (progress) => {
+        const report = (
+          progress: Parameters<NonNullable<typeof onProgress>>[0],
+        ) => {
           try {
             onProgress?.(progress);
           } catch (error) {
@@ -510,14 +865,14 @@ function admin(context, token, expiresAt) {
         // Some browsers leave an iPhone photo's type empty.
         const file = await shrink(
           !source.type && HEIC_NAME.test(source.name ?? "")
-            ? new File([source], source.name, { type: "image/heic" })
+            ? new File([source], source.name as string, { type: "image/heic" })
             : source,
         );
         if (HEIC.test(file.type))
           throw new TypeError(
             "This browser cannot convert HEIC photos. Upload from Safari, or convert the photo to JPEG first.",
           );
-        const authorization = await send(`${root}/_files`, {
+        const authorization = await send<Authorization>(`${root}/_files`, {
           method: "POST",
           body: {
             name: file.name || "upload",
@@ -539,19 +894,23 @@ function admin(context, token, expiresAt) {
                 report({ phase: "uploading", loaded, total: file.size })),
           );
         } catch (cause) {
-          if (cause?.name === "AbortError") throw cause;
-          throw new NaruError("File upload failed.", "UNAVAILABLE", cause);
+          if ((cause as Error)?.name === "AbortError") throw cause;
+          throw new (NaruError as unknown as Fail)(
+            "File upload failed.",
+            "UNAVAILABLE",
+            cause,
+          );
         }
         // An upload that never finishes is removed by the server within an
         // hour. Storage refusing the bytes (an expired authorization, say) is
         // fixed by uploading again, which authorizes afresh.
         if (!upload.ok)
-          throw new NaruError(
+          throw new (NaruError as unknown as Fail)(
             `File upload failed (HTTP ${upload.status}).`,
             "UNAVAILABLE",
           );
         report({ phase: "finishing" });
-        const finished = await send(
+        const finished = await send<Stored>(
           `${root}/_files/${segment(authorization.id)}`,
           { method: "PUT", body: {}, signal, touches: [] },
         );
@@ -573,7 +932,7 @@ function admin(context, token, expiresAt) {
   });
 }
 
-const base64url = (bytes) =>
+const base64url = (bytes: ArrayBuffer | Uint8Array) =>
   btoa(String.fromCharCode(...new Uint8Array(bytes)))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
@@ -588,7 +947,10 @@ const callback = () => location.origin + location.pathname;
  * back to this page. Register this page's URL as an administrator callback in
  * the control panel first; Naru says so on its own page if it is not.
  */
-async function signIn(context, collections) {
+async function signIn(
+  context: Context,
+  collections: readonly string[],
+): Promise<void> {
   const { site, origin } = context;
   // Checked here so a bad name fails on this page, not on Naru's consent page.
   collections.forEach(segment);
@@ -624,7 +986,7 @@ async function signIn(context, collections) {
  * exchange) is an ordinary signed-out visit, never a page failure. The owner
  * who denied it knows; anything else is fixed by signing in again.
  */
-async function adminSession(context) {
+async function adminSession(context: Context): Promise<Admin | null> {
   try {
     return await finishSignIn(context);
   } catch (error) {
@@ -633,13 +995,13 @@ async function adminSession(context) {
   }
 }
 
-async function finishSignIn(context) {
+async function finishSignIn(context: Context): Promise<Admin | null> {
   const key = sessionKey(context);
   const url = new URL(location.href);
   const code = url.searchParams.get("code");
   const denied = url.searchParams.get("error");
   const state = url.searchParams.get("state");
-  let pending = null;
+  let pending: Pending | null = null;
   try {
     pending = JSON.parse(sessionStorage.getItem(`${key}:pending`) ?? "null");
   } catch {
@@ -649,7 +1011,9 @@ async function finishSignIn(context) {
   // ?error= anywhere else belongs to the page and is left alone.
   if (!pending || state === null || (code === null && denied === null)) {
     try {
-      const saved = JSON.parse(sessionStorage.getItem(key) ?? "null");
+      const saved: Session | null = JSON.parse(
+        sessionStorage.getItem(key) ?? "null",
+      );
       if (saved && saved.expiresAt > Date.now())
         return admin(context, saved.accessToken, saved.expiresAt);
     } catch {
@@ -665,26 +1029,32 @@ async function finishSignIn(context) {
     pending.state !== state ||
     !(Date.now() - pending.startedAt < 10 * 60 * 1000)
   )
-    throw new NaruError(
+    throw new (NaruError as unknown as Fail)(
       "Sign-in expired or did not start here.",
       "AUTH_REQUIRED",
     );
   if (denied !== null)
-    throw new NaruError("Sign-in was denied.", "ACCESS_DENIED");
+    throw new (NaruError as unknown as Fail)(
+      "Sign-in was denied.",
+      "ACCESS_DENIED",
+    );
   const startedAt = Date.now();
-  const token = await request(`${context.origin}/api/data-auth/v1/token`, {
-    method: "POST",
-    body: {
-      code,
-      verifier: pending.verifier,
-      redirectUri: callback(),
+  const token = await request<Token>(
+    `${context.origin}/api/data-auth/v1/token`,
+    {
+      method: "POST",
+      body: {
+        code,
+        verifier: pending.verifier,
+        redirectUri: callback(),
+      },
+      touches: [],
     },
-    touches: [],
-  });
+  );
   // The lifetime is measured on this browser's clock from before the request,
   // so a clock set wrong can neither end the session early nor extend it.
   const expiresAt = Number.isFinite(token.expiresIn)
-    ? startedAt + token.expiresIn * 1000
+    ? startedAt + (token.expiresIn as number) * 1000
     : token.expiresAt;
   sessionStorage.setItem(
     key,
@@ -694,13 +1064,15 @@ async function finishSignIn(context) {
 }
 
 /** Creates a client bound to one site. */
-export function createNaru(options) {
+export function createNaru(options?: { site?: string }): NaruClient {
   const context = target(options);
   return Object.freeze({
-    collection: (name) => publicDocuments(context.root, name),
+    collection: <T = Json>(name: string) =>
+      publicDocuments<T>(context.root, name),
     auth: Object.freeze({
       session: () => adminSession(context),
-      signIn: ({ collections }) => signIn(context, collections),
+      signIn: ({ collections }: { collections: readonly string[] }) =>
+        signIn(context, collections),
     }),
   });
 }

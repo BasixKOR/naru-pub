@@ -1,5 +1,5 @@
-// Turns the hand-written SDK declarations into the compact JSON that
-// /docs/sdk/[version] renders. Run `pnpm sdk-reference` after editing a .d.ts.
+// Turns the SDK declarations that `pnpm sdk:build` emits into the compact JSON
+// that /docs/sdk/[version] renders. Run `pnpm sdk-reference` after rebuilding.
 //
 // TypeDoc parses the declarations and their TSDoc; everything below narrows its
 // model down to what the page actually draws, so the committed artifact stays

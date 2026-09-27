@@ -3,7 +3,7 @@ import { CopyObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
 import { assertJsonContentType } from "@/lib/utils";
-import { getUserHomeDirectory } from "@/lib/site-urls";
+import { getUserObjectKey } from "@/lib/site-urls";
 import { revalidatePath } from "next/cache";
 import { User } from "@/lib/auth";
 import * as Sentry from "@sentry/nextjs";
@@ -75,10 +75,7 @@ async function invalidateCloudflareCacheSingleFile(
     },
     body: JSON.stringify({
       files: [
-        `${getUserHomeDirectory(user.loginName)}/${filename}`.replaceAll(
-          "//",
-          "/",
-        ),
+        getUserObjectKey(user.loginName, filename),
       ],
     }),
   });
@@ -140,15 +137,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Copying an object onto itself and then deleting the source would lose it.
+    if (
+      getUserObjectKey(user.loginName, oldFilename) ===
+      getUserObjectKey(user.loginName, newPath)
+    ) {
+      return NextResponse.json({
+        success: true,
+        message: "파일 이름이 변경되었습니다.",
+      });
+    }
+
     try {
       // Copy the object to new location
       await s3Client.send(
         new CopyObjectCommand({
           Bucket: process.env.S3_BUCKET_NAME!,
-          CopySource: `${process.env.S3_BUCKET_NAME}/${getUserHomeDirectory(
+          CopySource: `${process.env.S3_BUCKET_NAME}/${getUserObjectKey(
             user.loginName,
-          )}/${oldFilename}`,
-          Key: `${getUserHomeDirectory(user.loginName)}/${newPath}`,
+            oldFilename,
+          )}`,
+          Key: getUserObjectKey(user.loginName, newPath),
         }),
       );
 
@@ -156,7 +165,7 @@ export async function POST(request: NextRequest) {
       await s3Client.send(
         new DeleteObjectCommand({
           Bucket: process.env.S3_BUCKET_NAME!,
-          Key: `${getUserHomeDirectory(user.loginName)}/${oldFilename}`,
+          Key: getUserObjectKey(user.loginName, oldFilename),
         }),
       );
 

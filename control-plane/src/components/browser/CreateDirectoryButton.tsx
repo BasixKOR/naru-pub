@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { collapseSlashes } from "@/lib/site-urls";
 
 export function CreateDirectoryButton({
   baseDirectory,
@@ -19,7 +20,9 @@ export function CreateDirectoryButton({
         }
 
         try {
-          const directoryPath = `${baseDirectory}/${newDirectory}`.replaceAll("//", "/");
+          const directoryPath = collapseSlashes(
+            `${baseDirectory}/${newDirectory}`,
+          );
           const response = await fetch("/api/files/create-directory", {
             method: "POST",
             headers: {

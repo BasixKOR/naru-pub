@@ -7,7 +7,7 @@ import {
 import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
 import { assertJsonContentType } from "@/lib/utils";
-import { getUserHomeDirectory } from "@/lib/site-urls";
+import { collapseSlashes, getUserObjectKey } from "@/lib/site-urls";
 import { revalidatePath } from "next/cache";
 import { User } from "@/lib/auth";
 import * as Sentry from "@sentry/nextjs";
@@ -29,10 +29,7 @@ async function invalidateCloudflareCacheSingleFile(
     },
     body: JSON.stringify({
       files: [
-        `${getUserHomeDirectory(user.loginName)}/${filename}`.replaceAll(
-          "//",
-          "/",
-        ),
+        getUserObjectKey(user.loginName, filename),
       ],
     }),
   });
@@ -77,8 +74,9 @@ export async function POST(request: NextRequest) {
       ? `${targetDirectory}/${fileName}`
       : fileName;
 
-    // If source and target are the same, no need to move
-    if (sourcePath === newPath) {
+    // If source and target are the same key, no need to move. Copying an
+    // object onto itself and then deleting the source would lose it.
+    if (collapseSlashes(sourcePath) === collapseSlashes(newPath)) {
       return NextResponse.json({
         success: true,
         message: "파일이 이미 해당 위치에 있습니다.",
@@ -98,7 +96,7 @@ export async function POST(request: NextRequest) {
       await s3Client.send(
         new HeadObjectCommand({
           Bucket: process.env.S3_BUCKET_NAME!,
-          Key: `${getUserHomeDirectory(user.loginName)}/${newPath}`,
+          Key: getUserObjectKey(user.loginName, newPath),
         }),
       );
 
@@ -124,10 +122,11 @@ export async function POST(request: NextRequest) {
       await s3Client.send(
         new CopyObjectCommand({
           Bucket: process.env.S3_BUCKET_NAME!,
-          CopySource: `${process.env.S3_BUCKET_NAME}/${getUserHomeDirectory(
+          CopySource: `${process.env.S3_BUCKET_NAME}/${getUserObjectKey(
             user.loginName,
-          )}/${sourcePath}`,
-          Key: `${getUserHomeDirectory(user.loginName)}/${newPath}`,
+            sourcePath,
+          )}`,
+          Key: getUserObjectKey(user.loginName, newPath),
         }),
       );
 
@@ -135,7 +134,7 @@ export async function POST(request: NextRequest) {
       await s3Client.send(
         new DeleteObjectCommand({
           Bucket: process.env.S3_BUCKET_NAME!,
-          Key: `${getUserHomeDirectory(user.loginName)}/${sourcePath}`,
+          Key: getUserObjectKey(user.loginName, sourcePath),
         }),
       );
 

@@ -19,7 +19,7 @@ import {
   FILE_EXTENSION_MIMETYPE_MAP,
 } from "@/lib/const";
 import { s3Client } from "@/lib/s3";
-import { getUserHomeDirectory } from "@/lib/site-urls";
+import { getUserHomeDirectory, getUserObjectKey } from "@/lib/site-urls";
 import { GitHubActionsClaims } from "./githubOidc";
 
 const MAX_DEPLOY_FILE_SIZE_BYTES = 10 * 1024 * 1024;
@@ -249,7 +249,7 @@ async function purgeCloudflareFiles(loginName: string, paths: string[]) {
   if (!zoneId || !userApiToken || paths.length === 0) return;
 
   const files = paths.map((path) =>
-    `${getUserHomeDirectory(loginName)}/${path}`.replaceAll("//", "/"),
+    getUserObjectKey(loginName, path),
   );
 
   const response = await fetch(
@@ -592,9 +592,7 @@ export async function finalizeGitHubDeployment(params: {
     )) {
       const stagingKey = `${deployment.upload_prefix}/${file.path}`;
       const targetPath = publicPath(deployment.target_prefix, file.path);
-      const publicKey = `${getUserHomeDirectory(
-        deployment.login_name,
-      )}/${targetPath}`.replaceAll("//", "/");
+      const publicKey = getUserObjectKey(deployment.login_name, targetPath);
 
       await s3Client.send(
         new CopyObjectCommand({
@@ -611,10 +609,10 @@ export async function finalizeGitHubDeployment(params: {
     }
 
     const publicDeleteKeys = deletedPaths.map((path) =>
-      `${getUserHomeDirectory(deployment.login_name)}/${publicPath(
-        deployment.target_prefix,
-        path,
-      )}`.replaceAll("//", "/"),
+      getUserObjectKey(
+        deployment.login_name,
+        publicPath(deployment.target_prefix, path),
+      ),
     );
     await deleteObjects(publicDeleteKeys);
 

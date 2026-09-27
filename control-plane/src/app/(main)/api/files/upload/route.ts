@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
-import { getUserHomeDirectory } from "@/lib/site-urls";
+import { getUserObjectKey } from "@/lib/site-urls";
 import { revalidatePath } from "next/cache";
 import { User } from "@/lib/auth";
 import * as Sentry from "@sentry/nextjs";
@@ -101,10 +101,7 @@ async function invalidateCloudflareCacheSingleFile(
     },
     body: JSON.stringify({
       files: [
-        `${getUserHomeDirectory(user.loginName)}/${filename}`.replaceAll(
-          "//",
-          "/",
-        ),
+        getUserObjectKey(user.loginName, filename),
       ],
     }),
   });
@@ -137,9 +134,7 @@ async function uploadSingleFile(user: User, directory: string, file: File) {
   }
 
   const data = await file.arrayBuffer();
-  const key = `${getUserHomeDirectory(user.loginName)}/${directory}${
-    file.name
-  }`.replaceAll("//", "/");
+  const key = getUserObjectKey(user.loginName, `${directory}${file.name}`);
 
   try {
     await s3Client.send(

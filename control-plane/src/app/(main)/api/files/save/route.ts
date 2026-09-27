@@ -3,7 +3,7 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
 import { assertJsonContentType } from "@/lib/utils";
-import { getUserHomeDirectory } from "@/lib/site-urls";
+import { getUserObjectKey } from "@/lib/site-urls";
 import { User } from "@/lib/auth";
 import * as Sentry from "@sentry/nextjs";
 import {
@@ -45,10 +45,7 @@ async function invalidateCloudflareCacheSingleFile(
     },
     body: JSON.stringify({
       files: [
-        `${getUserHomeDirectory(user.loginName)}/${filename}`.replaceAll(
-          "//",
-          "/",
-        ),
+        getUserObjectKey(user.loginName, filename),
       ],
     }),
   });
@@ -108,7 +105,7 @@ export async function POST(request: NextRequest) {
       await s3Client.send(
         new PutObjectCommand({
           Bucket: process.env.S3_BUCKET_NAME!,
-          Key: `${getUserHomeDirectory(user.loginName)}/${filename}`,
+          Key: getUserObjectKey(user.loginName, filename),
           Body: contents,
           ContentType: FILE_EXTENSION_MIMETYPE_MAP[filename.split(".").pop()!],
         }),

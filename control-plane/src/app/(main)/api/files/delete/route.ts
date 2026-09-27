@@ -3,7 +3,7 @@ import { DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
 import { assertJsonContentType } from "@/lib/utils";
-import { getUserHomeDirectory } from "@/lib/site-urls";
+import { getUserObjectKey } from "@/lib/site-urls";
 import { User } from "@/lib/auth";
 import * as Sentry from "@sentry/nextjs";
 import { recordSiteEdit } from "@/lib/database";
@@ -34,10 +34,7 @@ async function invalidateCloudflareCacheSingleFile(
     },
     body: JSON.stringify({
       files: [
-        `${getUserHomeDirectory(user.loginName)}/${filename}`.replaceAll(
-          "//",
-          "/",
-        ),
+        getUserObjectKey(user.loginName, filename),
       ],
     }),
   });
@@ -91,11 +88,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const key =
-      `${getUserHomeDirectory(user.loginName)}/${filename}`.replaceAll(
-        "//",
-        "/",
-      );
+    const key = getUserObjectKey(user.loginName, filename);
 
     try {
       // List all objects with the prefix

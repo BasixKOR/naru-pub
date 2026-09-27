@@ -7,7 +7,7 @@ import {
 import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
 import { assertJsonContentType } from "@/lib/utils";
-import { getUserHomeDirectory } from "@/lib/site-urls";
+import { getUserObjectKey } from "@/lib/site-urls";
 import { revalidatePath } from "next/cache";
 import { User } from "@/lib/auth";
 import * as Sentry from "@sentry/nextjs";
@@ -77,10 +77,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const key = directory
-      ? `${getUserHomeDirectory(user.loginName)}/${directory}/${filename}`
-      : `${getUserHomeDirectory(user.loginName)}/${filename}`;
-    const normalizedKey = key.replaceAll("///", "/").replaceAll("//", "/");
+    const normalizedKey = getUserObjectKey(
+      user.loginName,
+      `${directory}/${filename}`,
+    );
 
     try {
       await s3Client.send(

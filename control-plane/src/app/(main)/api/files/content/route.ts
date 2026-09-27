@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
-import { getUserHomeDirectory } from "@/lib/site-urls";
+import { getUserHomeDirectory, getUserObjectKey } from "@/lib/site-urls";
 import { EDITABLE_FILE_EXTENSIONS } from "@/lib/const";
 
 export async function GET(request: NextRequest) {
@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
 
     // Use proper path construction for S3 keys (always use forward slashes)
     userDir = getUserHomeDirectory(user.loginName);
-    const s3Key = `${userDir}/${filePath}`.replaceAll("//", "/");
+    const s3Key = getUserObjectKey(user.loginName, filePath);
 
     // CRITICAL SECURITY CHECK: Ensure the S3 key stays within user's directory
     if (!s3Key.startsWith(`${userDir}/`) || s3Key === userDir) {

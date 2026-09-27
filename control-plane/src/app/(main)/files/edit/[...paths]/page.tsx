@@ -1,8 +1,7 @@
-import path from "path";
 import { validateRequest } from "@/lib/auth";
 import { HeadObjectCommand, NotFound } from "@aws-sdk/client-s3";
 import { s3Client } from "@/lib/s3";
-import { getUserHomeDirectory } from "@/lib/site-urls";
+import { getUserObjectKey } from "@/lib/site-urls";
 import { buildFileTree } from "@/lib/fileUtils";
 import FileExplorerWithSelected from "@/components/browser/FileExplorerWithSelected";
 
@@ -25,9 +24,7 @@ export default async function EditPage(props: {
 
   const decodedPaths = params.paths.map((p) => decodeURIComponent(p));
   const filename = decodedPaths.join("/");
-  const actualFilename = path
-    .join(getUserHomeDirectory(user.loginName), ...decodedPaths)
-    .replaceAll("//", "/");
+  const actualFilename = getUserObjectKey(user.loginName, filename);
 
   // Check if file exists
   const headCommand = new HeadObjectCommand({

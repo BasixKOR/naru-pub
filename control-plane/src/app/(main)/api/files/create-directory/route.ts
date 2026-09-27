@@ -7,7 +7,7 @@ import {
 import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
 import { assertJsonContentType } from "@/lib/utils";
-import { getUserHomeDirectory } from "@/lib/site-urls";
+import { getUserObjectKey } from "@/lib/site-urls";
 import { revalidatePath } from "next/cache";
 import { User } from "@/lib/auth";
 import { DEFAULT_INDEX_HTML, FILE_EXTENSION_MIMETYPE_MAP } from "@/lib/const";
@@ -62,9 +62,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const key = `${getUserHomeDirectory(
-      user.loginName,
-    )}/${directory}/index.html`.replaceAll("//", "/");
+    const key = getUserObjectKey(user.loginName, `${directory}/index.html`);
 
     try {
       await s3Client.send(

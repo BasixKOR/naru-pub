@@ -5,8 +5,8 @@
 //
 // Each CLI is one bundle of our own code. Runtime dependencies stay imports,
 // resolved from the image's production node_modules; anything else a CLI
-// imports, such as dotenv, is a devDependency and is bundled in, because the
-// image does not install those.
+// imports is a devDependency and is bundled in, because the image does not
+// install those.
 //
 // dist/package.json lists only the dependencies the output imports, and the
 // jobs image installs from it, so the web app's (Next, React, Monaco and the
@@ -60,8 +60,8 @@ await rm("dist", { recursive: true, force: true });
 const results = [
   await build({
     ...common,
-    // env.ts is imported by the others, not run on its own.
-    entryPoints: await sources("src/cli", /^(?!env\.)[^.]+\.tsx?$/),
+    // env.ts and load-env.ts are imported by the others, not run on their own.
+    entryPoints: await sources("src/cli", /^(?!(load-)?env\.)[^.]+\.tsx?$/),
     outdir: "dist/cli",
     bundle: true,
     external,

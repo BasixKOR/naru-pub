@@ -1,8 +1,5 @@
-import { config } from "dotenv";
+import "./load-env";
 import { S3Client, ListObjectsV2Command, CopyObjectCommand, DeleteObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
-
-// Load environment variables from .env file
-config();
 
 // Ensure environment variables are loaded
 const requiredEnvVars = [

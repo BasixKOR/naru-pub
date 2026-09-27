@@ -40,21 +40,6 @@ export const PLAN_FEATURES: Record<string, Feature[]> = {
   // To add a richer tier later, add another plan key with its feature list.
 };
 
-const PREVIEW_FEATURES: Feature[] = ["custom_domains", "analytics", "database"];
-
-// null means the rollout gate is inactive and supporter entitlements apply.
-export function previewFeatureAccess(
-  supporterComp: boolean,
-  feature: Feature,
-): boolean | null {
-  if (
-    process.env.FEATURE_ACCESS_MODE === "supporters" ||
-    !PREVIEW_FEATURES.includes(feature)
-  )
-    return null;
-  return supporterComp;
-}
-
 export type UserEntitlement = {
   isSupporter: boolean;
   comp: boolean;
@@ -122,33 +107,9 @@ export async function getUserEntitlement(
 // load, and calling userHasFeature per feature would repeat the same
 // entitlement lookup once for each of them.
 export async function getUserFeatures(userId: number): Promise<Set<Feature>> {
-  const [user, ent] = await Promise.all([
-    process.env.FEATURE_ACCESS_MODE !== "supporters"
-      ? db
-          .selectFrom("users")
-          .select("supporter_comp")
-          .where("id", "=", userId)
-          .executeTakeFirst()
-      : undefined,
-    getUserEntitlement(userId),
-  ]);
-
-  const planFeatures = ent.isSupporter
-    ? (PLAN_FEATURES[ent.plan ?? "supporter"] ?? [])
-    : [];
-
-  const features = new Set<Feature>();
-  for (const feature of ALL_FEATURES) {
-    const preview = user
-      ? previewFeatureAccess(!!user.supporter_comp, feature)
-      : null;
-    if (preview !== null) {
-      if (preview) features.add(feature);
-      continue;
-    }
-    if (planFeatures.includes(feature)) features.add(feature);
-  }
-  return features;
+  const ent = await getUserEntitlement(userId);
+  if (!ent.isSupporter) return new Set();
+  return new Set(PLAN_FEATURES[ent.plan ?? "supporter"] ?? []);
 }
 
 export async function userHasFeature(
@@ -156,17 +117,6 @@ export async function userHasFeature(
   feature: Feature,
   executor: Executor = db,
 ): Promise<boolean> {
-  if (process.env.FEATURE_ACCESS_MODE !== "supporters") {
-    const user = await executor
-      .selectFrom("users")
-      .select("supporter_comp")
-      .where("id", "=", userId)
-      .executeTakeFirst();
-    if (user) {
-      const preview = previewFeatureAccess(!!user.supporter_comp, feature);
-      if (preview !== null) return preview;
-    }
-  }
   const ent = await getUserEntitlement(userId, executor);
   if (!ent.isSupporter) return false;
   const planFeatures = PLAN_FEATURES[ent.plan ?? "supporter"] ?? [];

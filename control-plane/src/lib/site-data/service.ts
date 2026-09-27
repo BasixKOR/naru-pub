@@ -26,7 +26,7 @@ import {
   limitPublicWrite,
   refusePublicWriteOverLimit,
 } from "./owner-auth";
-import { previewFeatureAccess, userHasFeature } from "@/lib/entitlements";
+import { userHasFeature } from "@/lib/entitlements";
 import { noteSupporterFeatureUse } from "@/lib/feature-usage";
 
 export type DataCommand = {
@@ -160,16 +160,15 @@ export async function executeData(command: DataCommand) {
     // connection the rest of the control plane also needs.
     const ownerQuery = tx
       .selectFrom("users")
-      .select(["id", "supporter_comp"])
+      .select("id")
       .where("login_name", "=", site);
     const owner = await (
       reading ? ownerQuery : ownerQuery.forUpdate()
     ).executeTakeFirst();
     if (!owner) throw noSite(command.site);
-    const preview = previewFeatureAccess(!!owner.supporter_comp, "database");
     // `tx`, never the pool: this runs inside the transaction, and taking a
     // second connection while holding the first is how the pool deadlocks.
-    if (!(preview ?? (await userHasFeature(owner.id, "database", tx))))
+    if (!(await userHasFeature(owner.id, "database", tx)))
       throw new DataError(403, "Database access is not enabled for this site.");
     // Only once the request is authorized. A stranger's refused write is not
     // the owner getting value out of a 유료 기능, and recording it here
@@ -581,15 +580,14 @@ export async function executeBatch(command: DataCommand) {
     // A batch is always a write, so it always takes the owner lock.
     const owner = await tx
       .selectFrom("users")
-      .select(["id", "supporter_comp"])
+      .select("id")
       .where("login_name", "=", command.site)
       .forUpdate()
       .executeTakeFirst();
     if (!owner) throw noSite(command.site);
-    const preview = previewFeatureAccess(!!owner.supporter_comp, "database");
     // `tx`, never the pool: a second connection taken while this one is held
     // is what empties the pool under concurrency.
-    if (!(preview ?? (await userHasFeature(owner.id, "database", tx))))
+    if (!(await userHasFeature(owner.id, "database", tx)))
       throw new DataError(403, "Database access is not enabled for this site.");
     const allowedIds = command.bearer
       ? await tokenScope(tx, owner.id, command.bearer)

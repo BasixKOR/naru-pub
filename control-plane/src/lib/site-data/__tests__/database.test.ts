@@ -70,7 +70,7 @@ integration("site database integration", () => {
       await call("GET", ["private", "one"], undefined, true),
     ).toMatchObject({ document: { data: null } });
   });
-  test("preview gate rejects sites outside the configured allowlist", async () => {
+  test("rejects sites whose owner is not a supporter", async () => {
     const denied = (
       await sql<{
         id: number;
@@ -89,6 +89,24 @@ integration("site database integration", () => {
       status: 403,
       message: "Database access is not enabled for this site.",
     });
+  });
+  test("allows sites whose owner has paid", async () => {
+    const paid = (
+      await sql<{
+        id: number;
+      }>`insert into users(login_name, supporter_comp, supporter_until)
+        values ('paid', false, now() + interval '30 days') returning id`.execute(
+        db,
+      )
+    ).rows[0].id;
+    await expect(
+      executeData({
+        site: "paid",
+        path: [],
+        method: "GET",
+        adminUserId: paid,
+      }),
+    ).resolves.toBeDefined();
   });
   test.each([
     ["world", "world"],

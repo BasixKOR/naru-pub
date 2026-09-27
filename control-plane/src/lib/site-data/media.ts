@@ -10,7 +10,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { sql } from "kysely";
 import { db, requestDeadline } from "@/lib/database";
 import { s3Client } from "@/lib/s3";
-import { previewFeatureAccess, userHasFeature } from "@/lib/entitlements";
+import { userHasFeature } from "@/lib/entitlements";
 import { noteSupporterFeatureUse } from "@/lib/feature-usage";
 import { tokenScope } from "./owner-auth";
 import { DataError, name } from "./validation";
@@ -131,13 +131,12 @@ export async function executeMedia(command: MediaCommand) {
   if (command.path.length > 1) throw new DataError(404, "Not found.");
   const owner = await db
     .selectFrom("users")
-    .select(["id", "supporter_comp"])
+    .select("id")
     .where("login_name", "=", command.site)
     .executeTakeFirst();
   if (!owner)
     throw new DataError(404, `No Naru site is named ${command.site}.`);
-  const preview = previewFeatureAccess(!!owner.supporter_comp, "database");
-  if (!(preview ?? (await userHasFeature(owner.id, "database"))))
+  if (!(await userHasFeature(owner.id, "database")))
     throw new DataError(403, "Database access is not enabled for this site.");
   const allowedIds = command.bearer
     ? await db

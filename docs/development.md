@@ -41,7 +41,6 @@ AWS_SECRET_ACCESS_KEY=your-secret-key
 
 # 기타
 NEXT_PUBLIC_DOMAIN=naru.pub
-FEATURE_ACCESS_MODE=preview
 CUSTOM_DOMAIN_CNAME_TARGET=customers.naru.pub
 CLOUDFLARE_ZONE_ID=your-cloudflare-zone-id
 CLOUDFLARE_USER_API_TOKEN=your-cloudflare-api-token
@@ -55,11 +54,6 @@ TOSS_SECRET_KEY=your-toss-secret-key
 서명된 R2 API URL로만 허용합니다. 브라우저가 직접 업로드할 수 있도록 버킷 CORS에서
 웹사이트 출처의 `PUT`과 `Content-Type` 헤더를 허용해야 합니다. R2 API 토큰에는
 `naru-media`의 객체 읽기·쓰기 권한도 필요합니다.
-
-`preview` 모드에서는 `users.supporter_comp`가 설정된 계정만 커스텀 도메인,
-분석, 데이터베이스를 사용할 수 있습니다. 이 기능을 유료 이용자에게 공개할 때는
-`FEATURE_ACCESS_MODE=supporters`로 바꾸면 기존 유료 이용자 권한과 결제 유예 기간을
-사용합니다.
 
 ## 3. 데이터베이스 설정
 

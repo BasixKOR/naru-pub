@@ -54,7 +54,6 @@ integration("SDK and data API contract", () => {
   const oldGlobals = browserGlobals.map((name) =>
     Object.getOwnPropertyDescriptor(globalThis, name),
   );
-  const oldFeatureMode = process.env.FEATURE_ACCESS_MODE;
 
   beforeAll(async () => {
     await setupTestDatabase();
@@ -243,8 +242,6 @@ integration("SDK and data API contract", () => {
       if (ready) await teardownTestDatabase();
     } finally {
       await db.destroy();
-      if (oldFeatureMode === undefined) delete process.env.FEATURE_ACCESS_MODE;
-      else process.env.FEATURE_ACCESS_MODE = oldFeatureMode;
     }
   });
 

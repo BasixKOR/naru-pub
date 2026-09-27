@@ -34,7 +34,6 @@ struct Config {
     platform_domain: String,
     r2_public_domain: String,
     payment_grace_days: i64,
-    feature_access_mode: String,
 }
 
 // Shared state for the application
@@ -45,7 +44,6 @@ struct AppState {
     platform_domain: String,
     r2_public_domain: String,
     payment_grace_days: i64,
-    feature_access_mode: String,
 }
 
 #[derive(Clone, Debug)]
@@ -81,8 +79,6 @@ async fn main() -> Result<()> {
             .unwrap_or_else(|_| "4".to_string())
             .parse()
             .expect("PAYMENT_GRACE_DAYS must be a valid number"),
-        feature_access_mode: std::env::var("FEATURE_ACCESS_MODE")
-            .unwrap_or_else(|_| "preview".to_string()),
     };
 
     // Initialize R2 client
@@ -120,7 +116,6 @@ async fn main() -> Result<()> {
         platform_domain: config.platform_domain,
         r2_public_domain: config.r2_public_domain,
         payment_grace_days: config.payment_grace_days,
-        feature_access_mode: config.feature_access_mode,
     });
 
     // Create a TCP listener
@@ -181,7 +176,6 @@ async fn resolve_site_owner(
     host: &str,
     platform_domain: &str,
     payment_grace_days: i64,
-    feature_access_mode: &str,
 ) -> Result<Option<SiteOwner>, sqlx::Error> {
     let host = normalize_host(host);
     if host.is_empty() || host == platform_domain {
@@ -205,40 +199,24 @@ async fn resolve_site_owner(
         }));
     }
 
-    let domain: Option<(i32, String)> = if feature_access_mode == "supporters" {
-        sqlx::query_as(
-            "SELECT users.id, users.login_name
-         FROM custom_domains
-         INNER JOIN users ON users.id = custom_domains.user_id
-         WHERE custom_domains.hostname = $1
-           AND custom_domains.verified_at IS NOT NULL
-           AND custom_domains.cloudflare_status = 'active'
-           AND custom_domains.ssl_status = 'active'
-           AND (
-             users.supporter_comp = TRUE
-             OR users.supporter_until > now()
-             OR users.supporter_until + ($2::int * INTERVAL '1 day') > now()
-           )",
-        )
-        .bind(&host)
-        .bind(payment_grace_days as i32)
-        .fetch_optional(db_pool)
-        .await?
-    } else {
-        sqlx::query_as(
-            "SELECT users.id, users.login_name
-         FROM custom_domains
-         INNER JOIN users ON users.id = custom_domains.user_id
-         WHERE custom_domains.hostname = $1
-           AND custom_domains.verified_at IS NOT NULL
-           AND custom_domains.cloudflare_status = 'active'
-           AND custom_domains.ssl_status = 'active'
-           AND users.supporter_comp = TRUE",
-        )
-        .bind(&host)
-        .fetch_optional(db_pool)
-        .await?
-    };
+    let domain: Option<(i32, String)> = sqlx::query_as(
+        "SELECT users.id, users.login_name
+     FROM custom_domains
+     INNER JOIN users ON users.id = custom_domains.user_id
+     WHERE custom_domains.hostname = $1
+       AND custom_domains.verified_at IS NOT NULL
+       AND custom_domains.cloudflare_status = 'active'
+       AND custom_domains.ssl_status = 'active'
+       AND (
+         users.supporter_comp = TRUE
+         OR users.supporter_until > now()
+         OR users.supporter_until + ($2::int * INTERVAL '1 day') > now()
+       )",
+    )
+    .bind(&host)
+    .bind(payment_grace_days as i32)
+    .fetch_optional(db_pool)
+    .await?;
 
     Ok(domain.map(|(user_id, login_name)| SiteOwner {
         user_id,
@@ -387,7 +365,6 @@ async fn handle_request(
         &host,
         &state.platform_domain,
         state.payment_grace_days,
-        &state.feature_access_mode,
     )
     .await
     {

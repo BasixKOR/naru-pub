@@ -5,11 +5,14 @@
 #   ./deploy-server.sh <commit>
 #   ./deploy-server.sh rollback
 #
-# It deploys naru-pub-control-plane:<commit> and naru-pub-proxy:<commit>. When
-# `deploy.sh build` has already loaded them, those are used. Otherwise they are
-# pulled from the images GitHub Actions built for <commit>:
+# It deploys naru-pub-control-plane:<commit> (the Next.js server),
+# naru-pub-control-plane-jobs:<commit> (cron, worker and migrations) and
+# naru-pub-proxy:<commit>. When `deploy.sh build` has already loaded them,
+# those are used. Otherwise they are pulled from the images GitHub Actions
+# built for <commit>:
 #
 #   ghcr.io/naru-pub/naru-pub-control-plane:git-<commit>-arm64
+#   ghcr.io/naru-pub/naru-pub-control-plane-jobs:git-<commit>-arm64
 #   ghcr.io/naru-pub/naru-pub-proxy:git-<commit>-arm64
 #
 # Nothing is compiled here. The builds used to run on this machine, where a
@@ -359,6 +362,7 @@ fi
 
 COMMIT=$1
 CONTROL_PLANE_IMAGE="naru-pub-control-plane:$COMMIT"
+JOBS_IMAGE="naru-pub-control-plane-jobs:$COMMIT"
 PROXY_IMAGE="naru-pub-proxy:$COMMIT"
 
 # The images were built from <commit>, and the Compose topology and this script
@@ -387,10 +391,12 @@ IMAGE_REGISTRY=${IMAGE_REGISTRY:-ghcr.io/naru-pub/naru-pub}
 # keychain, which the ssh session deploy.sh runs this in cannot open; see
 # docs/deployment.md.
 
+REPOSITORIES=(naru-pub-control-plane naru-pub-control-plane-jobs naru-pub-proxy)
+
 # Pulled under the registry name, then renamed to the local one, so everything
 # below and the cleanup at the end only ever see naru-pub-*:<commit> and
 # naru-pub-*:current. An image `deploy.sh build` shipped is used as is.
-for repository in naru-pub-control-plane naru-pub-proxy; do
+for repository in "${REPOSITORIES[@]}"; do
   image="$repository:$COMMIT"
   if docker image inspect "$image" >/dev/null 2>&1; then
     continue
@@ -415,10 +421,13 @@ proxy_service="proxy-$target"
 # the running containers: a container holds the image it was created from, not
 # the name, which is also what keeps the stopped slot able to roll back.
 docker tag "$CONTROL_PLANE_IMAGE" naru-pub-control-plane:current
+docker tag "$JOBS_IMAGE" naru-pub-control-plane-jobs:current
 docker tag "$PROXY_IMAGE" naru-pub-proxy:current
 
 echo "Running backward-compatible migrations..."
-docker compose run --rm --no-deps "$control_plane_service" pnpm migrate
+# In the jobs image, through the cron service's settings: the web image is only
+# the Next.js server and has neither the migrations nor tsx.
+docker compose run --rm --no-deps cron node --import tsx src/cli/migrate.ts
 
 echo "Starting and checking the $target slot..."
 docker compose up -d --no-deps --force-recreate "$control_plane_service" "$proxy_service"
@@ -440,7 +449,7 @@ fi
 # rollback until the next deploy recreates that slot. `latest` is what
 # `docker compose build` tagged before images were built elsewhere.
 echo "Removing old release images..."
-for repository in naru-pub-control-plane naru-pub-proxy; do
+for repository in "${REPOSITORIES[@]}"; do
   for tag in $(docker image ls "$repository" --format '{{.Tag}}'); do
     if [[ "$tag" != current && "$tag" != "$COMMIT" ]]; then
       docker rmi "$repository:$tag" >/dev/null 2>&1 || true

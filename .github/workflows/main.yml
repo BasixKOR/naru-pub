@@ -24,9 +24,13 @@ jobs:
           password: ${{ github.token }}
       - id: arch
         run: echo arch=arm64 >> "$GITHUB_OUTPUT"
+      # Two targets of one Dockerfile: the Next.js standalone server, and the
+      # image cron, worker and migrations run from. The second build reuses the
+      # first's dependency install from this builder's cache.
       - uses: docker/build-push-action@v6
         with:
           context: control-plane
+          target: web
           pull: "true"
           push: "true"
           no-cache: "false"
@@ -36,6 +40,20 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-control-plane:build-cache-${{ steps.arch.outputs.arch }}
           cache-to: type=registry,ref=ghcr.io/${{ github.repository }}-control-plane:build-cache-${{ steps.arch.outputs.arch }},mode=max
+          provenance: false
+      - uses: docker/build-push-action@v6
+        with:
+          context: control-plane
+          target: jobs
+          pull: "true"
+          push: "true"
+          no-cache: "false"
+          build-args: GIT_COMMIT=${{ github.sha }}
+          tags: ghcr.io/${{ github.repository }}-control-plane-jobs:git-${{ github.sha }}-${{ steps.arch.outputs.arch }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-control-plane-jobs:build-cache-${{ steps.arch.outputs.arch }}
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}-control-plane-jobs:build-cache-${{ steps.arch.outputs.arch }},mode=max
           provenance: false
 
   image-proxy:

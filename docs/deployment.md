@@ -6,8 +6,17 @@ Production runs the images GitHub Actions builds. Every push to `main` runs
 
 ```
 ghcr.io/naru-pub/naru-pub-control-plane:git-<commit>-arm64
+ghcr.io/naru-pub/naru-pub-control-plane-jobs:git-<commit>-arm64
 ghcr.io/naru-pub/naru-pub-proxy:git-<commit>-arm64
 ```
+
+The two control-plane images are targets of one multi-stage
+[`control-plane/Dockerfile`](../control-plane/Dockerfile). `control-plane` is
+the Next.js server built with `output: "standalone"`: only the files the server
+uses, without Chromium, pnpm, devDependencies or the build cache. The blue and
+green slots run it. `control-plane-jobs` has the TypeScript sources, the full
+`node_modules` with `tsx`, and Chromium; `cron`, `worker` and migrations run
+from it.
 
 To deploy, push to `main` and run this from the development machine:
 
@@ -17,8 +26,9 @@ mise run deploy        # same as ./deploy.sh
 
 It resolves `origin/main`, waits with `gh` for that commit's CI run to succeed,
 and runs `deploy-server.sh <commit>` on the host named by the `naru-pub-deploy`
-alias in `~/.ssh/config`. The server pulls both images from ghcr.io and tags
-them `naru-pub-control-plane:<commit>` and `naru-pub-proxy:<commit>`. Only
+alias in `~/.ssh/config`. The server pulls the images from ghcr.io and tags
+them `naru-pub-control-plane:<commit>`, `naru-pub-control-plane-jobs:<commit>`
+and `naru-pub-proxy:<commit>`. Only
 `origin/main` is deployed, so push first. `./deploy-server.sh <commit>` on the
 server does the same deployment without the CI wait.
 
@@ -56,11 +66,11 @@ When CI is unavailable, or an image has to be built from this machine, run:
 mise run deploy:local  # same as ./deploy.sh build
 ```
 
-It builds both images from `origin/main` in a clean checkout of its own
+It builds the images from `origin/main` in a clean checkout of its own
 (`~/.cache/naru-pub-deploy`), using the server's `NEXT_PUBLIC_*` values, ships
 them over ssh, and runs the same `deploy-server.sh <commit>`. The server then
 finds the images already loaded and pulls nothing. Docker must be running on
-the development machine, and it uploads both compressed images from there, so
+the development machine, and it uploads the compressed images from there, so
 avoid it on a metered connection.
 
 Neither path compiles on the server, and its Compose file has no `build:` on
@@ -77,11 +87,11 @@ For each deployment, `deploy-server.sh`:
    built from;
 2. pulls that commit's images from ghcr.io unless they are already loaded;
 3. points the `:current` tags at that commit's images;
-4. runs database migrations from the new control-plane image;
+4. runs database migrations from the new jobs image;
 5. starts the inactive slot and waits for the control plane, database, and
    hosted-site proxy to become healthy;
 6. reloads nginx to atomically direct new requests to the healthy slot;
-7. recreates the cron and worker processes from the new image; and
+7. recreates the cron and worker processes from the new jobs image; and
 8. stops the previous slot and removes release images nothing can come back to.
 
 After the checkout moves, the script re-executes the checked-in copy once

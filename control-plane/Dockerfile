@@ -1,9 +1,55 @@
-FROM node:24-slim
+# Two images from one build, chosen with --target:
+#
+#   web   the Next.js server, from `output: "standalone"`: only the files the
+#         server traces, with no Chromium, pnpm, devDependencies or build cache.
+#         The blue/green slots run this.
+#   jobs  the TypeScript CLIs under src/cli, run with tsx: cron (which starts
+#         Playwright for screenshots), worker and migrations. It needs src/,
+#         the whole node_modules and Chromium, and not the Next build.
+
+FROM node:24-slim AS deps
+
+WORKDIR /app
+
+RUN npm install --global pnpm@11.5.2
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+
+RUN pnpm install --frozen-lockfile
+
+FROM deps AS builder
+
+# NEXT_PUBLIC_* are compiled into the client bundle.
+ARG NEXT_PUBLIC_DOMAIN=naru.pub
+ENV NEXT_PUBLIC_DOMAIN=$NEXT_PUBLIC_DOMAIN
+
+COPY components.json \
+     kysely.config.ts \
+     next.config.mjs \
+     postcss.config.mjs \
+     sentry.edge.config.ts \
+     sentry.server.config.ts \
+     tailwind.config.ts \
+     tsconfig.json \
+     ./
+
+COPY public/ public/
+
+# The SDK source and the check, run first by the build, that public/sdk/ is
+# what it emits. The served files are the committed ones, never rebuilt here.
+COPY sdk/ sdk/
+COPY scripts/build-sdk.mjs scripts/
+
+COPY src/ src/
+
+RUN pnpm run build
+
+FROM node:24-slim AS jobs
 
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install system dependencies for Playwright in single layer
+# Chromium and what it needs, for src/cli/update-screenshots.tsx.
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -34,46 +80,43 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Setup pnpm in single layer
+# Kept so `pnpm <script>` still works in a shell in this container.
 RUN npm install --global pnpm@11.5.2
 
-# Copy dependency files first for better caching
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-
-# Install dependencies (this layer will be cached unless package files change)
-RUN pnpm install --frozen-lockfile
-
-# Set build arguments and environment early
 ARG NEXT_PUBLIC_DOMAIN=naru.pub
 ENV NEXT_PUBLIC_DOMAIN=$NEXT_PUBLIC_DOMAIN
 
-# Copy config files (less frequently changed)
-COPY components.json \
+# tsx is a devDependency, so this is the full install, not a production one.
+COPY --from=deps /app/node_modules node_modules/
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml \
      kysely.config.ts \
-     next.config.mjs \
-     postcss.config.mjs \
-     sentry.edge.config.ts \
-     sentry.server.config.ts \
-     tailwind.config.ts \
      tsconfig.json \
      ./
-
-# Copy static assets (less frequently changed)
-COPY public/ public/
-
-# The SDK source and the check, run first by the build, that public/sdk/ is
-# what it emits. The served files are the committed ones, never rebuilt here.
-COPY sdk/ sdk/
-COPY scripts/build-sdk.mjs scripts/
-
-# Copy source code (most frequently changed - should be last)
 COPY src/ src/
 
-# Build the application
-RUN pnpm run build
+# compose.yml gives each service its own command.
+CMD ["node", "--import", "tsx", "src/cli/worker.ts"]
+
+FROM node:24-slim AS web
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=3000
+# server.js listens on $HOSTNAME, which Docker sets to the container ID: that
+# would bind only the container's own address and fail the healthcheck, which
+# asks 127.0.0.1.
+ENV HOSTNAME=0.0.0.0
+
+# The standalone server does not serve these from the build; they go next to
+# it. public/ is also read at runtime by path (docs/database/blog.zip).
+COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/.next/static .next/static/
+COPY --from=builder --chown=node:node /app/public public/
+
+# Next writes its image optimization cache under .next/cache.
+USER node
 
 EXPOSE 3000
 
-# node directly rather than `pnpm start`: pnpm stays resident as the parent of
-# whatever it runs, about 65MB per container for a process that only waits.
-CMD ["node", "node_modules/next/dist/bin/next", "start"]
+CMD ["node", "server.js"]

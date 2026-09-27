@@ -1,6 +1,8 @@
 import { withSentryConfig } from "@sentry/nextjs";
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // The Dockerfile's web image runs .next/standalone/server.js.
+  output: "standalone",
   // /sdk/1/ follows the newest 1.x release, so a site that imports it gets
   // compatible fixes; /sdk/<exact version>/ never changes once released.
   async rewrites() {

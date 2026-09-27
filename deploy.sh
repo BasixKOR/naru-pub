@@ -6,14 +6,15 @@
 #   ./deploy.sh rollback   switch HTTP traffic back to the stopped slot
 #
 # By default production runs what GitHub Actions built: every push to main
-# builds and pushes ghcr.io/naru-pub/naru-pub-control-plane:git-<commit>-arm64
-# and ghcr.io/naru-pub/naru-pub-proxy:git-<commit>-arm64 (.github/workflows/
+# builds and pushes ghcr.io/naru-pub/naru-pub-control-plane:git-<commit>-arm64,
+# ghcr.io/naru-pub/naru-pub-control-plane-jobs:git-<commit>-arm64 and
+# ghcr.io/naru-pub/naru-pub-proxy:git-<commit>-arm64 (.github/workflows/
 # main.yml). This waits for that run to succeed, then runs deploy-server.sh
-# <commit> on the server, which pulls both images from the registry.
+# <commit> on the server, which pulls the images from the registry.
 #
 # `build` is the manual path, for when CI is unavailable: it builds
-# naru-pub-control-plane:<commit> and naru-pub-proxy:<commit> from origin/main
-# here, ships them over ssh, and runs the same deploy-server.sh <commit>, which
+# naru-pub-control-plane:<commit>, naru-pub-control-plane-jobs:<commit> and
+# naru-pub-proxy:<commit> from origin/main here, ships them over ssh, and runs the same deploy-server.sh <commit>, which
 # then finds them already loaded and pulls nothing. `mise run deploy` runs the
 # default path and `mise run deploy:local` this one.
 #
@@ -30,7 +31,7 @@
 # The default path is meant to work over a metered connection: this machine
 # only asks GitHub for the tip of main and the run's status, and sends one ssh
 # command. The images, several GB, travel from ghcr.io to the server, never
-# through here. It needs gh signed in. The build path uploads both images from
+# through here. It needs gh signed in. The build path uploads the images from
 # here and needs Docker running; OrbStack is started if it is not.
 set -Eeuo pipefail
 
@@ -135,6 +136,7 @@ wait_for_ci() {
 
 build_and_ship() {
   local control_plane_image="naru-pub-control-plane:$COMMIT"
+  local jobs_image="naru-pub-control-plane-jobs:$COMMIT"
   local proxy_image="naru-pub-proxy:$COMMIT"
 
   if ! docker info >/dev/null 2>&1; then
@@ -157,8 +159,8 @@ build_and_ship() {
 
   # A deploy that failed after shipping can be retried without rebuilding or
   # sending the images again.
-  if remote "docker image inspect $control_plane_image $proxy_image" >/dev/null 2>&1; then
-    echo "The server already has both images for $COMMIT."
+  if remote "docker image inspect $control_plane_image $jobs_image $proxy_image" >/dev/null 2>&1; then
+    echo "The server already has the images for $COMMIT."
     return
   fi
 
@@ -177,11 +179,22 @@ build_and_ship() {
     build_args+=(--build-arg "${line%%=*}=$value")
   done < <(remote "grep ^NEXT_PUBLIC_ $REMOTE_DIR/.env || true")
 
+  # Two targets of one Dockerfile; the second reuses the first's dependency
+  # install from the build cache.
   echo "Building $control_plane_image..."
   DOCKER_BUILDKIT=1 docker build \
     --platform linux/arm64 \
+    --target web \
     ${build_args[@]+"${build_args[@]}"} \
     --tag "$control_plane_image" \
+    "$BUILD_DIR/control-plane"
+
+  echo "Building $jobs_image..."
+  DOCKER_BUILDKIT=1 docker build \
+    --platform linux/arm64 \
+    --target jobs \
+    ${build_args[@]+"${build_args[@]}"} \
+    --tag "$jobs_image" \
     "$BUILD_DIR/control-plane"
 
   echo "Building $proxy_image..."
@@ -190,9 +203,9 @@ build_and_ship() {
     --tag "$proxy_image" \
     "$BUILD_DIR/proxy"
 
-  # One stream for both, so the layers they share are sent once.
-  echo "Shipping both images to $DEPLOY_HOST..."
-  docker save "$control_plane_image" "$proxy_image" \
+  # One stream for all three, so the layers they share are sent once.
+  echo "Shipping the images to $DEPLOY_HOST..."
+  docker save "$control_plane_image" "$jobs_image" "$proxy_image" \
     | zstd -T0 -3 -q \
     | remote "zstd -dcq | docker load --quiet"
 }
@@ -214,7 +227,7 @@ remote "test -x $REMOTE_DIR/deploy-server.sh || (cd $REMOTE_DIR && git fetch --q
 # sent there. Keeping the ones just deployed makes a retry cheap; the build
 # cache that makes the next build fast is separate and stays.
 if [[ "$MODE" == build ]]; then
-  for repository in naru-pub-control-plane naru-pub-proxy; do
+  for repository in naru-pub-control-plane naru-pub-control-plane-jobs naru-pub-proxy; do
     for tag in $(docker image ls "$repository" --format '{{.Tag}}'); do
       if [[ "$tag" != "$COMMIT" ]]; then
         docker rmi "$repository:$tag" >/dev/null 2>&1 || true

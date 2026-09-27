@@ -14,9 +14,10 @@ The two control-plane images are targets of one multi-stage
 [`control-plane/Dockerfile`](../control-plane/Dockerfile). `control-plane` is
 the Next.js server built with `output: "standalone"`: only the files the server
 uses, without Chromium, pnpm, devDependencies or the build cache. The blue and
-green slots run it. `control-plane-jobs` has the TypeScript sources, the full
-`node_modules` with `tsx`, and Chromium; `cron`, `worker` and migrations run
-from it.
+green slots run it. `control-plane-jobs` has the CLIs and migrations compiled
+to `dist/` by `scripts/build-cli.mjs`, the production dependencies, and
+Chromium; `cron`, `worker` and migrations run from it with plain `node`, no
+`tsx`.
 
 To deploy, push to `main` and run this from the development machine:
 

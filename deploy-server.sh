@@ -426,8 +426,8 @@ docker tag "$PROXY_IMAGE" naru-pub-proxy:current
 
 echo "Running backward-compatible migrations..."
 # In the jobs image, through the cron service's settings: the web image is only
-# the Next.js server and has neither the migrations nor tsx.
-docker compose run --rm --no-deps cron node --import tsx src/cli/migrate.ts
+# the Next.js server and has no migrations.
+docker compose run --rm --no-deps cron node dist/cli/migrate.mjs
 
 echo "Starting and checking the $target slot..."
 docker compose up -d --no-deps --force-recreate "$control_plane_service" "$proxy_service"

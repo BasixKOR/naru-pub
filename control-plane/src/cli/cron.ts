@@ -28,13 +28,20 @@ function runWithTimeout(
   timeout: number,
 ): Promise<{ success: boolean; code: number | null }> {
   return new Promise((resolve) => {
-    const scriptPath = `src/cli/${script}`;
     console.log(`[cron] Starting ${script}`);
 
-    // tsx as a loader in this same node binary, not the tsx CLI: that one is
-    // a second node process which only exists to start the real one, and it is
-    // on PATH only when pnpm put it there.
-    const child = spawn(process.execPath, ["--import", "tsx", scriptPath], {
+    // In the jobs image this is dist/cli/cron.mjs and the scripts are compiled
+    // beside it (scripts/build-cli.mjs). From source, tsx as a loader in this
+    // same node binary, not the tsx CLI: that one is a second node process
+    // which only exists to start the real one, and it is on PATH only when
+    // pnpm put it there.
+    const args = __filename.endsWith(".mjs")
+      ? [
+          ...process.execArgv,
+          `${__dirname}/${script.replace(/\.tsx?$/, ".mjs")}`,
+        ]
+      : ["--import", "tsx", `src/cli/${script}`];
+    const child = spawn(process.execPath, args, {
       cwd: process.cwd(),
       stdio: "inherit",
       env: process.env,

@@ -3,9 +3,10 @@
 #   web   the Next.js server, from `output: "standalone"`: only the files the
 #         server traces, with no Chromium, pnpm, devDependencies or build cache.
 #         The blue/green slots run this.
-#   jobs  the TypeScript CLIs under src/cli, run with tsx: cron (which starts
-#         Playwright for screenshots), worker and migrations. It needs src/,
-#         the whole node_modules and Chromium, and not the Next build.
+#   jobs  the CLIs under src/cli, compiled by scripts/build-cli.mjs and run
+#         with plain node: cron (which starts Playwright for screenshots),
+#         worker and migrations. It has Chromium and the production
+#         dependencies, and neither the Next build nor tsx.
 
 FROM node:24-slim AS deps
 
@@ -16,6 +17,29 @@ RUN npm install --global pnpm@11.5.2
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 RUN pnpm install --frozen-lockfile
+
+# Only what the compiled CLIs import at runtime; they bundle anything else. A
+# fresh install, because --prod over the full one leaves the devDependencies
+# in pnpm's store. The CLIs reach next only for next/headers, so its compiler,
+# which is for builds, goes too.
+FROM node:24-slim AS prod-deps
+
+WORKDIR /app
+
+RUN npm install --global pnpm@11.5.2
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+
+RUN pnpm install --frozen-lockfile --prod \
+    && rm -rf node_modules/.pnpm/@next+swc-*
+
+FROM deps AS cli-builder
+
+COPY tsconfig.json ./
+COPY scripts/build-cli.mjs scripts/
+COPY src/ src/
+
+RUN pnpm run build:cli
 
 FROM deps AS builder
 
@@ -80,22 +104,18 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Kept so `pnpm <script>` still works in a shell in this container.
-RUN npm install --global pnpm@11.5.2
-
 ARG NEXT_PUBLIC_DOMAIN=naru.pub
 ENV NEXT_PUBLIC_DOMAIN=$NEXT_PUBLIC_DOMAIN
+# Stack traces point into src/ through the maps built beside each CLI. Set
+# here, not as a flag, so the jobs cron starts inherit it.
+ENV NODE_OPTIONS=--enable-source-maps
 
-# tsx is a devDependency, so this is the full install, not a production one.
-COPY --from=deps /app/node_modules node_modules/
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml \
-     kysely.config.ts \
-     tsconfig.json \
-     ./
-COPY src/ src/
+COPY --from=prod-deps /app/node_modules node_modules/
+COPY package.json ./
+COPY --from=cli-builder /app/dist dist/
 
-# compose.yml gives each service its own command.
-CMD ["node", "--import", "tsx", "src/cli/worker.ts"]
+# docker-compose.yml gives each service its own command.
+CMD ["node", "dist/cli/worker.mjs"]
 
 FROM node:24-slim AS web
 

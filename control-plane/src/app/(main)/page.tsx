@@ -1,6 +1,6 @@
 import { db } from "@/lib/database";
 import { sql } from "kysely";
-import { getHomepageUrl, getRenderedSiteUrl } from "@/lib/utils";
+import { getHomepageUrl, getRenderedSiteUrl } from "@/lib/site-urls";
 import Link from "next/link";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";

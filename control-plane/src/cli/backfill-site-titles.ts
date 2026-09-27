@@ -3,7 +3,7 @@ import { GetObjectCommand, NoSuchKey } from "@aws-sdk/client-s3";
 import { db } from "@/lib/database";
 import { extractHtmlTitle } from "@/lib/html";
 import { s3Client } from "@/lib/s3";
-import { getUserHomeDirectory } from "@/lib/utils";
+import { getUserHomeDirectory } from "@/lib/site-urls";
 
 // Usage:
 //   pnpm exec tsx src/cli/backfill-site-titles.ts

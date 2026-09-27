@@ -6,7 +6,8 @@ import {
 } from "@aws-sdk/client-s3";
 import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
-import { assertJsonContentType, getUserHomeDirectory } from "@/lib/utils";
+import { assertJsonContentType } from "@/lib/utils";
+import { getUserHomeDirectory } from "@/lib/site-urls";
 import { revalidatePath } from "next/cache";
 import { User } from "@/lib/auth";
 import { DEFAULT_INDEX_HTML, FILE_EXTENSION_MIMETYPE_MAP } from "@/lib/const";

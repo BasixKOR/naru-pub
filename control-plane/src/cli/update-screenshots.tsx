@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import { db } from "@/lib/database";
 import { dispatchActorUpdate } from "@/lib/federation";
 import { s3Client } from "@/lib/s3";
-import { getHomepageUrl, getRenderedSiteUrl } from "@/lib/utils";
+import { getHomepageUrl, getRenderedSiteUrl } from "@/lib/site-urls";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { Browser, chromium } from "playwright";
 

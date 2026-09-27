@@ -15,7 +15,8 @@ The two control-plane images are targets of one multi-stage
 the Next.js server built with `output: "standalone"`: only the files the server
 uses, without Chromium, pnpm, devDependencies or the build cache. The blue and
 green slots run it. `control-plane-jobs` has the CLIs and migrations compiled
-to `dist/` by `scripts/build-cli.mjs`, the production dependencies, and
+to `dist/` by `scripts/build-cli.mjs`, only the dependencies those import (not
+Next, React or the other web app packages, which the build refuses), and
 Chromium; `cron`, `worker` and migrations run from it with plain `node`, no
 `tsx`.
 

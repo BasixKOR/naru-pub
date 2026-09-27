@@ -19,7 +19,7 @@ import {
   FILE_EXTENSION_MIMETYPE_MAP,
 } from "@/lib/const";
 import { s3Client } from "@/lib/s3";
-import { getUserHomeDirectory } from "@/lib/utils";
+import { getUserHomeDirectory } from "@/lib/site-urls";
 import { GitHubActionsClaims } from "./githubOidc";
 
 const MAX_DEPLOY_FILE_SIZE_BYTES = 10 * 1024 * 1024;

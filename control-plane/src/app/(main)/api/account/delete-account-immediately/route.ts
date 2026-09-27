@@ -7,7 +7,7 @@ import {
 import { db } from "@/lib/database";
 import { ListObjectsV2Command, DeleteObjectsCommand } from "@aws-sdk/client-s3";
 import { s3Client } from "@/lib/s3";
-import { getUserHomeDirectory } from "@/lib/utils";
+import { getUserHomeDirectory } from "@/lib/site-urls";
 import { dispatchActorDelete } from "@/lib/federation";
 import { deleteCustomDomainsForUser } from "@/lib/customDomains";
 import { verify } from "@node-rs/argon2";

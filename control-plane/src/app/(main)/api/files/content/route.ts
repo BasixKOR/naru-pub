@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
-import { getUserHomeDirectory } from "@/lib/utils";
+import { getUserHomeDirectory } from "@/lib/site-urls";
 import { EDITABLE_FILE_EXTENSIONS } from "@/lib/const";
 
 export async function GET(request: NextRequest) {

@@ -1,6 +1,6 @@
 import { db } from "@/lib/database";
 import { s3Client } from "@/lib/s3";
-import { getUserHomeDirectory } from "@/lib/utils";
+import { getUserHomeDirectory } from "@/lib/site-urls";
 import { ListObjectsV2Command } from "@aws-sdk/client-s3";
 
 async function calculateUserHomeDirectorySize(

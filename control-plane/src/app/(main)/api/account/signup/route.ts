@@ -9,7 +9,8 @@ import {
 } from "@/lib/const";
 import { PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { s3Client } from "@/lib/s3";
-import { assertJsonContentType, getUserHomeDirectory } from "@/lib/utils";
+import { assertJsonContentType } from "@/lib/utils";
+import { getUserHomeDirectory } from "@/lib/site-urls";
 
 async function prepareUserHomeDirectory(userName: string) {
   const bucketName = process.env.S3_BUCKET_NAME!;

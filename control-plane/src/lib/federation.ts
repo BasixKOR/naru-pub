@@ -6,10 +6,7 @@ import {
   generateCryptoKeyPair,
   importJwk,
 } from "@fedify/fedify";
-import {
-  PostgresKvStore,
-  PostgresMessageQueue,
-} from "@fedify/postgres";
+import { PostgresKvStore, PostgresMessageQueue } from "@fedify/postgres";
 import {
   Accept,
   Activity,
@@ -29,7 +26,7 @@ import { sql } from "kysely";
 import postgres from "postgres";
 import { db } from "./database";
 import { configureLogging } from "./logging";
-import { getRenderedSiteUrl } from "./utils";
+import { getRenderedSiteUrl } from "./site-urls";
 
 // Fire the logtape config eagerly so control-plane requests also get Fedify's
 // internal logs routed to the console.
@@ -37,9 +34,12 @@ void configureLogging();
 
 // Separate postgres.js client for Fedify's KV + queue. Kysely uses `pg`;
 // @fedify/postgres uses `postgres`. Two small pools in one process is fine.
-const fedifySql = postgres(process.env.DATABASE_URL ?? "postgres://localhost/", {
-  max: 4,
-});
+const fedifySql = postgres(
+  process.env.DATABASE_URL ?? "postgres://localhost/",
+  {
+    max: 4,
+  },
+);
 
 const KEY_ALGORITHMS = ["RSASSA-PKCS1-v1_5", "Ed25519"] as const;
 type KeyAlgorithm = (typeof KEY_ALGORITHMS)[number];
@@ -53,8 +53,7 @@ const DB_KEY_TYPE: Record<KeyAlgorithm, string> = {
 // Pin the origin so URIs in actor/activity/collection docs always use the
 // public hostname — not whatever Host header the reverse proxy forwards
 // (which behind Cloudflare often ends up as the container's localhost:3000).
-const federationOrigin =
-  process.env.BASE_URL ?? "http://localhost:3000";
+const federationOrigin = process.env.BASE_URL ?? "http://localhost:3000";
 
 export const federation = createFederation<void>({
   kv: new PostgresKvStore(fedifySql),
@@ -64,7 +63,7 @@ export const federation = createFederation<void>({
 
 async function buildPerson(
   ctx: Context<void>,
-  identifier: string
+  identifier: string,
 ): Promise<Person | null> {
   const user = await db
     .selectFrom("users")
@@ -105,7 +104,7 @@ async function buildPerson(
 
 federation
   .setActorDispatcher("/users/{identifier}", (ctx, identifier) =>
-    buildPerson(ctx, identifier)
+    buildPerson(ctx, identifier),
   )
   .setKeyPairsDispatcher(async (_ctx, identifier) => {
     const user = await db
@@ -176,9 +175,11 @@ async function upsertRemoteActor(actor: {
   const preferredUsername =
     typeof actor.preferredUsername === "string"
       ? actor.preferredUsername
-      : actor.preferredUsername?.toString() ?? null;
+      : (actor.preferredUsername?.toString() ?? null);
   const name =
-    typeof actor.name === "string" ? actor.name : actor.name?.toString() ?? null;
+    typeof actor.name === "string"
+      ? actor.name
+      : (actor.name?.toString() ?? null);
   const profileUrl =
     actor.url instanceof URL
       ? actor.url.href
@@ -204,7 +205,7 @@ async function upsertRemoteActor(actor: {
         name,
         profile_url: profileUrl,
         fetched_at: sql`now()`,
-      })
+      }),
     )
     .returning("id")
     .executeTakeFirstOrThrow();
@@ -239,7 +240,7 @@ federation
         remote_actor_id: remoteActorId,
       })
       .onConflict((oc) =>
-        oc.columns(["user_id", "remote_actor_id"]).doNothing()
+        oc.columns(["user_id", "remote_actor_id"]).doNothing(),
       )
       .execute();
 
@@ -249,7 +250,7 @@ federation
       new Accept({
         actor: ctx.getActorUri(identifier),
         object: follow,
-      })
+      }),
     );
   })
   .on(Undo, async (ctx, undo) => {
@@ -275,54 +276,59 @@ federation
         eb
           .selectFrom("remote_actors")
           .select("id")
-          .where("iri", "=", actorId.href)
+          .where("iri", "=", actorId.href),
       )
       .execute();
   });
 
-federation.setFollowersDispatcher(
-  "/users/{identifier}/followers",
-  async (_ctx, identifier, cursor) => {
-    const user = await db
-      .selectFrom("users")
-      .select("id")
-      .where("login_name", "=", identifier)
-      .executeTakeFirst();
-    if (!user) return null;
+federation
+  .setFollowersDispatcher(
+    "/users/{identifier}/followers",
+    async (_ctx, identifier, cursor) => {
+      const user = await db
+        .selectFrom("users")
+        .select("id")
+        .where("login_name", "=", identifier)
+        .executeTakeFirst();
+      if (!user) return null;
 
-    const pageSize = 50;
-    const offset = cursor ? Number.parseInt(cursor, 10) : 0;
-    if (Number.isNaN(offset) || offset < 0) return null;
+      const pageSize = 50;
+      const offset = cursor ? Number.parseInt(cursor, 10) : 0;
+      if (Number.isNaN(offset) || offset < 0) return null;
 
-    const rows = await db
-      .selectFrom("followers")
-      .innerJoin("remote_actors", "remote_actors.id", "followers.remote_actor_id")
-      .select([
-        "remote_actors.iri as iri",
-        "remote_actors.inbox_iri as inbox_iri",
-        "remote_actors.shared_inbox_iri as shared_inbox_iri",
-      ])
-      .where("followers.user_id", "=", user.id)
-      .orderBy("followers.id", "asc")
-      .limit(pageSize + 1)
-      .offset(offset)
-      .execute();
+      const rows = await db
+        .selectFrom("followers")
+        .innerJoin(
+          "remote_actors",
+          "remote_actors.id",
+          "followers.remote_actor_id",
+        )
+        .select([
+          "remote_actors.iri as iri",
+          "remote_actors.inbox_iri as inbox_iri",
+          "remote_actors.shared_inbox_iri as shared_inbox_iri",
+        ])
+        .where("followers.user_id", "=", user.id)
+        .orderBy("followers.id", "asc")
+        .limit(pageSize + 1)
+        .offset(offset)
+        .execute();
 
-    const hasMore = rows.length > pageSize;
-    const items = rows.slice(0, pageSize).map((r) => ({
-      id: new URL(r.iri),
-      inboxId: new URL(r.inbox_iri),
-      endpoints: r.shared_inbox_iri
-        ? { sharedInbox: new URL(r.shared_inbox_iri) }
-        : null,
-    }));
+      const hasMore = rows.length > pageSize;
+      const items = rows.slice(0, pageSize).map((r) => ({
+        id: new URL(r.iri),
+        inboxId: new URL(r.inbox_iri),
+        endpoints: r.shared_inbox_iri
+          ? { sharedInbox: new URL(r.shared_inbox_iri) }
+          : null,
+      }));
 
-    return {
-      items,
-      nextCursor: hasMore ? String(offset + pageSize) : null,
-    };
-  }
-)
+      return {
+        items,
+        nextCursor: hasMore ? String(offset + pageSize) : null,
+      };
+    },
+  )
   .setCounter(async (_ctx, identifier) => {
     const user = await db
       .selectFrom("users")
@@ -346,7 +352,7 @@ async function loadActivityByIri<T extends Activity>(
   ctx: Parameters<Parameters<typeof federation.setOutboxDispatcher>[1]>[0],
   identifier: string,
   matchColumn: "id" | "object_iri",
-  iri: string
+  iri: string,
 ): Promise<T | null> {
   const user = await db
     .selectFrom("users")
@@ -375,7 +381,7 @@ federation.setObjectDispatcher(
   async (ctx, { identifier, id }) => {
     const iri = ctx.getObjectUri(Create, { identifier, id }).href;
     return loadActivityByIri(Create, ctx, identifier, "id", iri);
-  }
+  },
 );
 
 federation.setObjectDispatcher(
@@ -388,12 +394,12 @@ federation.setObjectDispatcher(
       ctx,
       identifier,
       "object_iri",
-      iri
+      iri,
     );
     if (!create) return null;
     const object = await create.getObject(ctx);
     return object instanceof Note ? object : null;
-  }
+  },
 );
 
 federation
@@ -426,15 +432,15 @@ federation
           Activity.fromJsonLd(row.payload, {
             contextLoader: ctx.contextLoader,
             documentLoader: ctx.documentLoader,
-          })
-        )
+          }),
+        ),
       );
 
       return {
         items,
         nextCursor: hasMore ? String(offset + pageSize) : null,
       };
-    }
+    },
   )
   .setCounter(async (_ctx, identifier) => {
     const user = await db
@@ -478,15 +484,18 @@ export async function dispatchSiteUpdate(userId: number): Promise<void> {
       eb(
         "site_updated_at",
         ">",
-        eb.fn.coalesce("last_activity_sent_at", sql<Date>`'epoch'::timestamptz`)
-      )
+        eb.fn.coalesce(
+          "last_activity_sent_at",
+          sql<Date>`'epoch'::timestamptz`,
+        ),
+      ),
     )
     .where("site_updated_at", "<", QUIET_PERIOD)
     .where((eb) =>
       eb.or([
         eb("last_activity_sent_at", "is", null),
         eb("last_activity_sent_at", "<", COOLDOWN_WINDOW),
-      ])
+      ]),
     )
     .returning("login_name")
     .executeTakeFirst();
@@ -599,7 +608,7 @@ export async function dispatchActorUpdate(userId: number): Promise<void> {
  */
 export async function dispatchActorDelete(
   userId: number,
-  loginName: string
+  loginName: string,
 ): Promise<void> {
   const baseUrl = new URL(process.env.BASE_URL ?? "http://localhost:3000");
   const ctx = federation.createContext(baseUrl, undefined);

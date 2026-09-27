@@ -1,7 +1,7 @@
 import { validateRequest } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import DatabaseManager from "./DatabaseManager";
-import { getHomepageUrl } from "@/lib/utils";
+import { getHomepageUrl } from "@/lib/site-urls";
 import { userHasFeature } from "@/lib/entitlements";
 
 export default async function DatabasePage() {

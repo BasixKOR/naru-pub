@@ -20,7 +20,7 @@ import DirectoryBreadcrumb from "./DirectoryBreadcrumb";
 import { validateRequest } from "@/lib/auth";
 import { EDITABLE_FILE_EXTENSIONS } from "@/lib/const";
 import { s3Client } from "@/lib/s3";
-import { getPublicAssetUrl, getUserHomeDirectory } from "@/lib/utils";
+import { getPublicAssetUrl, getUserHomeDirectory } from "@/lib/site-urls";
 import EditFilenameButton from "./EditFilenameButton";
 
 export default async function DirectoryListing({ paths }: { paths: string[] }) {

@@ -1,6 +1,6 @@
 import { ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { s3Client } from "./s3";
-import { getUserHomeDirectory } from "./utils";
+import { getUserHomeDirectory } from "./site-urls";
 
 export interface FileNode {
   name: string;

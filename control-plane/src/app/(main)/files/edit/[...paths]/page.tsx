@@ -2,7 +2,7 @@ import path from "path";
 import { validateRequest } from "@/lib/auth";
 import { HeadObjectCommand, NotFound } from "@aws-sdk/client-s3";
 import { s3Client } from "@/lib/s3";
-import { getUserHomeDirectory } from "@/lib/utils";
+import { getUserHomeDirectory } from "@/lib/site-urls";
 import { buildFileTree } from "@/lib/fileUtils";
 import FileExplorerWithSelected from "@/components/browser/FileExplorerWithSelected";
 

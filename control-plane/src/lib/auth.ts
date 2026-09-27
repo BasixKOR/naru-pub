@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { cookies } from "next/headers";
-import { randomBytes } from "crypto";
 import { db } from "./database";
+import { generateId } from "./id";
 
 // Lucia v3's default session cookie name. Kept identical so sessions issued
 // before this migration stay valid.
@@ -12,19 +12,6 @@ const SESSION_EXPIRES_IN_MS = 1000 * 60 * 60 * 24 * 30;
 // Lucia set cookies with `expires: false`, i.e. a very long lived cookie. The
 // session row in the database is the real source of truth for validity.
 const SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 400;
-
-const ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
-
-// Drop-in replacement for Lucia's `generateId`: a random lowercase
-// alphanumeric string of the given length.
-export function generateId(length: number): string {
-  const bytes = randomBytes(length);
-  let id = "";
-  for (let i = 0; i < length; i++) {
-    id += ID_ALPHABET[bytes[i] % ID_ALPHABET.length];
-  }
-  return id;
-}
 
 export interface User {
   id: number;
@@ -53,10 +40,8 @@ export async function createSession(userId: number): Promise<Session> {
 }
 
 export async function validateSession(
-  sessionId: string
-): Promise<
-  { user: User; session: Session } | { user: null; session: null }
-> {
+  sessionId: string,
+): Promise<{ user: User; session: Session } | { user: null; session: null }> {
   const row = await db
     .selectFrom("sessions")
     .innerJoin("users", "users.id", "sessions.user_id")
@@ -146,8 +131,7 @@ export const validateRequest = cache(
   async (): Promise<
     { user: User; session: Session } | { user: null; session: null }
   > => {
-    const sessionId =
-      (await cookies()).get(SESSION_COOKIE_NAME)?.value ?? null;
+    const sessionId = (await cookies()).get(SESSION_COOKIE_NAME)?.value ?? null;
     if (!sessionId) {
       return {
         user: null,
@@ -166,5 +150,5 @@ export const validateRequest = cache(
       }
     } catch {}
     return result;
-  }
+  },
 );

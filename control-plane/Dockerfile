@@ -18,21 +18,6 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 RUN pnpm install --frozen-lockfile
 
-# Only what the compiled CLIs import at runtime; they bundle anything else. A
-# fresh install, because --prod over the full one leaves the devDependencies
-# in pnpm's store. The CLIs reach next only for next/headers, so its compiler,
-# which is for builds, goes too.
-FROM node:24-slim AS prod-deps
-
-WORKDIR /app
-
-RUN npm install --global pnpm@11.5.2
-
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-
-RUN pnpm install --frozen-lockfile --prod \
-    && rm -rf node_modules/.pnpm/@next+swc-*
-
 FROM deps AS cli-builder
 
 COPY tsconfig.json ./
@@ -40,6 +25,22 @@ COPY scripts/build-cli.mjs scripts/
 COPY src/ src/
 
 RUN pnpm run build:cli
+
+# Only the dependencies the compiled CLIs import, which the build lists in
+# dist/package.json; the web app's (Next, React, Monaco and the rest) stay
+# out. The lockfile is the full one, so every version it has for these is kept
+# as locked, and --frozen-lockfile, which would refuse the shorter manifest, is
+# off.
+FROM node:24-slim AS prod-deps
+
+WORKDIR /app
+
+RUN npm install --global pnpm@11.5.2
+
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY --from=cli-builder /app/dist/package.json ./
+
+RUN pnpm install --prod --no-frozen-lockfile
 
 FROM deps AS builder
 
@@ -111,7 +112,7 @@ ENV NEXT_PUBLIC_DOMAIN=$NEXT_PUBLIC_DOMAIN
 ENV NODE_OPTIONS=--enable-source-maps
 
 COPY --from=prod-deps /app/node_modules node_modules/
-COPY package.json ./
+COPY --from=prod-deps /app/package.json ./
 COPY --from=cli-builder /app/dist dist/
 
 # docker-compose.yml gives each service its own command.

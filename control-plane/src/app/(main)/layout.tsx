@@ -4,7 +4,7 @@ import Link from "next/link";
 import { validateRequest } from "@/lib/auth";
 import Image from "next/image";
 import { Toaster } from "@/components/ui/sonner";
-import { getHomepageUrl } from "@/lib/utils";
+import { getHomepageUrl } from "@/lib/site-urls";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ModeToggle } from "@/components/ModeToggle";
 import { hasSupportRelationship, PAYMENT_OPERATOR_USERS } from "@/lib/support";

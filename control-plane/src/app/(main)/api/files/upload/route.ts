@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
-import { getUserHomeDirectory } from "@/lib/utils";
+import { getUserHomeDirectory } from "@/lib/site-urls";
 import { revalidatePath } from "next/cache";
 import { User } from "@/lib/auth";
 import * as Sentry from "@sentry/nextjs";

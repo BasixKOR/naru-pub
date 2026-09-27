@@ -13,7 +13,7 @@ import {
   IMAGE_FILE_EXTENSIONS,
   AUDIO_FILE_EXTENSIONS,
 } from "@/lib/const";
-import { getPublicAssetUrl } from "@/lib/utils";
+import { getPublicAssetUrl } from "@/lib/site-urls";
 import Editor from "@/components/Editor";
 import ImageViewer, { ImageViewerRef } from "./ImageViewer";
 import { Button } from "@/components/ui/button";

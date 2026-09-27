@@ -60,8 +60,8 @@ await rm("dist", { recursive: true, force: true });
 const results = [
   await build({
     ...common,
-    // env.ts and load-env.ts are imported by the others, not run on their own.
-    entryPoints: await sources("src/cli", /^(?!(load-)?env\.)[^.]+\.tsx?$/),
+    // env.ts is imported by the others, not run on its own.
+    entryPoints: await sources("src/cli", /^(?!env\.)[^.]+\.tsx?$/),
     outdir: "dist/cli",
     bundle: true,
     external,

@@ -4,19 +4,11 @@ import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
 import { assertJsonContentType } from "@/lib/utils";
 import { getUserObjectKey } from "@/lib/site-urls";
+import { assertNoPathTraversal } from "@/lib/file-paths";
 import { User } from "@/lib/auth";
 import * as Sentry from "@sentry/nextjs";
 import { recordSiteEdit } from "@/lib/database";
 import { revalidatePath } from "next/cache";
-
-function assertNoPathTraversal(filename: string) {
-  if (filename.includes("..")) {
-    throw new Error("Path traversal detected in filename.");
-  }
-  if (filename.startsWith("/")) {
-    throw new Error("Absolute path detected in filename.");
-  }
-}
 
 async function invalidateCloudflareCacheSingleFile(
   user: User,

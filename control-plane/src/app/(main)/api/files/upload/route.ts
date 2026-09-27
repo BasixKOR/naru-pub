@@ -3,6 +3,7 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
 import { getUserObjectKey } from "@/lib/site-urls";
+import { assertNoPathTraversal, assertPlainFilename } from "@/lib/file-paths";
 import { revalidatePath } from "next/cache";
 import { User } from "@/lib/auth";
 import * as Sentry from "@sentry/nextjs";
@@ -51,15 +52,6 @@ function validateFilename(filename: string) {
   const nameWithoutExt = filename.split(".")[0].toUpperCase();
   if (reservedNames.includes(nameWithoutExt)) {
     throw new Error("예약된 파일명입니다.");
-  }
-}
-
-function assertNoPathTraversal(filename: string) {
-  if (filename.includes("..")) {
-    throw new Error("Path traversal detected in filename.");
-  }
-  if (filename.startsWith("/")) {
-    throw new Error("Absolute path detected in filename.");
   }
 }
 
@@ -125,10 +117,8 @@ async function uploadSingleFile(user: User, directory: string, file: File) {
 
   try {
     assertNoPathTraversal(directory);
+    assertPlainFilename(file.name);
     assertAllowedFilename(file.name);
-    if (directory.length > 1000) {
-      throw new Error("디렉토리 경로가 너무 깁니다.");
-    }
   } catch (e: any) {
     return { success: false, message: e.message };
   }

@@ -8,19 +8,11 @@ import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
 import { assertJsonContentType } from "@/lib/utils";
 import { getUserObjectKey } from "@/lib/site-urls";
+import { assertNoPathTraversal } from "@/lib/file-paths";
 import { revalidatePath } from "next/cache";
 import { User } from "@/lib/auth";
 import { DEFAULT_INDEX_HTML, FILE_EXTENSION_MIMETYPE_MAP } from "@/lib/const";
 import { recordSiteEdit } from "@/lib/database";
-
-function assertNoPathTraversal(filename: string) {
-  if (filename.includes("..")) {
-    throw new Error("Path traversal detected in filename.");
-  }
-  if (filename.startsWith("/")) {
-    throw new Error("Absolute path detected in filename.");
-  }
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -52,9 +44,6 @@ export async function POST(request: NextRequest) {
 
     try {
       assertNoPathTraversal(directory);
-      if (directory.length > 1000) {
-        throw new Error("디렉토리 경로가 너무 깁니다.");
-      }
     } catch (e: any) {
       return NextResponse.json(
         { success: false, message: e.message },

@@ -4,6 +4,7 @@ import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
 import { assertJsonContentType } from "@/lib/utils";
 import { getUserObjectKey } from "@/lib/site-urls";
+import { assertNoPathTraversal, assertPlainFilename } from "@/lib/file-paths";
 import { revalidatePath } from "next/cache";
 import { User } from "@/lib/auth";
 import * as Sentry from "@sentry/nextjs";
@@ -47,15 +48,6 @@ function validateFilename(filename: string) {
   const nameWithoutExt = filename.split(".")[0].toUpperCase();
   if (reservedNames.includes(nameWithoutExt)) {
     throw new Error("예약된 파일명입니다.");
-  }
-}
-
-function assertNoPathTraversal(filename: string) {
-  if (filename.includes("..")) {
-    throw new Error("Path traversal detected in filename.");
-  }
-  if (filename.startsWith("/")) {
-    throw new Error("Absolute path detected in filename.");
   }
 }
 
@@ -114,15 +106,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Calculate new full path
-    const pathParts = oldFilename.split("/");
-    pathParts[pathParts.length - 1] = newFilename;
-    const newPath = pathParts.join("/");
-
+    let newPath: string;
     try {
       assertNoPathTraversal(oldFilename);
-      assertNoPathTraversal(newPath);
+      // Renaming stays within the file's directory; /api/files/move moves.
+      assertPlainFilename(newFilename);
       validateFilename(newFilename);
+
+      // Calculate new full path
+      const pathParts = oldFilename.split("/");
+      pathParts[pathParts.length - 1] = newFilename;
+      newPath = pathParts.join("/");
+      assertNoPathTraversal(newPath);
     } catch (e: any) {
       return NextResponse.json(
         { success: false, message: e.message },

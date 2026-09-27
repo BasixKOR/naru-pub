@@ -4,6 +4,7 @@ import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
 import { assertJsonContentType } from "@/lib/utils";
 import { getUserObjectKey } from "@/lib/site-urls";
+import { assertNoPathTraversal } from "@/lib/file-paths";
 import { User } from "@/lib/auth";
 import * as Sentry from "@sentry/nextjs";
 import {
@@ -12,15 +13,6 @@ import {
 } from "@/lib/const";
 import { db, recordSiteEdit } from "@/lib/database";
 import { extractHtmlTitle } from "@/lib/html";
-
-function assertNoPathTraversal(filename: string) {
-  if (filename.includes("..")) {
-    throw new Error("Path traversal detected in filename.");
-  }
-  if (filename.startsWith("/")) {
-    throw new Error("Absolute path detected in filename.");
-  }
-}
 
 function assertEditableFilename(filename: string) {
   const extension = filename.split(".").pop();

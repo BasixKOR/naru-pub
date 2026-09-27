@@ -8,6 +8,7 @@ import { validateRequest } from "@/lib/auth";
 import { s3Client } from "@/lib/s3";
 import { assertJsonContentType } from "@/lib/utils";
 import { collapseSlashes, getUserObjectKey } from "@/lib/site-urls";
+import { assertNoPathTraversal } from "@/lib/file-paths";
 import { revalidatePath } from "next/cache";
 import { User } from "@/lib/auth";
 import * as Sentry from "@sentry/nextjs";
@@ -60,23 +61,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get filename from source path
-    const fileName = sourcePath.split("/").pop();
-    if (!fileName) {
+    let fileName: string | undefined;
+    let newPath: string;
+    try {
+      assertNoPathTraversal(sourcePath);
+      if (targetDirectory) {
+        assertNoPathTraversal(targetDirectory);
+      }
+
+      // Get filename from source path
+      fileName = sourcePath.split("/").pop();
+      if (!fileName) {
+        throw new Error("유효하지 않은 파일 경로입니다.");
+      }
+
+      // Calculate new path
+      newPath = collapseSlashes(
+        targetDirectory ? `${targetDirectory}/${fileName}` : fileName,
+      );
+      assertNoPathTraversal(newPath);
+    } catch (e: any) {
       return NextResponse.json(
-        { success: false, message: "유효하지 않은 파일 경로입니다." },
+        { success: false, message: e.message },
         { status: 400 },
       );
     }
 
-    // Calculate new path
-    const newPath = targetDirectory
-      ? `${targetDirectory}/${fileName}`
-      : fileName;
-
     // If source and target are the same key, no need to move. Copying an
     // object onto itself and then deleting the source would lose it.
-    if (collapseSlashes(sourcePath) === collapseSlashes(newPath)) {
+    if (collapseSlashes(sourcePath) === newPath) {
       return NextResponse.json({
         success: true,
         message: "파일이 이미 해당 위치에 있습니다.",

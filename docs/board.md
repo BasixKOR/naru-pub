@@ -70,12 +70,8 @@ Code: `control-plane/src/lib/board/` (logic), `src/app/(main)/board/` (pages),
   2. `apply` works the plan out again on the server. With backup on (the
      default), it first copies each file it will overwrite into
      `.backup/<Seoul time>/`. Then it copies the template's files in, creates
-     the collections, and records the application.
-- **Undo** (in the dialog, or at `/board/applications`):
-  - Files the application created are deleted.
-  - Files it overwrote are restored from the backup. With no backup, they are
-    left as the template wrote them.
-  - Collections and the backup folder are kept.
+     the collections, and records the application. Nothing undoes an
+     application; the backup folder is where the originals are.
 - **`apply_count`** counts distinct people, not applications.
 - **Previews** show the snapshot, never the author's live site. Publishing
   sends a Postgres `NOTIFY` on `board_template_published`. The cron process,
@@ -88,9 +84,8 @@ Code: `control-plane/src/lib/board/` (logic), `src/app/(main)/board/` (pages),
   longer tried. `update-screenshots --templates --force` renders every live
   version again.
 - **Deletion**: deleting a template post removes its R2 files and previews.
-  The database rows stay, so people who applied it keep their history and can
-  still undo. Deleting an account also removes that user's `_templates/`
-  objects.
+  The database rows stay, so the record of who applied it is kept. Deleting an
+  account also removes that user's `_templates/` objects.
 
 ## Routes
 
@@ -102,7 +97,6 @@ Code: `control-plane/src/lib/board/` (logic), `src/app/(main)/board/` (pages),
 | `/board/[postId]/edit`                | edit; publish a new template version             |
 | `/board/[postId]/replies/[replyId]`   | a reply and everything under it (permalink)      |
 | `/board/notifications`                | my reply notifications                           |
-| `/board/applications`                 | templates I applied, with undo                   |
 
 Every API route takes JSON only, including DELETE, and refuses cross-origin
 requests (`readJson`):
@@ -113,7 +107,6 @@ requests (`readJson`):
 - `PATCH`/`DELETE /api/board/replies/[id]`, `PUT`/`DELETE …/like`
 - `POST /api/board/templates/[id]/versions`
 - `POST /api/board/template-versions/[id]/apply/plan`, `POST …/apply`
-- `POST /api/board/template-applications/[id]/undo`
 - `POST /api/board/notifications/read`
 
 ## Tests

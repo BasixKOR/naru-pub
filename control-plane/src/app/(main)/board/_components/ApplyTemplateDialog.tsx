@@ -107,24 +107,6 @@ export function ApplyTemplateDialog({
     }
   }
 
-  async function undo(applicationId: string) {
-    if (!window.confirm("적용하기 전으로 되돌릴까요?")) return;
-    setBusy(true);
-    try {
-      await boardRequest(
-        `/api/board/template-applications/${applicationId}/undo`,
-        "POST",
-      );
-      toast.success("되돌렸어요.");
-      close();
-      router.refresh();
-    } catch (error: any) {
-      toast.error(error.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   const overwrites =
     step.name === "review"
       ? step.plan.files.filter((file) => file.action === "overwrite")
@@ -337,8 +319,7 @@ export function ApplyTemplateDialog({
                       </span>
                       <span className="block text-xs text-muted-foreground">
                         덮어쓰는 파일 {overwrites.length}개를 /.backup/ 폴더에
-                        옮겨 둬요. 보관해 두면 「되돌리기」로 원래대로 돌릴 수
-                        있어요.
+                        옮겨 둬요. 필요하면 파일 관리에서 꺼내 쓸 수 있어요.
                       </span>
                     </span>
                   </label>
@@ -445,14 +426,6 @@ export function ApplyTemplateDialog({
                   >
                     내 사이트에서 보기 ↗
                   </a>
-                  <button
-                    type="button"
-                    onClick={() => undo(step.result.applicationId)}
-                    disabled={busy}
-                    className="h-11 border border-border px-4 text-sm"
-                  >
-                    되돌리기
-                  </button>
                   <button
                     type="button"
                     onClick={close}

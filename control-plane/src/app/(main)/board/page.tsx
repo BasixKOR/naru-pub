@@ -229,16 +229,6 @@ export default async function BoardPage({
                   <strong className="text-foreground">답글</strong> — 답글에
                   답글을 달 수 있어요. 글을 쓰려면 이메일 인증이 필요해요.
                 </p>
-                {user && (
-                  <p>
-                    <Link
-                      href="/board/applications"
-                      className="text-primary hover:underline"
-                    >
-                      내가 적용한 템플릿 →
-                    </Link>
-                  </p>
-                )}
               </div>
             </section>
           </aside>

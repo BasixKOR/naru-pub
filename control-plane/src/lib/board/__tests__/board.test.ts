@@ -75,7 +75,6 @@ const {
   planApplication,
   publishTemplatePost,
   publishTemplateVersion,
-  undoApplication,
 } = require("../templates") as typeof import("../templates");
 
 // Runs against a disposable, migrated database (scripts/test-board.sh), never
@@ -397,7 +396,7 @@ integration("board", () => {
       });
     });
 
-    test("applies into a folder, backs up what it overwrites, and undoes", async () => {
+    test("applies into a folder and backs up what it overwrites", async () => {
       put("alice/retro/index.html");
       put("alice/retro/guestbook.js", "application/javascript");
       await db
@@ -460,20 +459,10 @@ integration("board", () => {
       expect(bucket.has("bob/retro-home/index.html")).toBe(true);
       expect((await getTemplateForPost(postId))?.applyCount).toBe(1);
 
-      await undoApplication(bob, result.applicationId);
-      expect(bucket.get("bob/index.html")?.size).toBe(5);
-      expect(bucket.has("bob/guestbook.js")).toBe(false);
-      await expect(
-        undoApplication(bob, result.applicationId),
-      ).rejects.toMatchObject({ status: 409 });
-      await expect(
-        undoApplication(carol, result.applicationId),
-      ).rejects.toMatchObject({ status: 404 });
-
       expect(templateId).toBeDefined();
     });
 
-    test("without a backup, undo leaves overwritten files in place", async () => {
+    test("without a backup, nothing is kept", async () => {
       put("alice/retro/index.html");
       const { postId } = await publish();
       const versionId = (await getTemplateForPost(postId))!.versions[0].id;
@@ -484,8 +473,10 @@ integration("board", () => {
         createCollections: true,
       });
       expect(result.backupPath).toBeNull();
-      await undoApplication(carol, result.applicationId);
-      expect(bucket.has("carol/index.html")).toBe(true);
+      expect(bucket.get("carol/index.html")?.size).toBe(10);
+      expect(
+        [...bucket.keys()].some((key) => key.startsWith("carol/.backup/")),
+      ).toBe(false);
     });
 
     test("new versions snapshot again and keep the old files", async () => {

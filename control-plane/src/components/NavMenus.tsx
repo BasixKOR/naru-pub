@@ -8,7 +8,6 @@ import {
   BarChart3,
   Bell,
   Database,
-  Download,
   Github,
   Globe2,
   Globe,
@@ -217,12 +216,6 @@ export function AccountMenu({
           <Link href="/board/notifications" className="flex items-center gap-2">
             <Bell size={16} />
             게시판 알림
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link href="/board/applications" className="flex items-center gap-2">
-            <Download size={16} />
-            적용한 템플릿
           </Link>
         </DropdownMenuItem>
         {supporter && (

@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/board/access";
 import { isPostKind } from "@/lib/board/constants";
-import {
-  BoardError,
-  boardErrorResponse,
-  parseId,
-  readJson,
-} from "@/lib/board/errors";
+import { BoardError, boardErrorResponse, readJson } from "@/lib/board/errors";
 import { createPost } from "@/lib/board/posts";
 import { publishTemplatePost } from "@/lib/board/templates";
 import { dispatchTemplatePost } from "@/lib/federation";
@@ -33,14 +28,9 @@ export async function POST(request: NextRequest) {
       body: body.body,
       slug: body.slug,
       license: body.license,
-      remixAllowed: body.remixAllowed,
       folder: body.folder,
       exclude: body.exclude,
       collections: body.collections,
-      remixedFromVersionId:
-        body.remixedFromVersionId == null
-          ? null
-          : parseId(body.remixedFromVersionId),
     });
     // The post is up whether or not the fediverse hears about it.
     try {

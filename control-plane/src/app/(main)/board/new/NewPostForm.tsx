@@ -30,11 +30,9 @@ function slugFrom(folder: string): string {
 export function NewPostForm({
   initialKind,
   collections,
-  remix,
 }: {
   initialKind: PostKind;
   collections: string[];
-  remix: { versionId: string; title: string; authorLoginName: string } | null;
 }) {
   const router = useRouter();
   const [kind, setKind] = useState<PostKind>(initialKind);
@@ -47,7 +45,6 @@ export function NewPostForm({
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
   const [license, setLicense] = useState<License>("cc-by-4.0");
-  const [remixAllowed, setRemixAllowed] = useState(true);
   const [chosenCollections, setChosenCollections] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -65,11 +62,9 @@ export function NewPostForm({
               body,
               slug: effectiveSlug,
               license,
-              remixAllowed,
               folder: selection.folder,
               exclude: selection.exclude,
               collections: chosenCollections,
-              remixedFromVersionId: remix?.versionId ?? null,
             }
           : { kind, title, body };
       const { postId } = await boardRequest<{ postId: string }>(
@@ -113,13 +108,6 @@ export function NewPostForm({
           </p>
         )}
       </fieldset>
-
-      {remix && kind === "template" && (
-        <p className="border border-primary bg-primary/5 p-3 text-sm">
-          {remix.authorLoginName}의 「{remix.title}」을(를) 리믹스해요. 먼저 그
-          템플릿을 내 사이트에 적용해서 고친 다음, 그 폴더를 골라 주세요.
-        </p>
-      )}
 
       <div className="space-y-2">
         <label htmlFor="post-title" className="text-sm font-bold">
@@ -166,7 +154,7 @@ export function NewPostForm({
             </p>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div>
             <div className="space-y-2">
               <label htmlFor="template-license" className="text-sm font-bold">
                 라이선스
@@ -184,15 +172,6 @@ export function NewPostForm({
                 ))}
               </select>
             </div>
-            <label className="flex h-11 items-center gap-3 self-end border border-border px-3 text-sm">
-              <input
-                type="checkbox"
-                checked={remixAllowed}
-                onChange={(event) => setRemixAllowed(event.target.checked)}
-                className="h-4 w-4 accent-primary"
-              />
-              리믹스해서 다시 공유해도 돼요
-            </label>
           </div>
 
           {collections.length > 0 && (

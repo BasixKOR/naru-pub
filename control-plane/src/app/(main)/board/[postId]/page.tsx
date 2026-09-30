@@ -140,20 +140,6 @@ export default async function PostPage({
                   {siteUrl.replace(/^https?:\/\//, "")} ↗
                 </a>
               </div>
-              {template?.remixedFrom && (
-                <p className="text-xs text-muted-foreground">
-                  원본:{" "}
-                  <Link
-                    href={`/board/${template.remixedFrom.postId}`}
-                    className="text-primary hover:underline"
-                  >
-                    {template.remixedFrom.authorLoginName}의 「
-                    {template.remixedFrom.title}」 v
-                    {template.remixedFrom.version}
-                  </Link>{" "}
-                  리믹스
-                </p>
-              )}
             </header>
 
             <div className="space-y-5 p-5">
@@ -291,26 +277,12 @@ export default async function PostPage({
               >
                 원작자 사이트에서 보기 ↗
               </a>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="border border-border bg-background p-3">
-                  <div className="text-xl font-bold text-primary">
-                    {template.applyCount}
-                  </div>
-                  <div className="text-xs text-muted-foreground">적용</div>
+              <div className="border border-border bg-background p-3">
+                <div className="text-xl font-bold text-primary">
+                  {template.applyCount}
                 </div>
-                <div className="border border-border bg-background p-3">
-                  <div className="text-xl font-bold">{template.remixCount}</div>
-                  <div className="text-xs text-muted-foreground">리믹스</div>
-                </div>
+                <div className="text-xs text-muted-foreground">적용</div>
               </div>
-              {template.remixAllowed && user && (
-                <Link
-                  href={`/board/new?kind=template&remix=${latest.id}`}
-                  className="block text-center text-xs text-primary hover:underline"
-                >
-                  고쳐서 내 템플릿으로 공유하기 (리믹스)
-                </Link>
-              )}
             </section>
 
             <section className="border-2 border-border bg-card">
@@ -328,8 +300,6 @@ export default async function PostPage({
                 </dd>
                 <dt className="text-muted-foreground">라이선스</dt>
                 <dd>{LICENSES[template.license]}</dd>
-                <dt className="text-muted-foreground">리믹스</dt>
-                <dd>{template.remixAllowed ? "허용" : "허용 안 함"}</dd>
                 <dt className="text-muted-foreground">크기</dt>
                 <dd>
                   파일 {latest.fileCount}개 · {formatBytes(latest.sizeBytes)}

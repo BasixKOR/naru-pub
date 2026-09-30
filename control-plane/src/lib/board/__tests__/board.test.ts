@@ -316,11 +316,9 @@ integration("board", () => {
         body: "설명",
         slug: `retro-${Math.random().toString(36).slice(2, 8)}`,
         license: "cc-by-4.0",
-        remixAllowed: true,
         folder: "retro",
         exclude: ["retro/drafts/"],
         collections: [],
-        remixedFromVersionId: null,
         ...overrides,
       });
     }
@@ -509,46 +507,6 @@ integration("board", () => {
       ]);
       expect(bucket.has(`_templates/${templateId}/v1/index.html`)).toBe(true);
       expect(bucket.has(`_templates/${templateId}/v2/new.css`)).toBe(true);
-    });
-
-    test("remixes count on the source and respect remix_allowed", async () => {
-      put("alice/retro/index.html");
-      put("bob/mine/index.html");
-      const closed = await publish({ remixAllowed: false });
-      const closedVersion = (await getTemplateForPost(closed.postId))!
-        .versions[0].id;
-      await expect(
-        publishTemplatePost(bob, {
-          title: "리믹스",
-          body: "",
-          slug: "remix-closed",
-          license: "cc0-1.0",
-          remixAllowed: true,
-          folder: "mine",
-          exclude: [],
-          collections: [],
-          remixedFromVersionId: closedVersion,
-        }),
-      ).rejects.toMatchObject({ status: 403 });
-
-      const open = await publish();
-      const openVersion = (await getTemplateForPost(open.postId))!.versions[0]
-        .id;
-      const remix = await publishTemplatePost(bob, {
-        title: "리믹스",
-        body: "",
-        slug: "remix-open",
-        license: "cc0-1.0",
-        remixAllowed: true,
-        folder: "mine",
-        exclude: [],
-        collections: [],
-        remixedFromVersionId: openVersion,
-      });
-      expect((await getTemplateForPost(open.postId))?.remixCount).toBe(1);
-      expect(
-        (await getTemplateForPost(remix.postId))?.remixedFrom?.postId,
-      ).toBe(open.postId);
     });
 
     test("deleted templates cannot be applied and lose their files", async () => {

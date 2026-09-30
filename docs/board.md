@@ -70,9 +70,6 @@ Code: `control-plane/src/lib/board/` (logic), `src/app/(main)/board/` (pages),
   - Files it overwrote are restored from the backup. With no backup, they are
     left as the template wrote them.
   - Collections and the backup folder are kept.
-- **Remixing**: when `remix_allowed` is set, anyone can publish their own
-  template that credits the source version. The source's `remix_count`
-  counts these.
 - **`apply_count`** counts distinct people, not applications.
 - **Previews**: the screenshot job (`update-screenshots`) renders up to ten
   unrendered versions per run from the author's live folder, which is the
@@ -90,7 +87,7 @@ Code: `control-plane/src/lib/board/` (logic), `src/app/(main)/board/` (pages),
 | page                                  | what                                             |
 | ------------------------------------- | ------------------------------------------------ |
 | `/board`                              | list; `?kind=`, `?sort=activity\|new\|applied`, `?page=` |
-| `/board/new`                          | compose; `?kind=`, `?remix=<versionId>`          |
+| `/board/new`                          | compose; `?kind=`                                |
 | `/board/[postId]`                     | post, template panel and apply dialog, reply tree |
 | `/board/[postId]/edit`                | edit; publish a new template version             |
 | `/board/[postId]/replies/[replyId]`   | a reply and everything under it (permalink)      |

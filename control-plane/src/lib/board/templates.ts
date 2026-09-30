@@ -268,11 +268,9 @@ export interface PublishTemplateInput {
   body: unknown;
   slug: unknown;
   license: unknown;
-  remixAllowed: unknown;
   folder: unknown;
   exclude: unknown;
   collections: unknown;
-  remixedFromVersionId: string | null;
 }
 
 // Creates a template post and publishes its first version in one step.
@@ -287,7 +285,6 @@ export async function publishTemplatePost(
     throw new BoardError(400, "라이선스를 골라 주세요.");
   }
   const license: License = input.license;
-  const remixAllowed = input.remixAllowed !== false;
   const folder = normalizeFolder(input.folder);
   const exclude = validateExclude(input.exclude);
   await assertCanPost(user.id);
@@ -300,21 +297,6 @@ export async function publishTemplatePost(
     .executeTakeFirst();
   if (taken) {
     throw new BoardError(409, `이미 「${slug}」라는 템플릿이 있어요.`);
-  }
-
-  if (input.remixedFromVersionId) {
-    const source = await db
-      .selectFrom("board_template_versions as v")
-      .innerJoin("board_templates as t", "t.id", "v.template_id")
-      .innerJoin("board_posts as p", "p.id", "t.post_id")
-      .select(["t.remix_allowed"])
-      .where("v.id", "=", input.remixedFromVersionId)
-      .where("p.deleted_at", "is", null)
-      .executeTakeFirst();
-    if (!source) throw new BoardError(404, "원본 템플릿을 찾을 수 없습니다.");
-    if (!source.remix_allowed) {
-      throw new BoardError(403, "원본 템플릿이 리믹스를 허용하지 않아요.");
-    }
   }
 
   const collections = await resolveCollections(user.id, input.collections);
@@ -338,8 +320,6 @@ export async function publishTemplatePost(
         user_id: user.id,
         slug,
         license,
-        remix_allowed: remixAllowed,
-        remixed_from_version_id: input.remixedFromVersionId,
       })
       .returning("id")
       .executeTakeFirstOrThrow();
@@ -371,20 +351,6 @@ export async function publishTemplatePost(
       .set({ latest_version_id: version.id })
       .where("id", "=", template.id)
       .execute();
-    if (input.remixedFromVersionId) {
-      await tx
-        .updateTable("board_templates")
-        .set({ remix_count: sql`remix_count + 1` })
-        .where(
-          "id",
-          "=",
-          tx
-            .selectFrom("board_template_versions")
-            .select("template_id")
-            .where("id", "=", input.remixedFromVersionId),
-        )
-        .execute();
-    }
     await copyIntoTemplate(template.id, 1, files);
     return { postId: post.id, templateId: template.id };
   });
@@ -488,15 +454,7 @@ export interface TemplateDetail {
   id: string;
   slug: string;
   license: License;
-  remixAllowed: boolean;
   applyCount: number;
-  remixCount: number;
-  remixedFrom: {
-    postId: string;
-    title: string;
-    authorLoginName: string;
-    version: number;
-  } | null;
   versions: {
     id: string;
     version: number;
@@ -516,28 +474,12 @@ export async function getTemplateForPost(
 ): Promise<TemplateDetail | null> {
   const template = await db
     .selectFrom("board_templates as t")
-    .leftJoin(
-      "board_template_versions as rv",
-      "rv.id",
-      "t.remixed_from_version_id",
-    )
-    .leftJoin("board_templates as rt", "rt.id", "rv.template_id")
-    .leftJoin("board_posts as rp", (join) =>
-      join.onRef("rp.id", "=", "rt.post_id").on("rp.deleted_at", "is", null),
-    )
-    .leftJoin("users as ru", "ru.id", "rp.user_id")
     .select([
       "t.id",
       "t.slug",
       "t.license",
-      "t.remix_allowed",
       "t.apply_count",
-      "t.remix_count",
       "t.latest_version_id",
-      "rp.id as remix_post_id",
-      "rp.title as remix_title",
-      "ru.login_name as remix_author",
-      "rv.version as remix_version",
     ])
     .where("t.post_id", "=", postId)
     .executeTakeFirst();
@@ -562,18 +504,7 @@ export async function getTemplateForPost(
     id: template.id,
     slug: template.slug,
     license: template.license,
-    remixAllowed: template.remix_allowed,
     applyCount: template.apply_count,
-    remixCount: template.remix_count,
-    remixedFrom:
-      template.remix_post_id && template.remix_title && template.remix_author
-        ? {
-            postId: template.remix_post_id,
-            title: template.remix_title,
-            authorLoginName: template.remix_author,
-            version: template.remix_version ?? 1,
-          }
-        : null,
     versions: versions.map((version) => ({
       id: version.id,
       version: version.version,

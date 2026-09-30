@@ -173,7 +173,7 @@ export default async function Home() {
           </CardContent>
         </Card>
 
-        <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
+        <div className="flex flex-col gap-8 lg:flex-row lg:items-stretch">
           <Card className="bg-card border-2 border-border shadow-lg min-w-0 flex-1">
             <CardHeader className="bg-secondary border-b-2 border-border">
               <div className="flex items-center justify-between gap-4">

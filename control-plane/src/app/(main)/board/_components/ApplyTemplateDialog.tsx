@@ -42,7 +42,6 @@ export function ApplyTemplateDialog({
   const dialogRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<HTMLButtonElement>(null);
 
-  const version = versions.find((v) => v.id === versionId);
   const targetPath = mode === "root" ? "" : folder;
   const cleanFolder = folder.trim().replace(/^\/+|\/+$/g, "");
   const targetPrefix = mode === "root" || !cleanFolder ? "" : `${cleanFolder}/`;
@@ -386,14 +385,6 @@ export function ApplyTemplateDialog({
                     </label>
                   </div>
                 )}
-
-                <pre className="overflow-x-auto border border-border bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground">
-                  {`$ template apply ${authorLoginName}/${slug}@v${version?.version ?? "?"} --into /${step.plan.targetPath}\n`}
-                  {overwrites.length > 0 && backup
-                    ? `  backup  ${overwrites.length}개 파일 → /.backup/\n`
-                    : ""}
-                  {`  write   ${step.plan.files.length}개 파일 (${formatBytes(step.plan.totalBytes)})`}
-                </pre>
 
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <span className="text-xs text-muted-foreground">

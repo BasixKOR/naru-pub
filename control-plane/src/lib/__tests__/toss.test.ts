@@ -7,6 +7,7 @@ import {
   test,
 } from "@jest/globals";
 import {
+  addInterval,
   chargeBillingKey,
   confirmPayment,
   isDefinitiveTossFailure,
@@ -134,6 +135,44 @@ describe("Toss payment requests", () => {
       false,
     );
   });
+
+  // A gateway error page is a response, not the caller's bad input. It has to
+  // surface as a TossApiError that stays ambiguous for a 5xx.
+  test("reports a non-JSON error page as an ambiguous Toss failure", async () => {
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: async () => {
+        throw new SyntaxError("Unexpected token <");
+      },
+    } as unknown as Response);
+
+    const error = await confirmPayment(
+      { paymentKey: "payment", orderId: "order", amount: 12000 },
+      "order",
+    ).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(TossApiError);
+    expect((error as TossApiError).status).toBe(502);
+    expect(isDefinitiveTossFailure(error)).toBe(false);
+  });
+});
+
+describe("billing periods", () => {
+  test.each([
+    ["2026-01-15T00:00:00", "month", "2026-02-15T00:00:00"],
+    ["2026-01-31T00:00:00", "month", "2026-02-28T00:00:00"],
+    ["2028-01-31T00:00:00", "month", "2028-02-29T00:00:00"],
+    ["2026-03-31T00:00:00", "month", "2026-04-30T00:00:00"],
+    ["2026-12-31T00:00:00", "month", "2027-01-31T00:00:00"],
+    ["2028-02-29T00:00:00", "year", "2029-02-28T00:00:00"],
+    ["2026-06-10T00:00:00", "year", "2027-06-10T00:00:00"],
+  ] as const)(
+    "%s plus one %s ends %s without spilling into the next month",
+    (from, interval, expected) => {
+      expect(addInterval(new Date(from), interval)).toEqual(new Date(expected));
+    },
+  );
 });
 
 // Toss rejects an orderId outside 6–64 characters of [A-Za-z0-9-_], and reuses

@@ -14,7 +14,12 @@ import {
   PLAN_ORDER_NAMES,
   TossApiError,
 } from "@/lib/toss";
-import { applySuccessfulCharge } from "@/lib/subscriptions";
+import {
+  applySuccessfulCharge,
+  claimSubscriptionForConfirm,
+  releaseSubscriptionLease,
+  scheduleSubscriptionStart,
+} from "@/lib/subscriptions";
 import { scheduledRecurringStart } from "@/lib/support-purchases";
 
 async function getOrCreateInitialChargeAttempt(opts: {
@@ -146,150 +151,41 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const interval = sub.billing_interval as BillingInterval;
-
-    // Issue a reusable billing key from the one-time authKey.
-    let billingKey = sub.toss_billing_key;
-    if (!billingKey) {
-      const issued = await issueBillingKey(authKey, customerKey);
-      billingKey = issued.billingKey;
-      await db
-        .updateTable("subscriptions")
-        .set({ toss_billing_key: billingKey, updated_at: new Date() })
+    // A doubled callback must not charge twice: only the request holding the
+    // lease issues the key and charges; the other reports the outcome.
+    const leasedAt = await claimSubscriptionForConfirm(sub.id);
+    if (!leasedAt) {
+      const latest = await db
+        .selectFrom("subscriptions")
+        .select("status")
         .where("id", "=", sub.id)
-        .execute();
-    }
-
-    const now = new Date();
-    const scheduledStart = scheduledRecurringStart(
-      userRow.supporter_until ?? null,
-      now,
-    );
-    if (scheduledStart) {
-      await db
-        .updateTable("subscriptions")
-        .set({
-          status: "scheduled",
-          current_period_start: null,
-          current_period_end: scheduledStart,
-          next_billing_at: scheduledStart,
-          failed_charge_count: 0,
-          charging_started_at: null,
-          canceled_at: null,
-          updated_at: now,
-        })
-        .where("id", "=", sub.id)
-        .execute();
-
-      return NextResponse.json({
-        success: true,
-        scheduled: true,
-        startsAt: scheduledStart.toISOString(),
-        message: "현재 결제 기간이 끝난 뒤 정기 결제가 시작됩니다.",
-      });
-    }
-
-    // Charge the first period.
-    const attempt = await getOrCreateInitialChargeAttempt({
-      subscriptionId: sub.id,
-      userId: user.id,
-      amount: sub.amount,
-    });
-    let payment;
-    try {
-      try {
-        const existingPayment = await getPaymentByOrderId(
-          attempt.order_id,
-          "billing",
-        );
-        if (existingPayment.status === "DONE") {
-          payment = existingPayment;
-        }
-      } catch (err) {
-        if (!(err instanceof TossApiError && err.status === 404)) {
-          throw err;
-        }
-      }
-
-      payment ??= await chargeBillingKey({
-        billingKey,
-        customerKey,
-        amount: sub.amount,
-        orderId: attempt.order_id,
-        orderName: PLAN_ORDER_NAMES[interval],
-        idempotencyKey: attempt.order_id,
-      });
-    } catch (err) {
-      // A transport error is ambiguous: Toss may have completed the charge.
-      // Keep the attempt pending so the next callback reconciles this orderId.
-      if (isDefinitiveTossFailure(err)) {
-        await db
-          .updateTable("payments")
-          .set({
-            status: "failed",
-            raw: JSON.stringify({ error: err.message }),
-          })
-          .where("id", "=", attempt.id)
-          .execute();
-      }
-      const message =
-        err instanceof TossApiError
-          ? err.message
-          : "결제 결과를 확인하고 있습니다. 잠시 후 다시 시도해 주세요.";
-      return NextResponse.json(
-        { success: false, message },
-        { status: isDefinitiveTossFailure(err) ? 402 : 503 },
-      );
-    }
-
-    if (payment.status !== "DONE") {
-      await db
-        .updateTable("payments")
-        .set({
-          ...paymentProviderMetadata(payment, "billing"),
-          toss_payment_key: payment.paymentKey,
-          order_id: payment.orderId ?? attempt.order_id,
-          amount: sub.amount,
-          status: "failed",
-          raw: JSON.stringify(payment),
-        })
-        .where("id", "=", attempt.id)
-        .execute();
-      return NextResponse.json(
-        { success: false, message: "결제가 완료되지 않았습니다." },
-        { status: 402 },
-      );
-    }
-
-    const period = await applySuccessfulCharge({
-      subscriptionId: sub.id,
-      userId: user.id,
-      interval,
-      amount: sub.amount,
-      from: now,
-      preserveExistingEntitlement: true,
-      payment,
-      paymentId: attempt.id,
-    });
-
-    if (userRow.email && userRow.email_verified_at) {
-      try {
-        await sendSupportThankYouEmail({
-          email: userRow.email,
-          loginName: userRow.login_name,
-          kind: "recurring",
-          amount: sub.amount,
-          supporterUntil: period.periodEnd,
+        .executeTakeFirst();
+      if (latest?.status === "active") {
+        return NextResponse.json({
+          success: true,
+          message: "이미 결제 중입니다.",
         });
-      } catch (error) {
-        console.error("Support thank-you email error:", error);
       }
+      return NextResponse.json(
+        {
+          success: false,
+          message: "결제를 처리하고 있습니다. 잠시 후 다시 확인해 주세요.",
+        },
+        { status: 409 },
+      );
     }
 
-    return NextResponse.json({
-      success: true,
-      message: "결제가 시작되었습니다. 감사합니다!",
-    });
+    try {
+      return await confirmClaimedSubscription({
+        sub,
+        userId: user.id,
+        userRow,
+        authKey,
+        customerKey,
+      });
+    } finally {
+      await releaseSubscriptionLease(sub.id, leasedAt);
+    }
   } catch (error) {
     console.error("Subscription confirm error:", error);
     return NextResponse.json(
@@ -297,4 +193,155 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+// Runs with the subscription's charge lease held.
+async function confirmClaimedSubscription(opts: {
+  sub: {
+    id: number;
+    billing_interval: string;
+    amount: number;
+    toss_billing_key: string | null;
+  };
+  userId: number;
+  userRow: {
+    email: string | null;
+    email_verified_at: Date | null;
+    login_name: string;
+    supporter_until: Date | null;
+  };
+  authKey: string;
+  customerKey: string;
+}) {
+  const { sub, userId, userRow, authKey, customerKey } = opts;
+  const interval = sub.billing_interval as BillingInterval;
+
+  // Issue a reusable billing key from the one-time authKey.
+  let billingKey = sub.toss_billing_key;
+  if (!billingKey) {
+    const issued = await issueBillingKey(authKey, customerKey);
+    billingKey = issued.billingKey;
+    await db
+      .updateTable("subscriptions")
+      .set({ toss_billing_key: billingKey, updated_at: new Date() })
+      .where("id", "=", sub.id)
+      .execute();
+  }
+
+  const now = new Date();
+  const scheduledStart = scheduledRecurringStart(
+    userRow.supporter_until ?? null,
+    now,
+  );
+  if (scheduledStart) {
+    await scheduleSubscriptionStart(sub.id, scheduledStart, now);
+
+    return NextResponse.json({
+      success: true,
+      scheduled: true,
+      startsAt: scheduledStart.toISOString(),
+      message: "현재 결제 기간이 끝난 뒤 정기 결제가 시작됩니다.",
+    });
+  }
+
+  // Charge the first period.
+  const attempt = await getOrCreateInitialChargeAttempt({
+    subscriptionId: sub.id,
+    userId,
+    amount: sub.amount,
+  });
+  let payment;
+  try {
+    try {
+      const existingPayment = await getPaymentByOrderId(
+        attempt.order_id,
+        "billing",
+      );
+      if (existingPayment.status === "DONE") {
+        payment = existingPayment;
+      }
+    } catch (err) {
+      if (!(err instanceof TossApiError && err.status === 404)) {
+        throw err;
+      }
+    }
+
+    payment ??= await chargeBillingKey({
+      billingKey,
+      customerKey,
+      amount: sub.amount,
+      orderId: attempt.order_id,
+      orderName: PLAN_ORDER_NAMES[interval],
+      idempotencyKey: attempt.order_id,
+    });
+  } catch (err) {
+    // A transport error is ambiguous: Toss may have completed the charge.
+    // Keep the attempt pending so the next callback reconciles this orderId.
+    if (isDefinitiveTossFailure(err)) {
+      await db
+        .updateTable("payments")
+        .set({
+          status: "failed",
+          raw: JSON.stringify({ error: err.message }),
+        })
+        .where("id", "=", attempt.id)
+        .execute();
+    }
+    const message =
+      err instanceof TossApiError
+        ? err.message
+        : "결제 결과를 확인하고 있습니다. 잠시 후 다시 시도해 주세요.";
+    return NextResponse.json(
+      { success: false, message },
+      { status: isDefinitiveTossFailure(err) ? 402 : 503 },
+    );
+  }
+
+  if (payment.status !== "DONE") {
+    await db
+      .updateTable("payments")
+      .set({
+        ...paymentProviderMetadata(payment, "billing"),
+        toss_payment_key: payment.paymentKey,
+        order_id: payment.orderId ?? attempt.order_id,
+        amount: sub.amount,
+        status: "failed",
+        raw: JSON.stringify(payment),
+      })
+      .where("id", "=", attempt.id)
+      .execute();
+    return NextResponse.json(
+      { success: false, message: "결제가 완료되지 않았습니다." },
+      { status: 402 },
+    );
+  }
+
+  const period = await applySuccessfulCharge({
+    subscriptionId: sub.id,
+    userId,
+    interval,
+    amount: sub.amount,
+    from: now,
+    payment,
+    paymentId: attempt.id,
+  });
+
+  if (userRow.email && userRow.email_verified_at) {
+    try {
+      await sendSupportThankYouEmail({
+        email: userRow.email,
+        loginName: userRow.login_name,
+        kind: "recurring",
+        amount: sub.amount,
+        supporterUntil: period.periodEnd,
+      });
+    } catch (error) {
+      console.error("Support thank-you email error:", error);
+    }
+  }
+
+  return NextResponse.json({
+    success: true,
+    message: "결제가 시작되었습니다. 감사합니다!",
+  });
 }

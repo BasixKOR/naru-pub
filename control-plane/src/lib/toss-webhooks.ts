@@ -25,3 +25,27 @@ export function parseTossWebhook(body: unknown): TossWebhookEvent {
     ? { type: "payment-status-changed", orderId }
     : { type: "ignored" };
 }
+
+// The ledger only knows pending, done and the terminal states, and every other
+// path (confirm, the reconciler) acts only on pending rows. A webhook for an
+// intermediate status — READY, IN_PROGRESS, WAITING_FOR_DEPOSIT — must leave the
+// row pending, or the payment can never be confirmed or reconciled. DONE also
+// leaves it pending: granting the paid period belongs to confirm, the renewal
+// cron and the reconciler. Cancellations go through reconciliation instead.
+const TERMINAL_FAILURE_STATUSES = new Set(["aborted", "expired", "failed"]);
+
+export type WebhookLedgerAction =
+  | { type: "reconcile" }
+  | { type: "fail"; status: string }
+  | { type: "record" };
+
+export function webhookLedgerAction(tossStatus: string): WebhookLedgerAction {
+  const status = tossStatus.toLowerCase();
+  if (status === "canceled" || status === "partial_canceled") {
+    return { type: "reconcile" };
+  }
+  if (TERMINAL_FAILURE_STATUSES.has(status)) {
+    return { type: "fail", status };
+  }
+  return { type: "record" };
+}

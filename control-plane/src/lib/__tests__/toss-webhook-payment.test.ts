@@ -1,5 +1,5 @@
 import { describe, expect, test } from "@jest/globals";
-import { parseTossWebhook } from "@/lib/toss-webhooks";
+import { parseTossWebhook, webhookLedgerAction } from "@/lib/toss-webhooks";
 
 describe("Toss webhook parsing", () => {
   test("accepts payment status events", () => {
@@ -29,4 +29,30 @@ describe("Toss webhook parsing", () => {
   ])("ignores unsupported or malformed payloads", (payload) => {
     expect(parseTossWebhook(payload)).toEqual({ type: "ignored" });
   });
+});
+
+describe("Toss webhook ledger updates", () => {
+  test.each(["READY", "IN_PROGRESS", "WAITING_FOR_DEPOSIT", "DONE"])(
+    "leaves a %s payment pending for confirm and reconciliation",
+    (status) => {
+      expect(webhookLedgerAction(status)).toEqual({ type: "record" });
+    },
+  );
+
+  test.each(["ABORTED", "EXPIRED", "FAILED"])(
+    "fails a pending payment on %s",
+    (status) => {
+      expect(webhookLedgerAction(status)).toEqual({
+        type: "fail",
+        status: status.toLowerCase(),
+      });
+    },
+  );
+
+  test.each(["CANCELED", "PARTIAL_CANCELED"])(
+    "reconciles a %s payment",
+    (status) => {
+      expect(webhookLedgerAction(status)).toEqual({ type: "reconcile" });
+    },
+  );
 });

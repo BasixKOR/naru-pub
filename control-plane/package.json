@@ -19,6 +19,7 @@
     "test:data": "jest --config jest.data.config.cjs --runInBand",
     "test:board": "bash scripts/test-board.sh",
     "test:payments": "jest --config jest.payment.config.cjs --runInBand",
+    "test:payments:db": "bash scripts/test-payments-db.sh",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:file": "jest src/lib/actions/__tests__/file.test.ts",

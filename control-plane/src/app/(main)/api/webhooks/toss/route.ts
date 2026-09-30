@@ -7,25 +7,20 @@ import {
   TossApiError,
 } from "@/lib/toss";
 import { reconcilePayment } from "@/lib/payment-reconciliation";
-import { parseTossWebhook } from "@/lib/toss-webhooks";
-
-const ALLOWED_PAYMENT_STATUSES = new Set([
-  "ready",
-  "in_progress",
-  "waiting_for_deposit",
-  "done",
-  "canceled",
-  "partial_canceled",
-  "aborted",
-  "expired",
-  "failed",
-]);
+import { parseTossWebhook, webhookLedgerAction } from "@/lib/toss-webhooks";
 // General Toss payment webhooks are not signed. Treat the payload only as a
 // notification and retrieve the authoritative payment before changing state.
 export async function POST(request: NextRequest) {
+  const rawBody = await request.text();
+  let body: unknown;
   try {
-    const rawBody = await request.text();
-    const body = JSON.parse(rawBody || "null") as unknown;
+    body = JSON.parse(rawBody || "null");
+  } catch {
+    // Malformed payloads are not worth a retry.
+    return NextResponse.json({ received: true });
+  }
+
+  try {
     const event = parseTossWebhook(body);
 
     if (event.type === "billing-deleted") {
@@ -71,40 +66,37 @@ export async function POST(request: NextRequest) {
       orderId,
       paymentFlowForRecord(ledger.toss_flow, ledger.attempt_key),
     );
-    const status = payment.status.toLowerCase();
-    if (
-      payment.orderId === orderId &&
-      payment.totalAmount === ledger.amount &&
-      ALLOWED_PAYMENT_STATUSES.has(status)
-    ) {
-      if (status === "canceled" || status === "partial_canceled") {
+    if (payment.orderId === orderId && payment.totalAmount === ledger.amount) {
+      const action = webhookLedgerAction(payment.status);
+      if (action.type === "reconcile") {
         await reconcilePayment(ledger.id);
         return NextResponse.json({ received: true });
       }
-      // Successful charges must still pass through confirm/renewal, which
-      // atomically records the payment and grants the paid period. Leaving a
-      // successful attempt pending makes that reconciliation possible.
+      const flow = paymentFlowForRecord(ledger.toss_flow, ledger.attempt_key);
       await db
         .updateTable("payments")
         .set({
-          ...paymentProviderMetadata(
-            payment,
-            paymentFlowForRecord(ledger.toss_flow, ledger.attempt_key),
-          ),
+          ...paymentProviderMetadata(payment, flow),
           toss_payment_key: payment.paymentKey,
-          ...(status === "done" ? {} : { status }),
           raw: JSON.stringify(payment),
         })
         .where("id", "=", ledger.id)
         .execute();
+      if (action.type === "fail") {
+        // Only an attempt still waiting on its outcome can fail; a done or
+        // refunded row keeps the state that granted or revoked its period.
+        await db
+          .updateTable("payments")
+          .set({ status: action.status })
+          .where("id", "=", ledger.id)
+          .where("status", "=", "pending")
+          .execute();
+      }
     }
 
     return NextResponse.json({ received: true });
   } catch (error) {
     console.error("Toss webhook error:", error);
-    if (error instanceof SyntaxError) {
-      return NextResponse.json({ received: true });
-    }
     // Ask Toss to retry transient lookup/database failures.
     const status =
       error instanceof TossApiError && error.status === 404 ? 200 : 503;

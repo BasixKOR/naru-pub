@@ -123,7 +123,19 @@ async function tossRequest<T>(
     body: init.body == null ? undefined : JSON.stringify(init.body),
   });
 
-  const data = (await res.json()) as Record<string, unknown>;
+  // A gateway in front of Toss can answer with an HTML error page. That is
+  // still a response with a status, so it must surface as a TossApiError (a 5xx
+  // stays ambiguous) rather than a SyntaxError that callers mistake for their
+  // own bad input.
+  let data: Record<string, unknown>;
+  try {
+    data = (await res.json()) as Record<string, unknown>;
+  } catch {
+    throw new TossApiError(
+      `Toss API returned an unreadable response (${res.status})`,
+      res.ok ? 502 : res.status,
+    );
+  }
   if (!res.ok) {
     throw new TossApiError(
       (data?.message as string) ?? `Toss API request failed (${res.status})`,
@@ -263,14 +275,21 @@ export function paymentProviderMetadata(
   };
 }
 
-export function addInterval(from: Date, interval: BillingInterval): Date {
+// Adds whole calendar months, clamping to the target month's last day. Plain
+// setMonth overflows — Jan 31 + 1 month is Mar 3 — and every later renewal
+// would inherit that drift.
+export function addMonths(from: Date, months: number): Date {
   const d = new Date(from);
-  if (interval === "month") {
-    d.setMonth(d.getMonth() + 1);
-  } else {
-    d.setFullYear(d.getFullYear() + 1);
-  }
+  const day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + months);
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, lastDay));
   return d;
+}
+
+export function addInterval(from: Date, interval: BillingInterval): Date {
+  return addMonths(from, interval === "month" ? 1 : 12);
 }
 
 // 주문번호는 두 곳에서 모양이 정해진다. 좁은 화면의 결제 내역 한 줄과,

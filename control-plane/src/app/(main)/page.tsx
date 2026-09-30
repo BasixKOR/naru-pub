@@ -35,10 +35,11 @@ function Sparkline({ values, label }: { values: number[]; label: string }) {
   });
 
   // The chart is absolutely placed in its box, so it adds nothing to the
-  // tile's natural height: the box is 24px unless a stretched tile gives it
-  // more room.
+  // tile's height. Beside 새 템플릿 the box has no height of its own and
+  // takes whatever room the tile has: 지표 is then never the taller card, and
+  // the template previews keep their exact 4:3 frames. Stacked, it is 24px.
   return (
-    <div className="relative mt-2 h-6 w-full lg:h-auto lg:min-h-6 lg:flex-1">
+    <div className="relative mt-2 h-6 w-full lg:h-auto lg:min-h-0 lg:flex-1">
       <svg
         viewBox={`0 0 ${width} ${height}`}
         preserveAspectRatio="none"
@@ -179,9 +180,11 @@ export default async function Home() {
         </Card>
 
         <div className="flex flex-col gap-8 lg:flex-row lg:items-stretch">
-          {/* Beside 지표 this card is as tall as the taller of the two. The
-              template rows share any extra height; each preview's frame grows
-              into it with the picture centered, never cropped or squeezed. */}
+          {/* Beside 지표, this card sets the row's height: 지표 has no
+              minimum beyond its text and fills the rest. Should 지표 still be
+              taller, the template rows share the extra height and each
+              preview's frame grows with the picture centered, never cropped
+              or squeezed. */}
           <Card className="bg-card border-2 border-border shadow-lg min-w-0 flex-1 flex flex-col">
             <CardHeader className="bg-secondary border-b-2 border-border">
               <div className="flex items-center justify-between gap-4">
@@ -253,55 +256,62 @@ export default async function Home() {
 
           <Card className="bg-card border-2 border-border shadow-lg lg:w-80 lg:shrink-0 flex flex-col">
             <CardHeader className="bg-secondary border-b-2 border-border">
-              <CardTitle className="text-foreground text-xl font-bold flex items-center gap-2">
-                <BarChart3 size={20} /> 지표
-              </CardTitle>
+              <div className="flex items-center justify-between gap-4">
+                <CardTitle className="text-foreground text-xl font-bold flex items-center gap-2">
+                  <BarChart3 size={20} /> 지표
+                </CardTitle>
+                <Link
+                  href="/open"
+                  className="text-primary text-sm font-medium hover:underline"
+                >
+                  전체 지표 보기 →
+                </Link>
+              </div>
             </CardHeader>
-            <CardContent className="p-6 flex flex-1 flex-col gap-4">
-              {/* Beside 새 템플릿 this card is as tall as the taller of the two:
-                  the tiles share that height and their sparklines grow into
-                  it. */}
+            <CardContent className="p-6 flex flex-1 flex-col">
+              {/* Beside 새 템플릿 this card takes that card's height: the tiles
+                  share it and their sparklines grow into it. */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:flex-1 lg:grid-cols-1 lg:auto-rows-fr">
                 <div className="bg-background border border-border rounded p-3 flex flex-col">
-                  <div className="text-2xl font-bold text-foreground tabular-nums">
-                    {stats.userCount.toLocaleString("ko-KR")}명
+                  <div className="lg:flex lg:flex-wrap lg:items-baseline lg:justify-between lg:gap-x-2">
+                    <div className="text-2xl font-bold text-foreground tabular-nums">
+                      {stats.userCount.toLocaleString("ko-KR")}명
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      함께하는 사용자
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    함께하는 사용자
-                  </p>
                   <Sparkline
                     values={stats.userTrend}
                     label="월별 누적 사용자"
                   />
                 </div>
                 <div className="bg-background border border-border rounded p-3 flex flex-col">
-                  <div className="text-2xl font-bold text-foreground tabular-nums">
-                    {stats.totalViews.toLocaleString("ko-KR")}
+                  <div className="lg:flex lg:flex-wrap lg:items-baseline lg:justify-between lg:gap-x-2">
+                    <div className="text-2xl font-bold text-foreground tabular-nums">
+                      {stats.totalViews.toLocaleString("ko-KR")}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      지금까지의 조회
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    지금까지의 조회
-                  </p>
                   <Sparkline
                     values={stats.viewTrend}
                     label="최근 30일 페이지뷰"
                   />
                 </div>
                 <div className="bg-background border border-border rounded p-3 flex flex-col">
-                  <div className="text-2xl font-bold text-foreground tabular-nums">
-                    {stats.totalEdits.toLocaleString("ko-KR")}
+                  <div className="lg:flex lg:flex-wrap lg:items-baseline lg:justify-between lg:gap-x-2">
+                    <div className="text-2xl font-bold text-foreground tabular-nums">
+                      {stats.totalEdits.toLocaleString("ko-KR")}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      지금까지의 편집
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    지금까지의 편집
-                  </p>
                   <Sparkline values={stats.editTrend} label="최근 30일 편집" />
                 </div>
               </div>
-              <Link
-                href="/open"
-                className="text-primary text-sm font-medium hover:underline"
-              >
-                전체 지표 보기 →
-              </Link>
             </CardContent>
           </Card>
         </div>

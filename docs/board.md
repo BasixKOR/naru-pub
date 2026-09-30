@@ -4,6 +4,8 @@ A message board with threaded replies at `/board`, where people share their
 sites and templates. A template is a snapshot of a folder from someone's site
 that anyone can apply to their own site in one step. The home page (`/`) shows
 the six newest **template** posts; other kinds of post stay on the board.
+Below them come the ads, the usage notice, and 최근 업데이트된, which shows
+the 24 most recently updated sites. `/sites` lists all of them, 48 per page.
 
 Code: `control-plane/src/lib/board/` (logic), `src/app/(main)/board/` (pages),
 `src/app/(main)/api/board/` (JSON routes). Schema: migration

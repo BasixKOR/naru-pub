@@ -1,11 +1,9 @@
 import { db } from "@/lib/database";
 import { sql } from "kysely";
-import { getHomepageUrl, getRenderedSiteUrl } from "@/lib/site-urls";
 import Link from "next/link";
-import Image from "next/image";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AdCard } from "@/components/AdCard";
+import { SiteGrid } from "@/components/SiteGrid";
 import {
   Info,
   ScrollText,
@@ -125,15 +123,19 @@ async function getHeadlineStats() {
   };
 }
 
+const RECENT_SITES_ON_HOME = 24;
+
 export default async function Home() {
   const [recentlyRenderedUsers, stats, templates, { user }] = await Promise.all(
     [
       db
         .selectFrom("users")
-        .selectAll()
+        .select(["id", "login_name", "site_rendered_at"])
         .where("discoverable", "=", true)
         .orderBy("site_updated_at", "desc")
         .where("site_rendered_at", "is not", null)
+        // The rest are on /sites.
+        .limit(RECENT_SITES_ON_HOME)
         .execute(),
       getHeadlineStats(),
       // Only template posts reach the front page; the rest stay on the board.
@@ -291,55 +293,6 @@ export default async function Home() {
           </Card>
         </div>
 
-        {recentlyRenderedUsers.length > 0 && (
-          <Card className="bg-card border-2 border-border shadow-lg">
-            <CardHeader className="bg-secondary border-b-2 border-border">
-              <CardTitle className="text-foreground text-xl font-bold flex items-center gap-2">
-                <History size={20} /> 최근 업데이트된
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-6">
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(min(220px,100%),1fr))] gap-4">
-                {recentlyRenderedUsers.map((user) => {
-                  const homepageUrl = getHomepageUrl(user.login_name);
-
-                  return (
-                    <div
-                      key={user.id}
-                      className="bg-card border border-border rounded-lg p-3 shadow-sm hover:shadow-md transition-shadow duration-200"
-                    >
-                      <Link
-                        href={homepageUrl}
-                        target="_blank"
-                        className="block"
-                      >
-                        <div className="border border-border rounded mb-3 overflow-hidden">
-                          <Image
-                            src={getRenderedSiteUrl(
-                              user.login_name,
-                              user.site_rendered_at,
-                            )}
-                            alt="screenshot"
-                            width={320}
-                            height={240}
-                            className="w-full h-auto hover:opacity-90 transition-opacity"
-                          />
-                        </div>
-                        <Button
-                          variant="outline"
-                          className="w-full border-border text-muted-foreground hover:bg-background bg-card"
-                        >
-                          {user.login_name}
-                        </Button>
-                      </Link>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
         <div className="grid gap-6 md:grid-cols-2">
           <AdCard
             icon="🥒"
@@ -430,6 +383,27 @@ export default async function Home() {
             </div>
           </CardContent>
         </Card>
+
+        {recentlyRenderedUsers.length > 0 && (
+          <Card className="bg-card border-2 border-border shadow-lg">
+            <CardHeader className="bg-secondary border-b-2 border-border">
+              <div className="flex items-center justify-between gap-4">
+                <CardTitle className="text-foreground text-xl font-bold flex items-center gap-2">
+                  <History size={20} /> 최근 업데이트된
+                </CardTitle>
+                <Link
+                  href="/sites"
+                  className="text-primary text-sm font-medium hover:underline"
+                >
+                  모든 사이트 보기 →
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent className="p-6">
+              <SiteGrid users={recentlyRenderedUsers} />
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );

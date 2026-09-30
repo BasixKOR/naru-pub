@@ -3,6 +3,7 @@
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
 import * as Sentry from "@sentry/nextjs";
+import { announceNavigationStart } from "@/lib/navigation-start";
 
 Sentry.init({
   dsn: "https://abb87d1e259356c7c14ecfee98d1c709@o4504757655764992.ingest.us.sentry.io/4509137772609536",
@@ -25,4 +26,13 @@ Sentry.init({
   debug: false,
 });
 
-export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;
+// Next calls this as each client-side navigation begins: link clicks,
+// router.push, back and forward. Sentry traces it, and the loading bar under
+// the nav starts from it.
+export function onRouterTransitionStart(
+  url: string,
+  navigationType: "push" | "replace" | "traverse",
+) {
+  Sentry.captureRouterTransitionStart(url, navigationType);
+  announceNavigationStart(url);
+}

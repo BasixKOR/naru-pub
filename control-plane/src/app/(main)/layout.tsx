@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import "./globals.css";
 import Link from "next/link";
 import { validateRequest } from "@/lib/auth";
@@ -7,6 +8,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { getHomepageUrl } from "@/lib/site-urls";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ModeToggle } from "@/components/ModeToggle";
+import { LoadingBar } from "@/components/LoadingBar";
 import { hasSupportRelationship, PAYMENT_OPERATOR_USERS } from "@/lib/support";
 import { getUserFeatures, type Feature } from "@/lib/entitlements";
 import { AccountMenu, DocsMenu, ExtensionsMenu } from "@/components/NavMenus";
@@ -39,7 +41,7 @@ export default async function RootLayout({
           disableTransitionOnChange
         >
           <div className="bg-background h-screen flex flex-col">
-            <nav className="bg-card border-b border-border">
+            <nav className="relative bg-card border-b border-border">
               <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex items-center justify-between gap-2 h-16">
                   <div className="flex shrink-0 items-center">
@@ -138,6 +140,11 @@ export default async function RootLayout({
                   </div>
                 </div>
               )}
+              {/* useSearchParams needs a Suspense boundary to keep static
+                  pages static. */}
+              <Suspense fallback={null}>
+                <LoadingBar />
+              </Suspense>
             </nav>
 
             <main className="flex-1 min-h-0">{children}</main>

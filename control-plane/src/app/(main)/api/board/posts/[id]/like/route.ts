@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/board/access";
-import { boardErrorResponse, parseId, readJson } from "@/lib/board/errors";
+import { boardErrorResponse, parsePostId, readJson } from "@/lib/board/errors";
 import { setPostLike } from "@/lib/board/posts";
 
 async function handle(
@@ -9,7 +9,7 @@ async function handle(
   liked: boolean,
 ) {
   try {
-    const id = parseId((await params).id);
+    const id = parsePostId((await params).id);
     await readJson(request);
     const user = await requireUser();
     const likeCount = await setPostLike(user, id, liked);

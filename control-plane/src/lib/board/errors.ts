@@ -59,3 +59,16 @@ export function parseId(value: unknown): string {
   }
   return text;
 }
+
+// A board post's id: a UUID, unlike the sequence numbers other board rows use.
+export function parsePostId(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      value,
+    )
+  ) {
+    throw new BoardError(404, "찾을 수 없습니다.");
+  }
+  return value.toLowerCase();
+}

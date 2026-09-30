@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/board/access";
-import { boardErrorResponse, parseId, readJson } from "@/lib/board/errors";
+import {
+  boardErrorResponse,
+  parseId,
+  parsePostId,
+  readJson,
+} from "@/lib/board/errors";
 import { createReply } from "@/lib/board/replies";
 
 export async function POST(
@@ -8,7 +13,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const postId = parseId((await params).id);
+    const postId = parsePostId((await params).id);
     const body = await readJson(request);
     const user = await requireVerifiedUser();
     const replyId = await createReply(user, postId, {

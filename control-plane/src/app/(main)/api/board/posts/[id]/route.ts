@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser, requireVerifiedUser } from "@/lib/board/access";
-import { boardErrorResponse, parseId, readJson } from "@/lib/board/errors";
+import { boardErrorResponse, parsePostId, readJson } from "@/lib/board/errors";
 import { deletePost, editPost } from "@/lib/board/posts";
 import { deleteTemplateObjects } from "@/lib/board/templates";
 import { dispatchNoteDelete } from "@/lib/federation";
@@ -10,7 +10,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const id = parseId((await params).id);
+    const id = parsePostId((await params).id);
     const body = await readJson(request);
     const user = await requireVerifiedUser();
     await editPost(user, id, { title: body.title, body: body.body });
@@ -25,7 +25,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const id = parseId((await params).id);
+    const id = parsePostId((await params).id);
     await readJson(request);
     const user = await requireUser();
     const deleted = await deletePost(user, id);

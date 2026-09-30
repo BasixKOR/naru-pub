@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/board/access";
-import { boardErrorResponse, parseId, readJson } from "@/lib/board/errors";
+import {
+  boardErrorResponse,
+  parseId,
+  parsePostId,
+  readJson,
+} from "@/lib/board/errors";
 import { setSolvedReply } from "@/lib/board/posts";
 
 export async function POST(
@@ -8,7 +13,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const postId = parseId((await params).id);
+    const postId = parsePostId((await params).id);
     const body = await readJson(request);
     const user = await requireUser();
     await setSolvedReply(

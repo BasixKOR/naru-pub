@@ -519,7 +519,6 @@ export async function listTemplateAppliers(
     .innerJoin("board_template_versions as v", "v.id", "a.version_id")
     .select(["a.user_id", sql<number>`max(v.version)`.as("version")])
     .where("v.template_id", "=", templateId)
-    .where("a.undone_at", "is", null)
     .groupBy("a.user_id")
     .execute();
   return new Map(rows.map((row) => [row.user_id, Number(row.version)]));
@@ -769,11 +768,6 @@ export async function applyTemplate(
       .values({
         version_id: version.id,
         user_id: user.id,
-        target_path: plan.targetPath,
-        backup_path: backupPath,
-        written_paths: written,
-        overwritten_paths: overwritten,
-        created_collections: createdCollections,
       })
       .returning("id")
       .executeTakeFirstOrThrow();

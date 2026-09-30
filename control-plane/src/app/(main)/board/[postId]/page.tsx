@@ -22,7 +22,11 @@ import { Thumbnail } from "../_components/Thumbnail";
 import { formatDate, formatRelative } from "../_components/format";
 
 function parsePostId(value: string): string | null {
-  return /^[1-9][0-9]{0,17}$/.test(value) ? value : null;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+    value,
+  )
+    ? value
+    : null;
 }
 
 export async function generateMetadata({

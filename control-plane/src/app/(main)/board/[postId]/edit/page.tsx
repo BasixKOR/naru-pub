@@ -16,7 +16,12 @@ export default async function EditPostPage({
   params: Promise<{ postId: string }>;
 }) {
   const { postId } = await params;
-  if (!/^[1-9][0-9]{0,17}$/.test(postId)) notFound();
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+      postId,
+    )
+  )
+    notFound();
   const { user } = await validateRequest();
   if (!user) redirect("/login");
   const post = await getPost(postId, user);

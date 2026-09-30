@@ -18,12 +18,15 @@ export function ApplyTemplateDialog({
   slug,
   authorLoginName,
   versions,
+  samplePath,
   siteUrl,
 }: {
   title: string;
   slug: string;
   authorLoginName: string;
   versions: { id: string; version: number }[];
+  // One of the template's files, to show where applying would put it.
+  samplePath: string;
   // The viewer's site, or null when nobody is signed in.
   siteUrl: string | null;
 }) {
@@ -41,6 +44,8 @@ export function ApplyTemplateDialog({
 
   const version = versions.find((v) => v.id === versionId);
   const targetPath = mode === "root" ? "" : folder;
+  const cleanFolder = folder.trim().replace(/^\/+|\/+$/g, "");
+  const targetPrefix = mode === "root" || !cleanFolder ? "" : `${cleanFolder}/`;
 
   useEffect(() => {
     if (!open) return;
@@ -251,6 +256,13 @@ export function ApplyTemplateDialog({
                     </span>
                   </label>
                 </fieldset>
+                <p className="break-all border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                  예: <code className="text-foreground">{samplePath}</code> →{" "}
+                  <code className="text-foreground">
+                    /{targetPrefix}
+                    {samplePath}
+                  </code>
+                </p>
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"

@@ -69,6 +69,7 @@ const {
 } = require("../replies") as typeof import("../replies");
 const {
   applyTemplate,
+  commonDirectory,
   deleteTemplateObjects,
   getTemplateForPost,
   planApplication,
@@ -346,6 +347,28 @@ integration("board", () => {
       const latest = await listLatestTemplatePosts(6);
       expect(latest[0].id).toBe(postId);
       expect(latest.every((p) => p.kind === "template")).toBe(true);
+    });
+
+    test("a template shared from a wrapping folder is rooted inside it", async () => {
+      expect(commonDirectory(["a/b/x.html", "a/b/c/y.css"])).toBe("a/b/");
+      expect(commonDirectory(["a/x.html", "b/y.html"])).toBe("");
+      expect(commonDirectory(["index.html", "a/y.html"])).toBe("");
+
+      // Shared from the whole site, but everything is in hello-world/.
+      put("alice/hello-world/index.html");
+      const { postId } = await publish({ folder: "", exclude: [] });
+      const template = await getTemplateForPost(postId);
+      expect(template?.files.map((f) => f.path)).toEqual(["index.html"]);
+      expect(template?.versions[0].sourcePath).toBe("hello-world/");
+
+      // Applying into a new folder named the same puts it one level deep.
+      await applyTemplate(bob, template!.versions[0].id, {
+        targetPath: "hello-world",
+        backup: true,
+        createCollections: true,
+      });
+      expect(bucket.has("bob/hello-world/index.html")).toBe(true);
+      expect(bucket.has("bob/hello-world/hello-world/index.html")).toBe(false);
     });
 
     test("refuses files a site cannot host, and empty folders", async () => {

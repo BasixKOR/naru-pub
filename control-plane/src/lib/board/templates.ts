@@ -84,13 +84,39 @@ export interface TemplateSourceFile {
   contentType: string;
 }
 
+// The deepest folder that holds every path, as "a/b/", or "" when the paths
+// sit in different places or at the top.
+export function commonDirectory(paths: string[]): string {
+  if (paths.length === 0) return "";
+  let common = paths[0].split("/").slice(0, -1);
+  for (const path of paths.slice(1)) {
+    const directories = path.split("/").slice(0, -1);
+    let shared = 0;
+    while (
+      shared < common.length &&
+      shared < directories.length &&
+      common[shared] === directories[shared]
+    ) {
+      shared++;
+    }
+    common = common.slice(0, shared);
+  }
+  return common.length > 0 ? `${common.join("/")}/` : "";
+}
+
 // The files a folder of the author's site would publish: everything under it
 // except the excluded paths and the backups applying templates leaves behind.
+//
+// When every file sits inside one subfolder, that subfolder becomes the
+// template's root. Otherwise a template shared from the whole site, holding
+// only hello-world/index.html, would be applied into a new folder as
+// hello-world/hello-world/index.html. The returned folder is the root used.
 export async function collectSourceFiles(
   loginName: string,
-  folder: string,
+  folderInput: string,
   exclude: string[],
-): Promise<TemplateSourceFile[]> {
+): Promise<{ folder: string; files: TemplateSourceFile[] }> {
+  let folder = folderInput;
   const home = `${getUserHomeDirectory(loginName)}/`;
   const prefix = `${home}${folder}`;
   const excluded = exclude.map((entry) => {
@@ -131,6 +157,11 @@ export async function collectSourceFiles(
   if (files.length === 0) {
     throw new BoardError(400, "공유할 파일이 없어요.");
   }
+  const narrowed = commonDirectory(files.map((file) => file.path));
+  if (narrowed) {
+    folder = `${folder}${narrowed}`;
+    for (const file of files) file.path = file.path.slice(narrowed.length);
+  }
   if (files.length > TEMPLATE_MAX_FILES) {
     throw new BoardError(
       400,
@@ -144,7 +175,7 @@ export async function collectSourceFiles(
       `템플릿은 ${formatBytes(TEMPLATE_MAX_BYTES)}까지 공유할 수 있어요. (지금 ${formatBytes(total)})`,
     );
   }
-  return files;
+  return { folder, files };
 }
 
 // The author's own collections, by name, to be created empty for whoever
@@ -287,7 +318,11 @@ export async function publishTemplatePost(
   }
 
   const collections = await resolveCollections(user.id, input.collections);
-  const files = await collectSourceFiles(user.loginName, folder, exclude);
+  const { folder: root, files } = await collectSourceFiles(
+    user.loginName,
+    folder,
+    exclude,
+  );
   const size = files.reduce((sum, file) => sum + file.size, 0);
 
   return await db.transaction().execute(async (tx) => {
@@ -313,7 +348,7 @@ export async function publishTemplatePost(
       .values({
         template_id: template.id,
         version: 1,
-        source_path: folder,
+        source_path: root,
         file_count: files.length,
         size_bytes: size,
         data_collections: JSON.stringify(collections),
@@ -389,7 +424,11 @@ export async function publishTemplateVersion(
   const exclude = validateExclude(input.exclude);
   const changelog = validateChangelog(input.changelog);
   const collections = await resolveCollections(user.id, input.collections);
-  const files = await collectSourceFiles(user.loginName, folder, exclude);
+  const { folder: root, files } = await collectSourceFiles(
+    user.loginName,
+    folder,
+    exclude,
+  );
   const size = files.reduce((sum, file) => sum + file.size, 0);
 
   return await db.transaction().execute(async (tx) => {
@@ -411,7 +450,7 @@ export async function publishTemplateVersion(
       .values({
         template_id: templateId,
         version: versionNumber,
-        source_path: folder,
+        source_path: root,
         file_count: files.length,
         size_bytes: size,
         data_collections: JSON.stringify(collections),

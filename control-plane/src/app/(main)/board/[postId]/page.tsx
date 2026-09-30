@@ -269,6 +269,11 @@ export default async function PostPage({
                 title={post.title}
                 slug={template.slug}
                 authorLoginName={post.authorLoginName}
+                samplePath={
+                  template.files.find((f) => f.path === "index.html")?.path ??
+                  template.files[0]?.path ??
+                  "index.html"
+                }
                 versions={template.versions.map((v) => ({
                   id: v.id,
                   version: v.version,

@@ -130,12 +130,13 @@ export async function listPosts(options: {
   };
 }
 
-// The front page's "새 템플릿": newest template posts only.
-export async function listLatestTemplatePosts(
+// The front page's board card: the newest posts of one kind.
+export async function listLatestPosts(
+  kind: PostKind,
   limit: number,
 ): Promise<PostSummary[]> {
   const rows = await summaryQuery()
-    .where("p.kind", "=", "template")
+    .where("p.kind", "=", kind)
     .orderBy("p.created_at", "desc")
     .orderBy("p.id", "desc")
     .limit(limit)

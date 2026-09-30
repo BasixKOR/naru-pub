@@ -2,8 +2,10 @@
 
 A message board with threaded replies at `/board`, where people share their
 sites and templates. A template is a snapshot of a folder from someone's site
-that anyone can apply to their own site in one step. The home page (`/`) shows
-the six newest **template** posts; other kinds of post stay on the board.
+that anyone can apply to their own site in one step. The home page (`/`) has
+a board card with a pill for each kind of post (템플릿 first, selected to
+start), each showing its six newest posts: templates and showcased sites as
+pictures, questions and chat as a list.
 Below them come the ads, the usage notice, and 최근 업데이트된, which shows
 the 24 most recently updated sites. `/sites` lists all of them, 48 per page.
 

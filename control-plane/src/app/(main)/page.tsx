@@ -4,17 +4,13 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AdCard } from "@/components/AdCard";
 import { SiteGrid } from "@/components/SiteGrid";
-import {
-  Info,
-  ScrollText,
-  History,
-  BarChart3,
-  LayoutTemplate,
-  Download,
-} from "lucide-react";
+import { Info, ScrollText, History, BarChart3 } from "lucide-react";
 import { validateRequest } from "@/lib/auth";
-import { listLatestTemplatePosts } from "@/lib/board/posts";
-import { Thumbnail, postThumbnailUrl } from "./board/_components/Thumbnail";
+import { POST_KINDS, type PostKind } from "@/lib/board/constants";
+import { listLatestPosts, type PostSummary } from "@/lib/board/posts";
+import { postThumbnailUrl } from "./board/_components/Thumbnail";
+import { HomeBoard, type HomePost } from "./board/_components/HomeBoard";
+import { formatRelative } from "./board/_components/format";
 
 // A sparkline is drawn server-side as plain SVG. The charts on /open pull in
 // recharts behind "use client", which is far too much JavaScript to put on the
@@ -132,8 +128,8 @@ async function getHeadlineStats() {
 const RECENT_SITES_ON_HOME = 24;
 
 export default async function Home() {
-  const [recentlyRenderedUsers, stats, templates, { user }] = await Promise.all(
-    [
+  const [recentlyRenderedUsers, stats, latestByKind, { user }] =
+    await Promise.all([
       db
         .selectFrom("users")
         .select(["id", "login_name", "site_rendered_at"])
@@ -144,12 +140,27 @@ export default async function Home() {
         .limit(RECENT_SITES_ON_HOME)
         .execute(),
       getHeadlineStats(),
-      // Only template posts reach the front page; the rest stay on the board.
-      listLatestTemplatePosts(6),
+      Promise.all(POST_KINDS.map((kind) => listLatestPosts(kind, 6))),
       validateRequest(),
-    ],
-  );
+    ]);
 
+  // Plain data for the client card, times already formatted.
+  const toHomePost = (post: PostSummary): HomePost => ({
+    id: post.id,
+    title: post.title,
+    excerpt: post.excerpt,
+    authorLoginName: post.authorLoginName,
+    time: formatRelative(post.createdAt),
+    replyCount: post.replyCount,
+    applyCount: post.template ? post.template.applyCount : null,
+    thumbnailUrl: postThumbnailUrl(post),
+  });
+  const boardPosts = Object.fromEntries(
+    POST_KINDS.map((kind, index) => [
+      kind,
+      latestByKind[index].map(toHomePost),
+    ]),
+  ) as Record<PostKind, HomePost[]>;
   return (
     <div className="bg-background min-h-screen p-6">
       <div className="mx-auto max-w-7xl space-y-8">
@@ -181,78 +192,8 @@ export default async function Home() {
 
         <div className="flex flex-col gap-8 lg:flex-row lg:items-stretch">
           {/* Beside 지표, this card sets the row's height: 지표 has no
-              minimum beyond its text and fills the rest. Should 지표 still be
-              taller, the template rows share the extra height and each
-              preview's frame grows with the picture centered, never cropped
-              or squeezed. */}
-          <Card className="bg-card border-2 border-border shadow-lg min-w-0 flex-1 flex flex-col">
-            <CardHeader className="bg-secondary border-b-2 border-border">
-              <div className="flex items-center justify-between gap-4">
-                <CardTitle className="text-foreground text-xl font-bold flex items-center gap-2">
-                  <LayoutTemplate size={20} /> 새 템플릿
-                </CardTitle>
-                <Link
-                  href="/board?kind=template"
-                  className="text-primary text-sm font-medium hover:underline"
-                >
-                  템플릿 더 보기 →
-                </Link>
-              </div>
-            </CardHeader>
-            <CardContent className="p-6 flex-1 flex flex-col">
-              {templates.length === 0 ? (
-                <p className="text-muted-foreground text-sm">
-                  아직 공유된 템플릿이 없어요.{" "}
-                  <Link
-                    href="/board/new?kind=template"
-                    className="text-primary hover:underline"
-                  >
-                    내 사이트를 첫 템플릿으로 공유해 보세요 →
-                  </Link>
-                </p>
-              ) : (
-                <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 lg:auto-rows-fr">
-                  {templates.map((post) => (
-                    <article
-                      key={post.id}
-                      className="border border-border bg-card flex flex-col"
-                    >
-                      <Link
-                        href={`/board/${post.id}`}
-                        tabIndex={-1}
-                        aria-hidden="true"
-                        className="block lg:flex-1"
-                      >
-                        <Thumbnail
-                          url={postThumbnailUrl(post)}
-                          alt=""
-                          className="border-0 border-b"
-                          fill
-                        />
-                      </Link>
-                      <div className="p-3 space-y-1">
-                        <Link
-                          href={`/board/${post.id}`}
-                          className="block truncate font-bold text-foreground hover:text-primary"
-                        >
-                          {post.title}
-                        </Link>
-                        <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                          <span className="truncate">
-                            {post.authorLoginName}
-                          </span>
-                          <span className="flex shrink-0 items-center gap-1 text-primary">
-                            <Download size={12} aria-hidden="true" />
-                            {post.template?.applyCount ?? 0}회 적용
-                          </span>
-                        </div>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+              minimum beyond its text and fills the rest. */}
+          <HomeBoard posts={boardPosts} />
 
           <Card className="bg-card border-2 border-border shadow-lg lg:w-80 lg:shrink-0 flex flex-col">
             <CardHeader className="bg-secondary border-b-2 border-border">

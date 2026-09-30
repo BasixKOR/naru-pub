@@ -55,7 +55,7 @@ const {
   createPost,
   deletePost,
   getPost,
-  listLatestTemplatePosts,
+  listLatestPosts,
   listPosts,
   setPostLike,
   setSolvedReply,
@@ -425,7 +425,7 @@ integration("board", () => {
       );
       expect(template?.versions[0].sourcePath).toBe("retro/");
 
-      const latest = await listLatestTemplatePosts(6);
+      const latest = await listLatestPosts("template", 6);
       expect(latest[0].id).toBe(postId);
       expect(latest.every((p) => p.kind === "template")).toBe(true);
     });

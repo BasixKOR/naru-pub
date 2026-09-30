@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { NAVIGATION_START } from "@/lib/navigation-start";
+import { NAVIGATION_START, WORK_END, WORK_START } from "@/lib/loading-bar";
 
 // Most pages render on the server, so after a click nothing on screen changes
 // until the next page arrives. This bar, under the nav, runs from the start of
@@ -10,7 +10,10 @@ import { NAVIGATION_START } from "@/lib/navigation-start";
 //
 // Next reports the start through onRouterTransitionStart in
 // instrumentation-client.ts, which calls announceNavigationStart
-// (lib/navigation-start.ts). The pathname or query changing finishes it.
+// (lib/loading-bar.ts); the pathname or query changing finishes it. Other
+// work, such as the file browser's requests, runs it through withLoadingBar.
+// The bar finishes when the navigation, if any, has landed and no work is
+// left.
 
 // Never sit at 100% while still waiting: creep towards this and stop.
 const CEILING = 0.9;
@@ -25,7 +28,11 @@ class Bar {
   private trickle: ReturnType<typeof setInterval> | null = null;
   private timers: ReturnType<typeof setTimeout>[] = [];
 
-  constructor(private element: HTMLDivElement) {}
+  constructor(
+    private element: HTMLDivElement,
+    // Called when the bar gives up waiting, to forget what it waited for.
+    private onGiveUp: () => void,
+  ) {}
 
   get running() {
     return this.trickle !== null;
@@ -52,7 +59,12 @@ class Bar {
       // ceiling and never reaches it.
       this.draw(this.progress + (CEILING - this.progress) * 0.1, true);
     }, 200);
-    this.timers.push(setTimeout(() => this.finish(), GIVE_UP_MS));
+    this.timers.push(
+      setTimeout(() => {
+        this.onGiveUp();
+        this.finish();
+      }, GIVE_UP_MS),
+    );
   }
 
   finish() {
@@ -77,13 +89,40 @@ export function LoadingBar() {
   const element = useRef<HTMLDivElement>(null);
   const bar = useRef<Bar | null>(null);
 
+  // What the bar is waiting for: a navigation, and pieces of other work.
+  const navigating = useRef(false);
+  const work = useRef(0);
+
   useEffect(() => {
-    const current = new Bar(element.current!);
+    const current = new Bar(element.current!, () => {
+      navigating.current = false;
+      work.current = 0;
+    });
     bar.current = current;
-    const start = () => current.start();
-    window.addEventListener(NAVIGATION_START, start);
+    const begin = () => {
+      if (!current.running) current.start();
+    };
+    const onNavigationStart = () => {
+      navigating.current = true;
+      begin();
+    };
+    const onWorkStart = () => {
+      work.current += 1;
+      begin();
+    };
+    const onWorkEnd = () => {
+      work.current = Math.max(0, work.current - 1);
+      if (work.current === 0 && !navigating.current && current.running) {
+        current.finish();
+      }
+    };
+    window.addEventListener(NAVIGATION_START, onNavigationStart);
+    window.addEventListener(WORK_START, onWorkStart);
+    window.addEventListener(WORK_END, onWorkEnd);
     return () => {
-      window.removeEventListener(NAVIGATION_START, start);
+      window.removeEventListener(NAVIGATION_START, onNavigationStart);
+      window.removeEventListener(WORK_START, onWorkStart);
+      window.removeEventListener(WORK_END, onWorkEnd);
       current.dispose();
       bar.current = null;
     };
@@ -91,7 +130,8 @@ export function LoadingBar() {
 
   // The new page's address is in place: the navigation has landed.
   useEffect(() => {
-    if (bar.current?.running) bar.current.finish();
+    navigating.current = false;
+    if (work.current === 0 && bar.current?.running) bar.current.finish();
   }, [pathname, searchParams]);
 
   return (

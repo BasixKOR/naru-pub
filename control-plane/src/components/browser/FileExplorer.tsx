@@ -23,6 +23,7 @@ import {
   Upload,
   ArrowUpToLine,
 } from "lucide-react";
+import { loadingFetch } from "@/lib/loading-bar";
 
 interface FileExplorerProps {
   initialFiles: FileNode[];
@@ -129,7 +130,7 @@ export default function FileExplorer({ initialFiles, userLoginName }: FileExplor
 
   const handleRefresh = async () => {
     try {
-      const response = await fetch("/api/files/tree");
+      const response = await loadingFetch("/api/files/tree");
       const result = await response.json();
 
       if (result.success) {
@@ -288,7 +289,7 @@ export default function FileExplorer({ initialFiles, userLoginName }: FileExplor
         }
       }
 
-      const response = await fetch("/api/files/rename", {
+      const response = await loadingFetch("/api/files/rename", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

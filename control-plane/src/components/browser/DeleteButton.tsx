@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { loadingFetch } from "@/lib/loading-bar";
 
 export default function DeleteButton({ filename }: { filename: string }) {
   return (
@@ -13,7 +14,7 @@ export default function DeleteButton({ filename }: { filename: string }) {
         }
 
         try {
-          const response = await fetch("/api/files/delete", {
+          const response = await loadingFetch("/api/files/delete", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

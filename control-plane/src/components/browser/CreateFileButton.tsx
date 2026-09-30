@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { loadingFetch } from "@/lib/loading-bar";
 
 export function CreateFileButton({ baseDirectory }: { baseDirectory: string }) {
   return (
@@ -15,7 +16,7 @@ export function CreateFileButton({ baseDirectory }: { baseDirectory: string }) {
         }
 
         try {
-          const response = await fetch("/api/files/create-file", {
+          const response = await loadingFetch("/api/files/create-file", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

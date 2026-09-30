@@ -21,6 +21,7 @@ import {
   FilePlus,
   Trash2,
 } from "lucide-react";
+import { loadingFetch } from "@/lib/loading-bar";
 
 interface DirectoryTreeProps {
   files: FileNode[];
@@ -387,7 +388,7 @@ export default function DirectoryTree({
     if (!newDirectoryName.trim()) return;
 
     try {
-      const response = await fetch("/api/files/create-directory", {
+      const response = await loadingFetch("/api/files/create-directory", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -418,7 +419,7 @@ export default function DirectoryTree({
     if (!newFileName.trim()) return;
 
     try {
-      const response = await fetch("/api/files/create-file", {
+      const response = await loadingFetch("/api/files/create-file", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -448,7 +449,7 @@ export default function DirectoryTree({
 
   const handleDelete = async (filePath: string) => {
     try {
-      const response = await fetch("/api/files/delete", {
+      const response = await loadingFetch("/api/files/delete", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -477,7 +478,7 @@ export default function DirectoryTree({
 
   const handleMoveFile = async (sourcePath: string, targetDirectory: string) => {
     try {
-      const response = await fetch("/api/files/move", {
+      const response = await loadingFetch("/api/files/move", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

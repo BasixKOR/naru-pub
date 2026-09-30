@@ -8,6 +8,7 @@ import FileViewer, { FileViewerRef } from "./FileViewer";
 import { FileNode } from "@/lib/fileUtils";
 import { Button } from "@/components/ui/button";
 import { EDITABLE_FILE_EXTENSIONS, IMAGE_FILE_EXTENSIONS } from "@/lib/const";
+import { loadingFetch } from "@/lib/loading-bar";
 
 interface FileExplorerWithSelectedProps {
   initialFiles: FileNode[];
@@ -97,7 +98,7 @@ export default function FileExplorerWithSelected({
 
   const handleRefresh = async () => {
     try {
-      const response = await fetch("/api/files/tree");
+      const response = await loadingFetch("/api/files/tree");
       const result = await response.json();
       
       if (result.success) {

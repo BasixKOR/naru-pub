@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { collapseSlashes } from "@/lib/site-urls";
+import { loadingFetch } from "@/lib/loading-bar";
 
 export function CreateDirectoryButton({
   baseDirectory,
@@ -23,7 +24,7 @@ export function CreateDirectoryButton({
           const directoryPath = collapseSlashes(
             `${baseDirectory}/${newDirectory}`,
           );
-          const response = await fetch("/api/files/create-directory", {
+          const response = await loadingFetch("/api/files/create-directory", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

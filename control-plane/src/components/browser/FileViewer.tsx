@@ -24,6 +24,7 @@ import prettierPluginCss from "prettier/plugins/postcss";
 import prettierPluginBabel from "prettier/plugins/babel";
 import prettierPluginEstree from "prettier/plugins/estree";
 import prettierPluginMarkdown from "prettier/plugins/markdown";
+import { loadingFetch } from "@/lib/loading-bar";
 
 export type FileType = "editable" | "image" | "audio" | "other";
 
@@ -90,7 +91,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>(
       setError(null);
 
       try {
-        const response = await fetch(
+        const response = await loadingFetch(
           `/api/files/content?path=${encodeURIComponent(filePath)}`,
         );
         if (!response.ok) {
@@ -121,7 +122,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>(
 
     const handleSave = useCallback(async () => {
       try {
-        const response = await fetch("/api/files/save", {
+        const response = await loadingFetch("/api/files/save", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

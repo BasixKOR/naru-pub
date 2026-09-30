@@ -1,5 +1,7 @@
 import { spawn } from "child_process";
 import { resolve } from "path";
+import { Client } from "pg";
+import { TEMPLATE_PUBLISHED_CHANNEL } from "@/lib/board/preview";
 
 const SCREENSHOT_INTERVAL = 15 * 60 * 1000; // 15 minutes
 const SCREENSHOT_TIMEOUT = 10 * 60 * 1000; // 10 minutes
@@ -26,6 +28,7 @@ const SITE_DATA_CLEANUP_TIMEOUT = 5 * 60 * 1000;
 function runWithTimeout(
   script: string,
   timeout: number,
+  scriptArgs: string[] = [],
 ): Promise<{ success: boolean; code: number | null }> {
   return new Promise((resolve) => {
     console.log(`[cron] Starting ${script}`);
@@ -39,8 +42,9 @@ function runWithTimeout(
       ? [
           ...process.execArgv,
           `${__dirname}/${script.replace(/\.tsx?$/, ".mjs")}`,
+          ...scriptArgs,
         ]
-      : ["--import", "tsx", `src/cli/${script}`];
+      : ["--import", "tsx", `src/cli/${script}`, ...scriptArgs];
     const child = spawn(process.execPath, args, {
       cwd: process.cwd(),
       stdio: "inherit",
@@ -71,6 +75,68 @@ function runWithTimeout(
 
 async function runScreenshotUpdater() {
   await runWithTimeout("update-screenshots.tsx", SCREENSHOT_TIMEOUT);
+}
+
+// Template previews are rendered as soon as a template is published: the
+// publish sends a NOTIFY, and this renders whatever is waiting. Publishes that
+// arrive while a render runs are folded into one more run after it.
+let templateRenderRunning = false;
+let templateRenderQueued = false;
+
+async function runTemplatePreviewRenderer() {
+  if (templateRenderRunning) {
+    templateRenderQueued = true;
+    return;
+  }
+  templateRenderRunning = true;
+  try {
+    do {
+      templateRenderQueued = false;
+      await runWithTimeout("update-screenshots.tsx", SCREENSHOT_TIMEOUT, [
+        "--templates",
+      ]);
+    } while (templateRenderQueued);
+  } finally {
+    templateRenderRunning = false;
+  }
+}
+
+function listenForTemplatePublishes() {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    console.log(
+      "[cron] DATABASE_URL is not set; template previews wait for the 15-minute run",
+    );
+    return;
+  }
+
+  const connect = async () => {
+    const client = new Client({ connectionString });
+    let retried = false;
+    const retry = (error: unknown) => {
+      if (retried) return;
+      retried = true;
+      console.error("[cron] Template publish listener lost:", error);
+      client.end().catch(() => {});
+      setTimeout(connect, 30 * 1000);
+    };
+    client.on("error", retry);
+    client.on("end", () => retry("connection ended"));
+    client.on("notification", () => {
+      void runTemplatePreviewRenderer();
+    });
+    try {
+      await client.connect();
+      await client.query(`LISTEN ${TEMPLATE_PUBLISHED_CHANNEL}`);
+      console.log("[cron] Listening for published templates");
+      // Anything published while this was disconnected.
+      void runTemplatePreviewRenderer();
+    } catch (error) {
+      retry(error);
+    }
+  };
+
+  void connect();
 }
 
 async function runHomeDirectoryUpdater() {
@@ -157,6 +223,8 @@ async function main() {
 
   // Run on startup after a short delay
   setTimeout(runScreenshotUpdater, 10 * 1000);
+
+  listenForTemplatePublishes();
 
   // Run export processor every 2 minutes
   console.log("[cron] Scheduling export processor every 2 minutes");

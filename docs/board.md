@@ -71,12 +71,16 @@ Code: `control-plane/src/lib/board/` (logic), `src/app/(main)/board/` (pages),
     left as the template wrote them.
   - Collections and the backup folder are kept.
 - **`apply_count`** counts distinct people, not applications.
-- **Previews**: the screenshot job (`update-screenshots`) renders up to ten
-  unrendered versions per run from the author's live folder, which is the
-  same content at publish time. It uploads them to the screenshots bucket as
-  `_templates/<id>/v<n>.png`. A version that still has no preview after a day
-  is no longer tried. The "원작자 사이트에서 보기" link (view on the author's
-  site) opens the author's live folder, which may have changed since.
+- **Previews** show the snapshot, never the author's live site. Publishing
+  sends a Postgres `NOTIFY` on `board_template_published`. The cron process,
+  which runs in the jobs image where Chromium is, listens for it and runs
+  `update-screenshots --templates` straight away. That run serves each
+  version's stored files from a loopback web server inside the container,
+  screenshots it, and uploads it to the screenshots bucket as
+  `_templates/<id>/v<n>.png`. The 15-minute screenshot run also picks up
+  anything missed. A version that still has no preview after a day is no
+  longer tried. `update-screenshots --templates --force` renders every live
+  version again.
 - **Deletion**: deleting a template post removes its R2 files and previews.
   The database rows stay, so people who applied it keep their history and can
   still undo. Deleting an account also removes that user's `_templates/`

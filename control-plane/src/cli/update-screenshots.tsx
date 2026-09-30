@@ -1,15 +1,13 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { parseArgs } from "node:util";
 import { sql } from "kysely";
 import { db } from "@/lib/database";
 import { dispatchActorUpdate } from "@/lib/federation";
 import { s3Client } from "@/lib/s3";
-import { templatePreviewKey } from "@/lib/board/preview";
-import {
-  getHomepageUrl,
-  getPublicAssetUrl,
-  getRenderedSiteUrl,
-} from "@/lib/site-urls";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { templateFileKey, templatePreviewKey } from "@/lib/board/preview";
+import { getHomepageUrl, getRenderedSiteUrl } from "@/lib/site-urls";
+import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { Browser, chromium } from "playwright";
 
 // Usage:
@@ -22,6 +20,11 @@ import { Browser, chromium } from "playwright";
 //     → render every discoverable user, ignoring the predicate
 //   pnpm exec tsx src/cli/update-screenshots.tsx --user <login_name> --force
 //     → render that user, ignoring the predicate
+//   pnpm exec tsx src/cli/update-screenshots.tsx --templates
+//     → render only board template previews still waiting for one (cron runs
+//       this as soon as a template is published)
+//   pnpm exec tsx src/cli/update-screenshots.tsx --templates --force
+//     → render every live template version's preview again
 //   pnpm exec tsx src/cli/update-screenshots.tsx --concurrency 8
 //     → override the default parallel-render worker count (default: 2)
 
@@ -33,9 +36,8 @@ const DEFAULT_CONCURRENCY = 2;
 
 type TargetUser = { id: number; login_name: string };
 
-// Board templates waiting for a preview. The preview is the author's folder as
-// published, rendered from their live site: at publish time it is the same
-// content. A render that keeps failing stops being retried after a day.
+// Board templates waiting for a preview. A render that keeps failing stops
+// being retried after a day.
 const TEMPLATE_PREVIEW_WINDOW = sql<Date>`now() - interval '1 day'`;
 const TEMPLATE_PREVIEWS_PER_RUN = 10;
 
@@ -43,29 +45,25 @@ type TargetTemplate = {
   version_id: string;
   template_id: string;
   version: number;
-  source_path: string;
-  login_name: string;
 };
 
-async function selectTemplateTargets(): Promise<TargetTemplate[]> {
-  return await db
+async function selectTemplateTargets(
+  force: boolean,
+): Promise<TargetTemplate[]> {
+  let query = db
     .selectFrom("board_template_versions as v")
     .innerJoin("board_templates as t", "t.id", "v.template_id")
     .innerJoin("board_posts as p", "p.id", "t.post_id")
-    .innerJoin("users as u", "u.id", "t.user_id")
-    .select([
-      "v.id as version_id",
-      "v.template_id",
-      "v.version",
-      "v.source_path",
-      "u.login_name",
-    ])
-    .where("v.preview_rendered_at", "is", null)
-    .where("v.created_at", ">", TEMPLATE_PREVIEW_WINDOW)
+    .select(["v.id as version_id", "v.template_id", "v.version"])
     .where("p.deleted_at", "is", null)
-    .orderBy("v.created_at", "asc")
-    .limit(TEMPLATE_PREVIEWS_PER_RUN)
-    .execute();
+    .orderBy("v.created_at", "asc");
+  if (!force) {
+    query = query
+      .where("v.preview_rendered_at", "is", null)
+      .where("v.created_at", ">", TEMPLATE_PREVIEW_WINDOW)
+      .limit(TEMPLATE_PREVIEWS_PER_RUN);
+  }
+  return await query.execute();
 }
 
 async function selectTargets(
@@ -169,12 +167,71 @@ async function renderUser(browser: Browser, user: TargetUser): Promise<void> {
   await dispatchActorUpdate(user.id);
 }
 
+// Serves one template version's own files, the snapshot as published, on a
+// loopback port for the duration of a render. Rendering the author's live
+// site instead would show whatever is there now, or their whole home page
+// for a template shared from the site root.
+async function serveTemplate(target: TargetTemplate) {
+  const rows = await db
+    .selectFrom("board_template_files")
+    .select(["path", "content_type"])
+    .where("version_id", "=", target.version_id)
+    .execute();
+  const files = new Map<string, { body: Uint8Array; contentType: string }>();
+  for (const row of rows) {
+    const object = await s3Client.send(
+      new GetObjectCommand({
+        Bucket: process.env.S3_BUCKET_NAME!,
+        Key: templateFileKey(target.template_id, target.version, row.path),
+      }),
+    );
+    files.set(row.path, {
+      body: await object.Body!.transformToByteArray(),
+      contentType: row.content_type,
+    });
+  }
+
+  const server = createServer((request, response) => {
+    let path: string;
+    try {
+      path = decodeURIComponent(
+        new URL(request.url ?? "/", "http://template").pathname,
+      ).replace(/^\/+/, "");
+    } catch {
+      response.writeHead(400).end();
+      return;
+    }
+    const file =
+      files.get(path) ??
+      files.get(path.endsWith("/") || !path ? `${path}index.html` : "") ??
+      files.get(`${path}/index.html`);
+    if (!file) {
+      response.writeHead(404).end();
+      return;
+    }
+    response
+      .writeHead(200, { "Content-Type": file.contentType })
+      .end(file.body);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}/`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
 async function renderTemplate(
   browser: Browser,
   target: TargetTemplate,
 ): Promise<void> {
-  const url = getPublicAssetUrl(target.login_name, target.source_path);
-  const screenshot = await takeScreenshot(browser, url);
+  const served = await serveTemplate(target);
+  let screenshot: Buffer;
+  try {
+    screenshot = await takeScreenshot(browser, served.url);
+  } finally {
+    await served.close();
+  }
   if (screenshot.length === 0) {
     console.log(
       `Skipping template ${target.template_id}: screenshot is 0 bytes`,
@@ -204,6 +261,7 @@ async function main() {
     options: {
       user: { type: "string" },
       force: { type: "boolean", default: false },
+      templates: { type: "boolean", default: false },
       concurrency: { type: "string" },
     },
   });
@@ -212,9 +270,13 @@ async function main() {
     ? Math.max(1, Number.parseInt(values.concurrency, 10))
     : DEFAULT_CONCURRENCY;
 
-  const targets = await selectTargets(values.user, values.force ?? false);
+  const targets = values.templates
+    ? []
+    : await selectTargets(values.user, values.force ?? false);
   // A run for one user renders only that user.
-  const templateTargets = values.user ? [] : await selectTemplateTargets();
+  const templateTargets = values.user
+    ? []
+    : await selectTemplateTargets((values.templates && values.force) ?? false);
 
   if (values.user && targets.length === 0) {
     console.error(
@@ -227,6 +289,9 @@ async function main() {
   console.log(
     `[update-screenshots] ${targets.length} target(s), ${templateTargets.length} template(s), concurrency=${concurrency}`,
   );
+
+  // Most runs, and most --templates runs, find nothing: skip Chromium then.
+  if (targets.length === 0 && templateTargets.length === 0) return;
 
   let browser: Browser | null = null;
   try {

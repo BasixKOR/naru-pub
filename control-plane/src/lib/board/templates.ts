@@ -29,23 +29,16 @@ import {
 import { BoardError } from "./errors";
 import { assertUnderHourlyLimit } from "./limits";
 import { assertCanPost, validatePostBody, validateTitle } from "./posts";
-import { getTemplatePreviewUrl } from "./preview";
+import {
+  TEMPLATE_PUBLISHED_CHANNEL,
+  getTemplatePreviewUrl,
+  templateFileKey,
+  templatePrefix,
+} from "./preview";
 import * as storage from "./storage";
 
 // Where applying a template keeps the files it replaced.
 export const BACKUP_DIRECTORY = ".backup";
-
-export function templatePrefix(templateId: string): string {
-  return `_templates/${templateId}/`;
-}
-
-export function templateFileKey(
-  templateId: string,
-  version: number,
-  path: string,
-): string {
-  return `${templatePrefix(templateId)}v${version}/${path}`;
-}
 
 // "" is the whole site; anything else is a folder, returned as "a/b/".
 export function normalizeFolder(value: unknown): string {
@@ -352,6 +345,8 @@ export async function publishTemplatePost(
       .where("id", "=", template.id)
       .execute();
     await copyIntoTemplate(template.id, 1, files);
+    // Delivered on commit, so only a version that exists is rendered.
+    await sql`select pg_notify(${TEMPLATE_PUBLISHED_CHANNEL}, '')`.execute(tx);
     return { postId: post.id, templateId: template.id };
   });
 }
@@ -446,6 +441,7 @@ export async function publishTemplateVersion(
       .where("id", "=", template.post_id)
       .execute();
     await copyIntoTemplate(templateId, versionNumber, files);
+    await sql`select pg_notify(${TEMPLATE_PUBLISHED_CHANNEL}, '')`.execute(tx);
     return versionNumber;
   });
 }

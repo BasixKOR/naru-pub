@@ -10,11 +10,7 @@ import {
   getTemplateForPost,
   listTemplateAppliers,
 } from "@/lib/board/templates";
-import {
-  getHomepageUrl,
-  getPublicAssetUrl,
-  getRenderedSiteUrl,
-} from "@/lib/site-urls";
+import { getHomepageUrl, getRenderedSiteUrl } from "@/lib/site-urls";
 import { ApplyTemplateDialog } from "../_components/ApplyTemplateDialog";
 import { BoardText } from "../_components/BoardText";
 import { KindBadge } from "../_components/KindBadge";
@@ -266,17 +262,6 @@ export default async function PostPage({
                 }))}
                 siteUrl={user ? getHomepageUrl(user.loginName) : null}
               />
-              <a
-                href={getPublicAssetUrl(
-                  post.authorLoginName,
-                  latest.sourcePath,
-                )}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex h-11 items-center justify-center border border-border text-sm hover:bg-accent"
-              >
-                원작자 사이트에서 보기 ↗
-              </a>
               <div className="border border-border bg-background p-3">
                 <div className="text-xl font-bold text-primary">
                   {template.applyCount}

@@ -56,6 +56,32 @@ jobs:
           cache-to: type=registry,ref=ghcr.io/${{ github.repository }}-control-plane-jobs:build-cache-${{ steps.arch.outputs.arch }},mode=max
           provenance: false
 
+  # The payment tests: unit tests, then the database tests against a throwaway
+  # PostgreSQL cluster the script starts itself. Part of the run deploy.sh
+  # checks, so a payment regression never reaches the server.
+  test-payments:
+    defaults:
+      run:
+        working-directory: control-plane
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # Same pnpm as the Dockerfile.
+      - run: npm install --global pnpm@11.5.2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:payments
+      # Only the server binaries are needed; the script runs its own cluster
+      # on a private socket.
+      - run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends postgresql-16
+      - run: pnpm test:payments:db
+        env:
+          NARU_TEST_PG_BIN: /usr/lib/postgresql/16/bin
+
   image-proxy:
     defaults:
       run:

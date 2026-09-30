@@ -96,8 +96,13 @@ export default async function PostPage({
 
   return (
     <div className="bg-background min-h-screen p-4 sm:p-6">
-      <div className="mx-auto flex max-w-7xl flex-col gap-6 lg:flex-row lg:items-start">
-        <main className="min-w-0 flex-1 space-y-6">
+      {/* Two columns on wide screens: the post above its replies on the
+          left, the sidebar beside both. Stacked, the order is the source
+          order: post, sidebar, replies. */}
+      <div
+        className={`mx-auto grid max-w-7xl grid-cols-1 gap-6 ${showHero ? "lg:grid-cols-[minmax(0,1fr)_20rem] lg:grid-rows-[auto_1fr]" : ""}`}
+      >
+        <main className="min-w-0 space-y-6 lg:col-start-1 lg:row-start-1">
           <nav
             aria-label="위치"
             className="flex gap-2 text-xs text-muted-foreground"
@@ -143,22 +148,6 @@ export default async function PostPage({
             </header>
 
             <div className="space-y-5 p-5">
-              {showHero && (
-                <figure className="border border-border">
-                  <figcaption className="flex items-center justify-between gap-2 border-b border-border bg-secondary px-3 py-2 text-xs text-muted-foreground">
-                    <span className="truncate">
-                      {latest
-                        ? `미리보기 · v${latest.version}`
-                        : siteUrl.replace(/^https?:\/\//, "")}
-                    </span>
-                  </figcaption>
-                  <Thumbnail
-                    url={heroImage}
-                    alt={`${post.title} 미리보기`}
-                    className="border-0"
-                  />
-                </figure>
-              )}
               {post.body && (
                 <BoardText
                   text={post.body}
@@ -166,16 +155,6 @@ export default async function PostPage({
                 />
               )}
               <div className="flex flex-wrap items-center gap-2">
-                {post.kind === "site" && (
-                  <a
-                    href={siteUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex h-11 items-center bg-primary px-4 text-sm font-bold text-primary-foreground hover:bg-primary/90"
-                  >
-                    사이트 방문 ↗
-                  </a>
-                )}
                 <LikeButton
                   url={`/api/board/posts/${post.id}/like`}
                   initialLiked={post.likedByViewer}
@@ -193,169 +172,202 @@ export default async function PostPage({
               </div>
             </div>
           </article>
-
-          <section aria-labelledby="replies-title" className="space-y-4">
-            <h2 id="replies-title" className="text-lg font-bold">
-              답글 {post.replyCount}
-            </h2>
-            {viewer?.canWrite ? (
-              <ReplyComposer
-                postId={post.id}
-                parentId={null}
-                label={`${user!.loginName} 로 답글 쓰기`}
-              />
-            ) : (
-              <p className="border border-border p-4 text-sm text-muted-foreground">
-                {user ? (
-                  <>
-                    답글을 쓰려면{" "}
-                    <Link
-                      href="/account"
-                      className="text-primary hover:underline"
-                    >
-                      이메일을 인증
-                    </Link>
-                    해 주세요.
-                  </>
-                ) : (
-                  <>
-                    답글을 쓰려면{" "}
-                    <Link
-                      href="/login"
-                      className="text-primary hover:underline"
-                    >
-                      로그인
-                    </Link>
-                    해 주세요.
-                  </>
-                )}
-              </p>
-            )}
-            <ReplyThread
-              postId={post.id}
-              postAuthorId={post.userId}
-              replies={threadReplies}
-              viewer={viewer}
-              isQuestion={post.kind === "question"}
-              solvedReplyId={post.solvedReplyId}
-            />
-            {truncated && (
-              <p className="text-sm text-muted-foreground">
-                답글이 너무 많아 일부만 보여요. 각 답글의 시간을 누르면 그
-                답글부터 이어서 볼 수 있어요.
-              </p>
-            )}
-          </section>
         </main>
 
-        {template && latest && (
-          <aside className="w-full space-y-5 lg:w-80 lg:shrink-0">
-            <section className="space-y-3 border-2 border-primary bg-primary/5 p-4">
-              <ApplyTemplateDialog
-                title={post.title}
-                slug={template.slug}
-                authorLoginName={post.authorLoginName}
-                samplePath={
-                  template.files.find((f) => f.path === "index.html")?.path ??
-                  template.files[0]?.path ??
-                  "index.html"
-                }
-                versions={template.versions.map((v) => ({
-                  id: v.id,
-                  version: v.version,
-                }))}
-                siteUrl={user ? getHomepageUrl(user.loginName) : null}
+        {showHero && (
+          <aside className="min-w-0 space-y-5 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start">
+            <figure className="border-2 border-border bg-card">
+              <figcaption className="flex items-center justify-between gap-2 border-b-2 border-border bg-secondary px-3 py-2 text-xs text-muted-foreground">
+                <span className="truncate">
+                  {latest
+                    ? `미리보기 · v${latest.version}`
+                    : siteUrl.replace(/^https?:\/\//, "")}
+                </span>
+              </figcaption>
+              <Thumbnail
+                url={heroImage}
+                alt={`${post.title} 미리보기`}
+                className="border-0"
               />
-              <div className="border border-border bg-background p-3">
-                <div className="text-xl font-bold text-primary">
-                  {template.applyCount}
-                </div>
-                <div className="text-xs text-muted-foreground">적용</div>
-              </div>
-            </section>
-
-            <section className="border-2 border-border bg-card">
-              <h2 className="border-b-2 border-border bg-secondary px-4 py-3 font-bold">
-                정보
-              </h2>
-              <dl className="grid grid-cols-[5.5rem_1fr] gap-y-2 p-4 text-xs">
-                <dt className="text-muted-foreground">이름</dt>
-                <dd className="break-all">
-                  {post.authorLoginName}/{template.slug}
-                </dd>
-                <dt className="text-muted-foreground">버전</dt>
-                <dd>
-                  v{latest.version} · {formatDate(latest.createdAt)}
-                </dd>
-                <dt className="text-muted-foreground">라이선스</dt>
-                <dd>{LICENSES[template.license]}</dd>
-                <dt className="text-muted-foreground">크기</dt>
-                <dd>
-                  파일 {latest.fileCount}개 · {formatBytes(latest.sizeBytes)}
-                </dd>
-              </dl>
-            </section>
-
-            <section className="border-2 border-border bg-card">
-              <h2 className="border-b-2 border-border bg-secondary px-4 py-3 font-bold">
-                포함된 파일
-              </h2>
-              <ul className="max-h-80 overflow-y-auto p-4 text-xs leading-6">
-                {template.files.map((file) => (
-                  <li key={file.path} className="flex justify-between gap-2">
-                    <span className="break-all">{file.path}</span>
-                    <span className="shrink-0 text-muted-foreground">
-                      {formatBytes(file.sizeBytes)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            {latest.collections.length > 0 && (
-              <section className="space-y-2 border-2 border-border bg-card p-4 text-xs leading-relaxed">
-                <h2 className="text-sm font-bold">필요한 기능</h2>
-                <p className="text-muted-foreground">
-                  데이터베이스 — 적용할 때 빈 컬렉션{" "}
-                  {latest.collections.map((c, index) => (
-                    <span key={c.name}>
-                      {index > 0 && ", "}
-                      <code className="bg-secondary px-1 text-foreground">
-                        {c.name}
-                      </code>
-                    </span>
-                  ))}
-                  을(를) 만들어요.
-                </p>
-              </section>
+            </figure>
+            {post.kind === "site" && (
+              <a
+                href={siteUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex h-12 w-full items-center justify-center bg-primary text-base font-bold text-primary-foreground hover:bg-primary/90"
+              >
+                사이트 방문 ↗
+              </a>
             )}
+            {template && latest && (
+              <>
+                <section className="space-y-3 border-2 border-primary bg-primary/5 p-4">
+                  <ApplyTemplateDialog
+                    title={post.title}
+                    slug={template.slug}
+                    authorLoginName={post.authorLoginName}
+                    samplePath={
+                      template.files.find((f) => f.path === "index.html")
+                        ?.path ??
+                      template.files[0]?.path ??
+                      "index.html"
+                    }
+                    versions={template.versions.map((v) => ({
+                      id: v.id,
+                      version: v.version,
+                    }))}
+                    siteUrl={user ? getHomepageUrl(user.loginName) : null}
+                  />
+                  <div className="border border-border bg-background p-3">
+                    <div className="text-xl font-bold text-primary">
+                      {template.applyCount}
+                    </div>
+                    <div className="text-xs text-muted-foreground">적용</div>
+                  </div>
+                </section>
 
-            {template.versions.length > 1 && (
-              <section className="border-2 border-border bg-card">
-                <h2 className="border-b-2 border-border bg-secondary px-4 py-3 font-bold">
-                  버전 기록
-                </h2>
-                <ol className="space-y-3 p-4 text-xs">
-                  {template.versions.map((version) => (
-                    <li key={version.id} className="space-y-1">
-                      <div className="font-bold">
-                        v{version.version}{" "}
-                        <span className="font-normal text-muted-foreground">
-                          {formatDate(version.createdAt)}
+                <section className="border-2 border-border bg-card">
+                  <h2 className="border-b-2 border-border bg-secondary px-4 py-3 font-bold">
+                    정보
+                  </h2>
+                  <dl className="grid grid-cols-[5.5rem_1fr] gap-y-2 p-4 text-xs">
+                    <dt className="text-muted-foreground">이름</dt>
+                    <dd className="break-all">
+                      {post.authorLoginName}/{template.slug}
+                    </dd>
+                    <dt className="text-muted-foreground">버전</dt>
+                    <dd>
+                      v{latest.version} · {formatDate(latest.createdAt)}
+                    </dd>
+                    <dt className="text-muted-foreground">라이선스</dt>
+                    <dd>{LICENSES[template.license]}</dd>
+                    <dt className="text-muted-foreground">크기</dt>
+                    <dd>
+                      파일 {latest.fileCount}개 ·{" "}
+                      {formatBytes(latest.sizeBytes)}
+                    </dd>
+                  </dl>
+                </section>
+
+                <section className="border-2 border-border bg-card">
+                  <h2 className="border-b-2 border-border bg-secondary px-4 py-3 font-bold">
+                    포함된 파일
+                  </h2>
+                  <ul className="max-h-80 overflow-y-auto p-4 text-xs leading-6">
+                    {template.files.map((file) => (
+                      <li
+                        key={file.path}
+                        className="flex justify-between gap-2"
+                      >
+                        <span className="break-all">{file.path}</span>
+                        <span className="shrink-0 text-muted-foreground">
+                          {formatBytes(file.sizeBytes)}
                         </span>
-                      </div>
-                      {version.changelog && (
-                        <p className="whitespace-pre-wrap text-muted-foreground">
-                          {version.changelog}
-                        </p>
-                      )}
-                    </li>
-                  ))}
-                </ol>
-              </section>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+
+                {latest.collections.length > 0 && (
+                  <section className="space-y-2 border-2 border-border bg-card p-4 text-xs leading-relaxed">
+                    <h2 className="text-sm font-bold">필요한 기능</h2>
+                    <p className="text-muted-foreground">
+                      데이터베이스 — 적용할 때 빈 컬렉션{" "}
+                      {latest.collections.map((c, index) => (
+                        <span key={c.name}>
+                          {index > 0 && ", "}
+                          <code className="bg-secondary px-1 text-foreground">
+                            {c.name}
+                          </code>
+                        </span>
+                      ))}
+                      을(를) 만들어요.
+                    </p>
+                  </section>
+                )}
+
+                {template.versions.length > 1 && (
+                  <section className="border-2 border-border bg-card">
+                    <h2 className="border-b-2 border-border bg-secondary px-4 py-3 font-bold">
+                      버전 기록
+                    </h2>
+                    <ol className="space-y-3 p-4 text-xs">
+                      {template.versions.map((version) => (
+                        <li key={version.id} className="space-y-1">
+                          <div className="font-bold">
+                            v{version.version}{" "}
+                            <span className="font-normal text-muted-foreground">
+                              {formatDate(version.createdAt)}
+                            </span>
+                          </div>
+                          {version.changelog && (
+                            <p className="whitespace-pre-wrap text-muted-foreground">
+                              {version.changelog}
+                            </p>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  </section>
+                )}
+              </>
             )}
           </aside>
         )}
+
+        <section
+          aria-labelledby="replies-title"
+          className="min-w-0 space-y-4 lg:col-start-1 lg:row-start-2"
+        >
+          <h2 id="replies-title" className="text-lg font-bold">
+            답글 {post.replyCount}
+          </h2>
+          {viewer?.canWrite ? (
+            <ReplyComposer
+              postId={post.id}
+              parentId={null}
+              label={`${user!.loginName} 로 답글 쓰기`}
+            />
+          ) : (
+            <p className="border border-border p-4 text-sm text-muted-foreground">
+              {user ? (
+                <>
+                  답글을 쓰려면{" "}
+                  <Link
+                    href="/account"
+                    className="text-primary hover:underline"
+                  >
+                    이메일을 인증
+                  </Link>
+                  해 주세요.
+                </>
+              ) : (
+                <>
+                  답글을 쓰려면{" "}
+                  <Link href="/login" className="text-primary hover:underline">
+                    로그인
+                  </Link>
+                  해 주세요.
+                </>
+              )}
+            </p>
+          )}
+          <ReplyThread
+            postId={post.id}
+            postAuthorId={post.userId}
+            replies={threadReplies}
+            viewer={viewer}
+            isQuestion={post.kind === "question"}
+            solvedReplyId={post.solvedReplyId}
+          />
+          {truncated && (
+            <p className="text-sm text-muted-foreground">
+              답글이 너무 많아 일부만 보여요. 각 답글의 시간을 누르면 그
+              답글부터 이어서 볼 수 있어요.
+            </p>
+          )}
+        </section>
       </div>
     </div>
   );

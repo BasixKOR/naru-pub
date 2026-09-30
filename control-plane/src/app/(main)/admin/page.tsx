@@ -87,6 +87,9 @@ export default async function PaymentOperatorPage() {
               최근 결제 200건과 Toss 대사 상태입니다.
             </p>
           </div>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/admin/board">게시판 관리 →</Link>
+          </Button>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-3">

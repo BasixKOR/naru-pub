@@ -68,6 +68,12 @@ const {
   markPostNotificationsRead,
 } = require("../replies") as typeof import("../replies");
 const {
+  listPostsForModeration,
+  listRepliesForModeration,
+  restorePost,
+  restoreReply,
+} = require("../moderation") as typeof import("../moderation");
+const {
   applyTemplate,
   commonDirectory,
   deleteTemplateObjects,
@@ -308,6 +314,72 @@ integration("board", () => {
 
       await deleteReply(carol, child);
       expect((await getPost(post, null))?.solvedReplyId).toBeNull();
+    });
+  });
+
+  describe("moderation", () => {
+    test("admins see deleted posts and replies and can restore them", async () => {
+      const yang = await makeUser("yang-mod");
+      // isBoardAdmin checks the operator list, so borrow its one name.
+      const admin = { ...yang, loginName: "yang" };
+
+      const post = await createPost(alice, {
+        kind: "chat",
+        title: "지울 글",
+        body: "본문",
+      });
+      const reply = await createReply(bob, post, {
+        parentId: null,
+        body: "지울 답글",
+      });
+      await deleteReply(admin, reply);
+      await deletePost(admin, post);
+
+      const deletedPosts = await listPostsForModeration({
+        status: "deleted",
+        author: "alice",
+        page: 1,
+      });
+      expect(deletedPosts.posts.map((p) => p.id)).toContain(post);
+      const deletedReplies = await listRepliesForModeration({
+        status: "deleted",
+        author: "bob",
+        page: 1,
+      });
+      expect(deletedReplies.replies.map((r) => r.id)).toContain(reply);
+
+      await expect(restorePost(bob, post)).rejects.toMatchObject({
+        status: 403,
+      });
+      await restorePost(admin, post);
+      await restoreReply(admin, reply);
+      expect((await getPost(post, null))?.replyCount).toBe(1);
+      await expect(restoreReply(admin, reply)).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+
+    test("a deleted template can't be restored", async () => {
+      put("alice/tpl/index.html");
+      const { postId } = await publishTemplatePost(alice, {
+        title: "템플릿",
+        body: "",
+        slug: "mod-tpl",
+        license: "cc0-1.0",
+        files: ["tpl/index.html"],
+        collections: [],
+      });
+      await deletePost(alice, postId);
+      const admin = { ...alice, loginName: "yang" };
+      await expect(restorePost(admin, postId)).rejects.toMatchObject({
+        status: 409,
+      });
+      const listed = await listPostsForModeration({
+        status: "deleted",
+        author: null,
+        page: 1,
+      });
+      expect(listed.posts.find((p) => p.id === postId)?.restorable).toBe(false);
     });
   });
 

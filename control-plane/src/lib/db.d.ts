@@ -370,11 +370,8 @@ export interface BoardTemplates {
   user_id: number;
   slug: string;
   license: "cc-by-4.0" | "cc-by-sa-4.0" | "cc0-1.0";
-  remix_allowed: Generated<boolean>;
-  remixed_from_version_id: Int8 | null;
   latest_version_id: Int8 | null;
   apply_count: Generated<number>;
-  remix_count: Generated<number>;
 }
 
 export interface BoardTemplateCollection {

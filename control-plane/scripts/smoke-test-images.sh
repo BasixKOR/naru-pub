@@ -59,7 +59,9 @@ wait_for() {
 docker network create "$run" >/dev/null
 
 echo "Starting PostgreSQL..."
-start db -e POSTGRES_PASSWORD=smoke -e POSTGRES_DB=naru postgres:17-alpine
+# The major version production runs, so a migration that needs it fails here
+# first.
+start db -e POSTGRES_PASSWORD=smoke -e POSTGRES_DB=naru postgres:18-alpine
 wait_for PostgreSQL 60 docker exec "$run-db" pg_isready -U postgres -d naru
 
 echo "Migrating, twice: the second run must find nothing to do..."

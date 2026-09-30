@@ -7,11 +7,17 @@ export function parseTossWebhook(body: unknown): TossWebhookEvent {
   if (!body || typeof body !== "object") return { type: "ignored" };
 
   const event = body as Record<string, unknown>;
-  if (
-    event.eventType === "BILLING_DELETED" &&
-    typeof event.billingKey === "string"
-  ) {
-    return { type: "billing-deleted", billingKey: event.billingKey };
+  // Toss nests every event's payload under data: BILLING_DELETED is
+  // { eventType, createdAt, data: { billingKey, reason } }.
+  if (event.eventType === "BILLING_DELETED") {
+    const data = event.data;
+    const billingKey =
+      data && typeof data === "object"
+        ? (data as Record<string, unknown>).billingKey
+        : undefined;
+    return typeof billingKey === "string" && billingKey
+      ? { type: "billing-deleted", billingKey }
+      : { type: "ignored" };
   }
 
   if (event.eventType !== "PAYMENT_STATUS_CHANGED") {

@@ -106,7 +106,7 @@ async function tossRequest<T>(
   flow: TossPaymentFlow,
   path: string,
   init: {
-    method?: "GET" | "POST";
+    method?: "GET" | "POST" | "DELETE";
     body?: unknown;
     idempotencyKey?: string;
   } = {},
@@ -129,7 +129,9 @@ async function tossRequest<T>(
   // own bad input.
   let data: Record<string, unknown>;
   try {
-    data = (await res.json()) as Record<string, unknown>;
+    const text = await res.text();
+    // A successful DELETE may answer with no body at all.
+    data = (text ? JSON.parse(text) : {}) as Record<string, unknown>;
   } catch {
     throw new TossApiError(
       `Toss API returned an unreadable response (${res.status})`,
@@ -216,19 +218,32 @@ export function confirmPayment(
 }
 
 // Cancels a payment, refunding it in full. 나루 does not sell partial periods
-// back, so no cancelAmount is sent: Toss refunds the whole balance. Passing the
-// same idempotency key for a retry cancels once rather than twice.
+// back, so no cancelAmount is sent: Toss refunds the whole balance.
+//
+// No idempotency key: Toss stores the first response for a key — errors
+// included — and replays it for 15 days, so a fixed key would turn one failed
+// cancel into 15 days of the same failure, well past the refund window. A full
+// cancel is already safe to repeat: Toss refuses to cancel a payment twice.
 export function cancelPayment(params: {
   flow: TossPaymentFlow;
   paymentKey: string;
   cancelReason: string;
-  idempotencyKey: string;
 }) {
-  const { flow, paymentKey, cancelReason, idempotencyKey } = params;
+  const { flow, paymentKey, cancelReason } = params;
   return tossRequest<TossPaymentResult>(
     flow,
     `/v1/payments/${encodeURIComponent(paymentKey)}/cancel`,
-    { body: { cancelReason }, idempotencyKey },
+    { body: { cancelReason } },
+  );
+}
+
+// Deletes a billing key at Toss so it can never be charged again. Keys have no
+// expiry of their own.
+export async function deleteBillingKey(billingKey: string): Promise<void> {
+  await tossRequest<unknown>(
+    "billing",
+    `/v1/billing/${encodeURIComponent(billingKey)}`,
+    { method: "DELETE" },
   );
 }
 

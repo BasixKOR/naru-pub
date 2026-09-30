@@ -181,6 +181,15 @@ export interface Subscriptions {
   updated_at: Generated<Timestamp>;
 }
 
+export interface RetiredBillingKeys {
+  id: Generated<number>;
+  billing_key: string;
+  retired_at: Generated<Timestamp>;
+  attempts: Generated<number>;
+  last_attempted_at: Timestamp | null;
+  last_error: string | null;
+}
+
 export interface Payments {
   id: Generated<number>;
   attempt_key: string | null;
@@ -444,6 +453,7 @@ export interface DB {
   password_reset_tokens: PasswordResetTokens;
   payments: Payments;
   remote_actors: RemoteActors;
+  retired_billing_keys: RetiredBillingKeys;
   sessions: Sessions;
   subscriptions: Subscriptions;
   supporter_feature_uses: SupporterFeatureUses;

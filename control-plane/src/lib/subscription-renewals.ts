@@ -92,18 +92,48 @@ async function claimDueSubscriptions(now: Date) {
   return result.rows;
 }
 
-async function getOrCreatePaymentAttempt(sub: DueSubscription) {
-  const attemptKey = renewalAttemptKey(sub);
-  const existing = await db
-    .selectFrom("payments")
-    .select(["id", "order_id", "status"])
-    .where("attempt_key", "=", attemptKey)
-    .executeTakeFirst();
+// Statuses under which an order is still worth asking Toss about again.
+const LIVE_ATTEMPT_STATUSES = new Set(["pending", "done"]);
 
-  if (existing) return existing;
+// Returns the order to charge for this renewal try, or a declined one.
+//
+// Toss never reuses an orderId, and it replays the first response for an
+// idempotency key — errors included — for 15 days. So a pending order is
+// retried as is (Toss may have charged it), but once Toss has shown the order
+// went nowhere (the reconciler marks it expired), the next try gets a new
+// order and key rather than replaying the same failure until the key expires.
+// An order Toss reports as ABORTED was declined; that is counted as a failed
+// try instead of being charged again.
+async function getOrCreatePaymentAttempt(
+  sub: DueSubscription,
+): Promise<{ attempt: PaymentAttempt; declined: boolean }> {
+  const baseKey = renewalAttemptKey(sub);
+  const attemptsForTry = () =>
+    db
+      .selectFrom("payments")
+      .select(["id", "order_id", "status"])
+      .where((eb) =>
+        eb.or([
+          eb("attempt_key", "=", baseKey),
+          eb("attempt_key", "like", `${baseKey}:r%`),
+        ]),
+      )
+      .orderBy("id", "desc")
+      .execute();
 
+  const attempts = await attemptsForTry();
+  const live = attempts.find((attempt) =>
+    LIVE_ATTEMPT_STATUSES.has(attempt.status),
+  );
+  if (live) return { attempt: live, declined: false };
+  if (attempts[0]?.status === "aborted") {
+    return { attempt: attempts[0], declined: true };
+  }
+
+  const attemptKey =
+    attempts.length === 0 ? baseKey : `${baseKey}:r${attempts.length}`;
   try {
-    return await db
+    const attempt = await db
       .insertInto("payments")
       .values({
         attempt_key: attemptKey,
@@ -115,13 +145,12 @@ async function getOrCreatePaymentAttempt(sub: DueSubscription) {
       })
       .returning(["id", "order_id", "status"])
       .executeTakeFirstOrThrow();
+    return { attempt, declined: false };
   } catch (error) {
-    const concurrent = await db
-      .selectFrom("payments")
-      .select(["id", "order_id", "status"])
-      .where("attempt_key", "=", attemptKey)
-      .executeTakeFirst();
-    if (concurrent) return concurrent;
+    const concurrent = (await attemptsForTry()).find((attempt) =>
+      LIVE_ATTEMPT_STATUSES.has(attempt.status),
+    );
+    if (concurrent) return { attempt: concurrent, declined: false };
     throw error;
   }
 }
@@ -160,22 +189,25 @@ async function markAttemptFailed(opts: {
   failures: number;
   nextStatus: string;
   error: unknown;
+  keepAttemptStatus?: boolean;
 }) {
   const now = new Date();
   await db.transaction().execute(async (trx) => {
-    await trx
-      .updateTable("payments")
-      .set({
-        status: "failed",
-        raw: JSON.stringify({
-          error:
-            opts.error instanceof Error
-              ? opts.error.message
-              : String(opts.error),
-        }),
-      })
-      .where("id", "=", opts.attempt.id)
-      .execute();
+    if (!opts.keepAttemptStatus) {
+      await trx
+        .updateTable("payments")
+        .set({
+          status: "failed",
+          raw: JSON.stringify({
+            error:
+              opts.error instanceof Error
+                ? opts.error.message
+                : String(opts.error),
+          }),
+        })
+        .where("id", "=", opts.attempt.id)
+        .execute();
+    }
 
     // A cancel, refund or one-time switch that landed mid-charge wins: its
     // status must not be overwritten back to active or past_due.
@@ -251,7 +283,7 @@ export async function chargeDueSubscriptions(now = new Date()) {
 
   for (const sub of due) {
     const interval = sub.billing_interval as BillingInterval;
-    const attempt = await getOrCreatePaymentAttempt(sub);
+    const { attempt, declined } = await getOrCreatePaymentAttempt(sub);
 
     if (attempt.status === "done") {
       await releaseLease(sub);
@@ -270,6 +302,13 @@ export async function chargeDueSubscriptions(now = new Date()) {
     }
 
     try {
+      if (declined) {
+        throw new TossApiError(
+          `order ${attempt.order_id} was declined`,
+          400,
+          "ABORTED",
+        );
+      }
       let payment = null;
       try {
         const existingPayment = await getPaymentByOrderId(
@@ -278,6 +317,14 @@ export async function chargeDueSubscriptions(now = new Date()) {
         );
         if (existingPayment.status === "DONE") {
           payment = existingPayment;
+        } else if (existingPayment.status === "ABORTED") {
+          // Toss already declined this order, and an orderId is never
+          // reused; charging it again would only replay the decline.
+          throw new TossApiError(
+            `order ${attempt.order_id} was declined`,
+            400,
+            "ABORTED",
+          );
         }
       } catch (error) {
         if (!(error instanceof TossApiError && error.status === 404)) {
@@ -340,6 +387,8 @@ export async function chargeDueSubscriptions(now = new Date()) {
         failures,
         nextStatus,
         error: err,
+        // A declined order keeps the status and response Toss reported.
+        keepAttemptStatus: declined,
       });
       await sendGraceNoticeIfNeeded(sub, now);
       console.error(

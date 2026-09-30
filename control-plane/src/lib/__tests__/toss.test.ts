@@ -8,8 +8,10 @@ import {
 } from "@jest/globals";
 import {
   addInterval,
+  cancelPayment,
   chargeBillingKey,
   confirmPayment,
+  deleteBillingKey,
   isDefinitiveTossFailure,
   isOneTimeYears,
   isPurchasableOneTimeYears,
@@ -29,12 +31,14 @@ describe("Toss payment requests", () => {
     process.env.TOSS_PAYMENT_SECRET_KEY = "test_payment_secret";
     global.fetch = jest.fn<typeof fetch>().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        paymentKey: "payment",
-        orderId: "order",
-        status: "DONE",
-        totalAmount: 1000,
-      }),
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          paymentKey: "payment",
+          orderId: "order",
+          status: "DONE",
+          totalAmount: 1000,
+        }),
     } as Response);
   });
 
@@ -142,9 +146,7 @@ describe("Toss payment requests", () => {
     global.fetch = jest.fn<typeof fetch>().mockResolvedValue({
       ok: false,
       status: 502,
-      json: async () => {
-        throw new SyntaxError("Unexpected token <");
-      },
+      text: async () => "<html>Bad Gateway</html>",
     } as unknown as Response);
 
     const error = await confirmPayment(
@@ -155,6 +157,61 @@ describe("Toss payment requests", () => {
     expect(error).toBeInstanceOf(TossApiError);
     expect((error as TossApiError).status).toBe(502);
     expect(isDefinitiveTossFailure(error)).toBe(false);
+  });
+
+  // Toss replays the first response for an idempotency key — errors included
+  // — for 15 days, so a fixed key would lock a failed refund out of retries.
+  test("cancels without an idempotency key, on the payment's own MID", async () => {
+    await cancelPayment({
+      flow: "billing",
+      paymentKey: "pay/key",
+      cancelReason: "refund",
+    });
+
+    const [url, init] = (fetch as jest.Mock<typeof fetch>).mock.calls[0];
+    expect(url).toBe(
+      "https://api.tosspayments.com/v1/payments/pay%2Fkey/cancel",
+    );
+    expect(init?.headers).not.toHaveProperty("Idempotency-Key");
+    expect(init?.headers).toHaveProperty(
+      "Authorization",
+      "Basic " + Buffer.from("test_billing_secret:").toString("base64"),
+    );
+  });
+
+  test("deletes a billing key, accepting an empty response body", async () => {
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => "",
+    } as Response);
+
+    await deleteBillingKey("billing-key");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.tosspayments.com/v1/billing/billing-key",
+      expect.objectContaining({
+        method: "DELETE",
+        headers: expect.objectContaining({
+          Authorization:
+            "Basic " + Buffer.from("test_billing_secret:").toString("base64"),
+        }),
+      }),
+    );
+  });
+
+  test("reports a Toss error body with its code", async () => {
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: async () =>
+        JSON.stringify({ code: "NOT_FOUND_BILLING", message: "없음" }),
+    } as Response);
+
+    const error = await deleteBillingKey("gone").catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(TossApiError);
+    expect(error).toMatchObject({ status: 404, code: "NOT_FOUND_BILLING" });
   });
 });
 

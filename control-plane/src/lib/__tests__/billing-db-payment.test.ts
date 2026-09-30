@@ -14,7 +14,9 @@ jest.mock("@/lib/toss", () => {
   const actual = jest.requireActual<typeof import("@/lib/toss")>("@/lib/toss");
   return {
     ...actual,
+    cancelPayment: jest.fn(),
     chargeBillingKey: jest.fn(),
+    deleteBillingKey: jest.fn(),
     getPaymentByOrderId: jest.fn(),
   };
 });
@@ -41,6 +43,10 @@ const { chargeDueSubscriptions } =
   require("@/lib/subscription-renewals") as typeof import("@/lib/subscription-renewals");
 const { reconcilePayment } =
   require("@/lib/payment-reconciliation") as typeof import("@/lib/payment-reconciliation");
+const { refundPayment } =
+  require("@/lib/refunds") as typeof import("@/lib/refunds");
+const { deleteRetiredBillingKeys } =
+  require("@/lib/billing-keys") as typeof import("@/lib/billing-keys");
 
 // Runs against a disposable, migrated database (scripts/test-payments-db.sh),
 // never the developer's own.
@@ -158,10 +164,14 @@ async function supporterUntil(userId: number) {
 
 integration("payments against the database", () => {
   beforeEach(async () => {
-    await sql`truncate users, subscriptions, payments restart identity cascade`.execute(
+    await sql`truncate users, subscriptions, payments, retired_billing_keys restart identity cascade`.execute(
       db,
     );
     jest.clearAllMocks();
+    toss.chargeBillingKey.mockReset();
+    toss.cancelPayment.mockReset();
+    toss.deleteBillingKey.mockReset();
+    toss.deleteBillingKey.mockResolvedValue(undefined);
     toss.getPaymentByOrderId.mockRejectedValue(
       new toss.TossApiError("not found", 404),
     );
@@ -501,6 +511,311 @@ integration("payments against the database", () => {
       expect(
         Math.abs(until.getTime() - yearFromPurchase.getTime()),
       ).toBeLessThan(2 * DAY);
+    });
+  });
+
+  describe("retiring billing keys", () => {
+    async function queued() {
+      return (
+        await db
+          .selectFrom("retired_billing_keys")
+          .select("billing_key")
+          .orderBy("id")
+          .execute()
+      ).map((row) => row.billing_key);
+    }
+
+    test("every key a subscription lets go of is queued for deletion", async () => {
+      const userId = await makeUser();
+      const subId = await makeSubscription(userId, {
+        status: "active",
+        billingKey: "key-a",
+      });
+
+      // Unrelated updates leave the key alone.
+      await db
+        .updateTable("subscriptions")
+        .set({ status: "past_due" })
+        .where("id", "=", subId)
+        .execute();
+      expect(await queued()).toEqual([]);
+
+      // Replaced by a new card.
+      await db
+        .updateTable("subscriptions")
+        .set({ toss_billing_key: "key-b" })
+        .where("id", "=", subId)
+        .execute();
+      // Cleared by a cancel.
+      await db
+        .updateTable("subscriptions")
+        .set({ toss_billing_key: null })
+        .where("id", "=", subId)
+        .execute();
+      expect(await queued()).toEqual(["key-a", "key-b"]);
+    });
+
+    test("a deleted account's key is queued too", async () => {
+      const userId = await makeUser();
+      await makeSubscription(userId, { status: "active", billingKey: "key-c" });
+
+      await db.deleteFrom("users").where("id", "=", userId).execute();
+
+      expect(await queued()).toEqual(["key-c"]);
+    });
+
+    test("a one-time purchase retires the recurring key", async () => {
+      const userId = await makeUser();
+      await makeSubscription(userId, { status: "active", billingKey: "key-d" });
+
+      await applyOneTimePayment({
+        userId,
+        amount: 12000,
+        years: 1,
+        payment: tossPayment("one-time-retire", 12000),
+      });
+
+      expect(await queued()).toEqual(["key-d"]);
+    });
+
+    test("keys are deleted at Toss and forgotten once Toss confirms", async () => {
+      await db
+        .insertInto("retired_billing_keys")
+        .values([
+          { billing_key: "deleted" },
+          { billing_key: "already-gone" },
+          { billing_key: "refused" },
+        ])
+        .execute();
+      toss.deleteBillingKey.mockImplementation(async (key) => {
+        if (key === "already-gone") {
+          throw new toss.TossApiError("not found", 404, "NOT_FOUND_BILLING");
+        }
+        if (key === "refused") {
+          throw new toss.TossApiError("server error", 500);
+        }
+      });
+
+      const now = new Date();
+      expect(await deleteRetiredBillingKeys(now)).toEqual({
+        deleted: 2,
+        failed: 1,
+      });
+
+      const left = await db
+        .selectFrom("retired_billing_keys")
+        .selectAll()
+        .execute();
+      expect(left).toHaveLength(1);
+      expect(left[0]).toMatchObject({
+        billing_key: "refused",
+        attempts: 1,
+        last_error: "server error",
+      });
+
+      // Not retried right away, but again an hour later.
+      toss.deleteBillingKey.mockClear();
+      await deleteRetiredBillingKeys(new Date(now.getTime() + 60 * 1000));
+      expect(toss.deleteBillingKey).not.toHaveBeenCalled();
+      toss.deleteBillingKey.mockResolvedValue(undefined);
+      toss.deleteBillingKey.mockImplementation(async () => {});
+      await deleteRetiredBillingKeys(new Date(now.getTime() + 61 * 60 * 1000));
+      expect(toss.deleteBillingKey).toHaveBeenCalledWith("refused");
+      expect(await queued()).toEqual([]);
+    });
+  });
+
+  describe("refunds", () => {
+    async function paidPayment(userId: number) {
+      const paymentId = await makePendingPayment({
+        userId,
+        subscriptionId: null,
+        attemptKey: `one_time:1:refund-order-${userId}`,
+        orderId: `refund-order-${userId}`,
+        amount: 12000,
+      });
+      await applyOneTimePayment({
+        userId,
+        amount: 12000,
+        years: 1,
+        payment: tossPayment(`refund-order-${userId}`, 12000),
+        paymentId,
+      });
+      return paymentId;
+    }
+
+    test("a payment Toss already canceled is recorded as refunded", async () => {
+      const userId = await makeUser();
+      const paymentId = await paidPayment(userId);
+      toss.cancelPayment.mockRejectedValue(
+        new toss.TossApiError("취소 불가", 403, "NOT_CANCELABLE_PAYMENT"),
+      );
+      toss.getPaymentByOrderId.mockResolvedValue(
+        tossPayment(`refund-order-${userId}`, 12000, {
+          status: "CANCELED",
+          cancels: [{ cancelAmount: 12000 }],
+        }),
+      );
+
+      await expect(
+        refundPayment({ paymentId, overridePolicy: false, reason: "test" }),
+      ).resolves.toMatchObject({ paymentId });
+
+      const row = await db
+        .selectFrom("payments")
+        .select(["status", "refunded_amount"])
+        .where("id", "=", paymentId)
+        .executeTakeFirstOrThrow();
+      expect(row).toEqual({ status: "canceled", refunded_amount: 12000 });
+      expect(await supporterUntil(userId)).toBeNull();
+    });
+
+    test("a refund Toss refused is reported, and can be tried again", async () => {
+      const userId = await makeUser();
+      const paymentId = await paidPayment(userId);
+      const refusal = new toss.TossApiError(
+        "일시적 오류",
+        400,
+        "PROVIDER_ERROR",
+      );
+      toss.cancelPayment.mockRejectedValueOnce(refusal);
+      toss.getPaymentByOrderId.mockResolvedValue(
+        tossPayment(`refund-order-${userId}`, 12000),
+      );
+
+      await expect(
+        refundPayment({ paymentId, overridePolicy: false, reason: "test" }),
+      ).rejects.toBe(refusal);
+
+      toss.cancelPayment.mockResolvedValueOnce(
+        tossPayment(`refund-order-${userId}`, 12000, { status: "CANCELED" }),
+      );
+      toss.getPaymentByOrderId.mockResolvedValue(
+        tossPayment(`refund-order-${userId}`, 12000, {
+          status: "CANCELED",
+          cancels: [{ cancelAmount: 12000 }],
+        }),
+      );
+      await refundPayment({ paymentId, overridePolicy: false, reason: "test" });
+
+      expect(toss.cancelPayment).toHaveBeenCalledTimes(2);
+      for (const [params] of toss.cancelPayment.mock.calls) {
+        expect(params).not.toHaveProperty("idempotencyKey");
+      }
+      expect(await supporterUntil(userId)).toBeNull();
+    });
+  });
+
+  describe("renewal retries", () => {
+    async function dueSubscription() {
+      const periodEnd = new Date(Date.now() - 60 * 1000);
+      const userId = await makeUser(periodEnd);
+      const subId = await makeSubscription(userId, {
+        status: "active",
+        currentPeriodEnd: periodEnd,
+        nextBillingAt: periodEnd,
+      });
+      return { userId, subId, periodEnd };
+    }
+
+    function attempts(subId: number) {
+      return db
+        .selectFrom("payments")
+        .select(["attempt_key", "order_id", "status"])
+        .where("subscription_id", "=", subId)
+        .orderBy("id")
+        .execute();
+    }
+
+    test("an order Toss never saw is replaced, not replayed", async () => {
+      const { subId } = await dueSubscription();
+      toss.chargeBillingKey.mockRejectedValueOnce(
+        new toss.TossApiError("server error", 500),
+      );
+
+      await chargeDueSubscriptions();
+      const [first] = await attempts(subId);
+      expect(first.status).toBe("pending");
+      expect((await subscription(subId)).failed_charge_count).toBe(0);
+
+      // The reconciler finds nothing at Toss and expires the order.
+      await db
+        .updateTable("payments")
+        .set({ status: "expired" })
+        .where("order_id", "=", first.order_id)
+        .execute();
+      toss.chargeBillingKey.mockImplementation(async (params) =>
+        tossPayment(params.orderId, params.amount),
+      );
+
+      await chargeDueSubscriptions();
+
+      const [, second] = await attempts(subId);
+      expect(second.order_id).not.toBe(first.order_id);
+      expect(second.attempt_key).toBe(`${first.attempt_key}:r1`);
+      expect(second.status).toBe("done");
+      const lastCharge = toss.chargeBillingKey.mock.calls.at(-1)![0];
+      expect(lastCharge.orderId).toBe(second.order_id);
+      expect(lastCharge.idempotencyKey).toBe(second.order_id);
+    });
+
+    test("a pending order is retried with the same order and key", async () => {
+      const { subId } = await dueSubscription();
+      toss.chargeBillingKey.mockRejectedValue(
+        new toss.TossApiError("server error", 500),
+      );
+
+      await chargeDueSubscriptions();
+      await chargeDueSubscriptions();
+
+      const [first, second] = toss.chargeBillingKey.mock.calls.map(
+        ([params]) => params,
+      );
+      expect(second.orderId).toBe(first.orderId);
+      expect(second.idempotencyKey).toBe(first.idempotencyKey);
+      expect(await attempts(subId)).toHaveLength(1);
+    });
+
+    test("an order Toss declined counts as a failed try without a new charge", async () => {
+      const { subId } = await dueSubscription();
+      toss.chargeBillingKey.mockRejectedValueOnce(
+        new toss.TossApiError("server error", 500),
+      );
+      await chargeDueSubscriptions();
+      const [first] = await attempts(subId);
+      // The reconciler learns Toss declined it.
+      await db
+        .updateTable("payments")
+        .set({ status: "aborted" })
+        .where("order_id", "=", first.order_id)
+        .execute();
+
+      await chargeDueSubscriptions();
+
+      expect(toss.chargeBillingKey).toHaveBeenCalledTimes(1);
+      const sub = await subscription(subId);
+      expect(sub.failed_charge_count).toBe(1);
+      expect(sub.status).toBe("active");
+      expect(sub.charging_started_at).toBeNull();
+      expect((await attempts(subId))[0].status).toBe("aborted");
+      expect(email.sendSubscriptionPaymentGraceEmail).toHaveBeenCalledTimes(1);
+    });
+
+    test("a pending order Toss reports as declined is not charged again", async () => {
+      const { subId } = await dueSubscription();
+      toss.chargeBillingKey.mockRejectedValueOnce(
+        new toss.TossApiError("server error", 500),
+      );
+      await chargeDueSubscriptions();
+      const [first] = await attempts(subId);
+      toss.getPaymentByOrderId.mockResolvedValue(
+        tossPayment(first.order_id, 1000, { status: "ABORTED" }),
+      );
+
+      await chargeDueSubscriptions();
+
+      expect(toss.chargeBillingKey).toHaveBeenCalledTimes(1);
+      expect((await subscription(subId)).failed_charge_count).toBe(1);
     });
   });
 });

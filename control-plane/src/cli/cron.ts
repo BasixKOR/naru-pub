@@ -17,6 +17,8 @@ const SUBSCRIPTION_CHARGE_TIMEOUT = 10 * 60 * 1000; // 10 minutes
 const BILLING_NOTIFICATION_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const PAYMENT_RECONCILIATION_INTERVAL = 5 * 60 * 1000; // 5 minutes
 const PAYMENT_RECONCILIATION_TIMEOUT = 2 * 60 * 1000; // 2 minutes
+const BILLING_KEY_DELETION_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const BILLING_KEY_DELETION_TIMEOUT = 2 * 60 * 1000; // 2 minutes
 const PAYMENT_REFUND_SYNC_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const EXPIRED_CUSTOM_DOMAIN_CLEANUP_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const EXPIRED_GITHUB_DEPLOYMENT_CLEANUP_TIMEOUT = 5 * 60 * 1000; // 5 minutes
@@ -170,6 +172,13 @@ async function runPaymentReconciliation() {
   await runWithTimeout("reconcile-payments.ts", PAYMENT_RECONCILIATION_TIMEOUT);
 }
 
+async function runBillingKeyDeletion() {
+  await runWithTimeout(
+    "delete-retired-billing-keys.ts",
+    BILLING_KEY_DELETION_TIMEOUT,
+  );
+}
+
 async function runPaymentRefundSync() {
   await runWithTimeout("sync-payment-refunds.ts", PAYMENT_REFUND_SYNC_TIMEOUT);
 }
@@ -242,6 +251,10 @@ async function main() {
   console.log("[cron] Scheduling payment reconciliation every 5 minutes");
   setInterval(runPaymentReconciliation, PAYMENT_RECONCILIATION_INTERVAL);
   setTimeout(runPaymentReconciliation, 45 * 1000);
+
+  console.log("[cron] Scheduling billing key deletion every 5 minutes");
+  setInterval(runBillingKeyDeletion, BILLING_KEY_DELETION_INTERVAL);
+  setTimeout(runBillingKeyDeletion, 55 * 1000);
 
   // Run expired GitHub deployment cleanup every 15 minutes
   console.log("[cron] Scheduling GitHub deployment cleanup every 15 minutes");

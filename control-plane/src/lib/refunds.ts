@@ -161,26 +161,26 @@ export async function refundPayment(opts: {
     }
   }
 
+  let reconciled = false;
   try {
     await cancelPayment({
       flow: paymentFlowForRecord(payment.toss_flow, payment.attempt_key),
       paymentKey: payment.toss_payment_key,
       cancelReason: opts.reason.slice(0, 200),
-      idempotencyKey: `refund:${payment.id}`,
     });
   } catch (error) {
-    // The money is already back — it is the ledger that is behind. Fall through
-    // to reconciliation so this attempt catches the ledger up instead of
-    // reporting a failure for a refund that did happen.
-    if (
-      !(error instanceof TossApiError) ||
-      error.code !== "ALREADY_CANCELED_PAYMENT"
-    ) {
-      throw error;
-    }
+    if (!(error instanceof TossApiError)) throw error;
+    // Toss refuses to cancel a payment that is already canceled — with
+    // ALREADY_CANCELED_PAYMENT or NOT_CANCELABLE_PAYMENT, and the latter also
+    // covers other refusals. Ask Toss what the payment is now: if the money is
+    // already back, only the ledger is behind and reconciliation catches it
+    // up. Otherwise the refund really failed.
+    const result = await reconcilePayment(payment.id).catch(() => null);
+    if (result?.state !== "refunded") throw error;
+    reconciled = true;
   }
 
-  await reconcilePayment(payment.id);
+  if (!reconciled) await reconcilePayment(payment.id);
   const subscriptionCanceled = await stopRecurringBilling(payment.user_id);
 
   return {

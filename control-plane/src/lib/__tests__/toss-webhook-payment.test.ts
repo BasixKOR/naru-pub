@@ -11,12 +11,13 @@ describe("Toss webhook parsing", () => {
     ).toEqual({ type: "payment-status-changed", orderId: "order-1" });
   });
 
+  // Toss nests the payload under data, as for every other event.
   test("accepts billing-key deletion events", () => {
     expect(
       parseTossWebhook({
         eventType: "BILLING_DELETED",
-        billingKey: "billing-1",
-        reason: "customer request",
+        createdAt: "2026-09-30T12:00:00.000000",
+        data: { billingKey: "billing-1", reason: "customer request" },
       }),
     ).toEqual({ type: "billing-deleted", billingKey: "billing-1" });
   });
@@ -25,6 +26,10 @@ describe("Toss webhook parsing", () => {
     null,
     {},
     { eventType: "BILLING_DELETED" },
+    { eventType: "BILLING_DELETED", data: {} },
+    { eventType: "BILLING_DELETED", data: { billingKey: "" } },
+    // Not where Toss puts it.
+    { eventType: "BILLING_DELETED", billingKey: "billing-1" },
     { eventType: "DEPOSIT_CALLBACK", orderId: "order-1" },
   ])("ignores unsupported or malformed payloads", (payload) => {
     expect(parseTossWebhook(payload)).toEqual({ type: "ignored" });

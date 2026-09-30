@@ -45,6 +45,11 @@ export async function POST(request: NextRequest) {
           .where("toss_billing_key", "=", event.billingKey)
           .execute();
       }
+      // Toss already deleted this key; nothing is left to retire.
+      await db
+        .deleteFrom("retired_billing_keys")
+        .where("billing_key", "=", event.billingKey)
+        .execute();
 
       return NextResponse.json({ received: true });
     }

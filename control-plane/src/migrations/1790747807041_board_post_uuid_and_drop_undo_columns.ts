@@ -2,14 +2,15 @@ import { sql, type Kysely } from "kysely";
 
 // Board posts are keyed by a UUID instead of a sequence number, so post
 // addresses (/board/<id>) don't reveal how many posts there are or let anyone
-// walk them in order. uuidv7() (PostgreSQL 18) is time-ordered, so new rows
-// still land at the end of the index. Existing posts get a new id, and every
-// table that points at a post follows.
+// walk them in order. gen_random_uuid() rather than the time-ordered uuidv7():
+// that needs PostgreSQL 18, and CI and development run older versions. The
+// board is small and sorts by its timestamps, not by id. Existing posts get a
+// new id, and every table that points at a post follows.
 //
 // Also drops the template application columns that only undo read, now that
 // applications can't be undone. The backups applying makes are unchanged.
 export async function up(db: Kysely<any>): Promise<void> {
-  await sql`alter table board_posts add column uuid uuid not null default uuidv7()`.execute(
+  await sql`alter table board_posts add column uuid uuid not null default gen_random_uuid()`.execute(
     db,
   );
 

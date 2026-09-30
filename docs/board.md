@@ -7,7 +7,7 @@ the six newest **template** posts; other kinds of post stay on the board.
 Below them come the ads, the usage notice, and 최근 업데이트된, which shows
 the 24 most recently updated sites. `/sites` lists all of them, 48 per page.
 
-Post ids are UUIDs (`uuidv7()`), so `/board/<id>` addresses can't be
+Post ids are random UUIDs (`gen_random_uuid()`), so `/board/<id>` addresses can't be
 guessed or walked in order. Replies, templates and versions keep sequence
 numbers.
 

@@ -5,29 +5,24 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { MAX_CHANGELOG_LENGTH } from "@/lib/board/constants";
 import { boardRequest } from "../../_components/api";
-import {
-  FolderPicker,
-  type FolderSelection,
-} from "../../_components/FolderPicker";
+import { FolderPicker } from "../../_components/FolderPicker";
 
 export function NewVersionForm({
   templateId,
   postId,
-  initialFolder,
+  initialFiles,
   collections,
   initialCollections,
 }: {
   templateId: string;
   postId: string;
-  initialFolder: string;
+  // The previous version's files, checked to start with.
+  initialFiles: string[];
   collections: string[];
   initialCollections: string[];
 }) {
   const router = useRouter();
-  const [selection, setSelection] = useState<FolderSelection>({
-    folder: initialFolder,
-    exclude: [],
-  });
+  const [selection, setSelection] = useState<string[]>(initialFiles);
   const [changelog, setChangelog] = useState("");
   const [chosen, setChosen] = useState<string[]>(
     initialCollections.filter((name) => collections.includes(name)),
@@ -42,8 +37,7 @@ export function NewVersionForm({
         `/api/board/templates/${templateId}/versions`,
         "POST",
         {
-          folder: selection.folder,
-          exclude: selection.exclude,
+          files: selection,
           changelog,
           collections: chosen,
         },

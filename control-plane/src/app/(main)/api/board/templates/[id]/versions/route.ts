@@ -12,8 +12,7 @@ export async function POST(
     const body = await readJson(request);
     const user = await requireVerifiedUser();
     const version = await publishTemplateVersion(user, templateId, {
-      folder: body.folder,
-      exclude: body.exclude,
+      files: body.files,
       changelog: body.changelog,
       collections: body.collections,
     });

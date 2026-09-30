@@ -53,7 +53,7 @@ export default async function EditPostPage({
             <div className="space-y-1">
               <h2 className="text-lg font-bold">새 버전 올리기</h2>
               <p className="text-sm text-muted-foreground">
-                지금은 v{latest.version}이에요. 폴더의 현재 파일로 v
+                지금은 v{latest.version}이에요. 체크한 파일의 지금 내용으로 v
                 {latest.version + 1}을(를) 만들어요. 이미 적용한 사람의 사이트는
                 바뀌지 않아요.
               </p>
@@ -61,7 +61,9 @@ export default async function EditPostPage({
             <NewVersionForm
               templateId={template.id}
               postId={post.id}
-              initialFolder={latest.sourcePath.replace(/\/$/, "")}
+              initialFiles={template.files.map(
+                (file) => `${latest.sourcePath}${file.path}`,
+              )}
               collections={collections.map((c) => c.name)}
               initialCollections={latest.collections.map((c) => c.name)}
             />

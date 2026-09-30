@@ -28,8 +28,7 @@ export async function POST(request: NextRequest) {
       body: body.body,
       slug: body.slug,
       license: body.license,
-      folder: body.folder,
-      exclude: body.exclude,
+      files: body.files,
       collections: body.collections,
     });
     // The post is up whether or not the fediverse hears about it.

@@ -42,15 +42,21 @@ Code: `control-plane/src/lib/board/` (logic), `src/app/(main)/board/` (pages),
 
 ## Templates
 
-- **A template is one folder**, or the whole site, minus any files or
-  subfolders the author leaves out. `/.backup/` is always left out. Only file
-  types the upload route accepts are allowed. The limits are 200 files and
-  20 MiB, so publishing and applying each fit in one request of R2 copies.
+- **A template is the files the author checks.** The share form shows the
+  whole site with nothing checked, and folders start collapsed. The
+  template's root is the deepest folder holding every checked file, so
+  checking `hello-world/index.html` shares `index.html` from the root
+  `hello-world/`. Its name (for example `alice/hello-world`), which is also
+  the default folder when someone applies it, is filled in from that folder.
+  `/.backup/` is hidden and refused. Only file types the upload route accepts
+  are allowed. The limits are 200 files and 20 MiB, so publishing and
+  applying each fit in one request of R2 copies.
 - **Publishing takes a snapshot.** The files are copied to
   `_templates/<template_id>/v<version>/` in the site bucket. Login names match
   `^[a-z0-9]+(-[a-z0-9]+)*$`, so no one's site can collide with that prefix.
   Later edits to the author's site don't change the template. "새 버전
-  올리기" (publish a new version) on the edit page takes another snapshot.
+  올리기" (publish a new version) on the edit page takes another snapshot,
+  starting with the previous version's files checked.
 - **Licenses**: CC BY 4.0, CC BY-SA 4.0 or CC0 1.0. All three allow copying,
   which is what applying does.
 - **Collections**: an author can attach some of their own site-data

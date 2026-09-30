@@ -310,27 +310,35 @@ integration("board", () => {
   });
 
   describe("templates", () => {
+    // Everything under alice/retro/ unless a test checks other files.
+    function aliceFiles(prefix = "retro/") {
+      return [...bucket.keys()]
+        .filter((key) => key.startsWith(`alice/${prefix}`))
+        .map((key) => key.slice("alice/".length));
+    }
+
     function publish(overrides: Record<string, unknown> = {}) {
       return publishTemplatePost(alice, {
         title: "레트로 홈",
         body: "설명",
         slug: `retro-${Math.random().toString(36).slice(2, 8)}`,
         license: "cc-by-4.0",
-        folder: "retro",
-        exclude: ["retro/drafts/"],
+        files: aliceFiles(),
         collections: [],
         ...overrides,
       });
     }
 
-    test("publishes a snapshot of the folder, minus exclusions and backups", async () => {
+    test("publishes a snapshot of only the checked files", async () => {
       put("alice/retro/index.html");
       put("alice/retro/style.css", "text/css");
       put("alice/retro/images/bg.png", "image/png", 100);
       put("alice/retro/drafts/secret.html");
       put("alice/index.html");
 
-      const { postId, templateId } = await publish({ exclude: ["drafts/"] });
+      const { postId, templateId } = await publish({
+        files: ["retro/index.html", "retro/style.css", "retro/images/bg.png"],
+      });
       const template = await getTemplateForPost(postId);
       expect(template?.files.map((f) => f.path)).toEqual([
         "images/bg.png",
@@ -341,6 +349,7 @@ integration("board", () => {
       expect(bucket.has(`_templates/${templateId}/v1/drafts/secret.html`)).toBe(
         false,
       );
+      expect(template?.versions[0].sourcePath).toBe("retro/");
 
       const latest = await listLatestTemplatePosts(6);
       expect(latest[0].id).toBe(postId);
@@ -352,9 +361,10 @@ integration("board", () => {
       expect(commonDirectory(["a/x.html", "b/y.html"])).toBe("");
       expect(commonDirectory(["index.html", "a/y.html"])).toBe("");
 
-      // Shared from the whole site, but everything is in hello-world/.
+      // Everything checked is in hello-world/.
       put("alice/hello-world/index.html");
-      const { postId } = await publish({ folder: "", exclude: [] });
+      put("alice/index.html");
+      const { postId } = await publish({ files: ["hello-world/index.html"] });
       const template = await getTemplateForPost(postId);
       expect(template?.files.map((f) => f.path)).toEqual(["index.html"]);
       expect(template?.versions[0].sourcePath).toBe("hello-world/");
@@ -369,17 +379,17 @@ integration("board", () => {
       expect(bucket.has("bob/hello-world/hello-world/index.html")).toBe(false);
     });
 
-    test("refuses files a site cannot host, and empty folders", async () => {
+    test("refuses unhostable, missing, backup and escaping paths", async () => {
       put("alice/bad/run.exe", "application/octet-stream");
-      await expect(publish({ folder: "bad" })).rejects.toMatchObject({
-        status: 400,
-      });
-      await expect(publish({ folder: "empty" })).rejects.toMatchObject({
-        status: 400,
-      });
-      await expect(publish({ folder: "../bob" })).rejects.toMatchObject({
-        status: 400,
-      });
+      for (const files of [
+        ["bad/run.exe"],
+        [],
+        ["../bob/index.html"],
+        ["missing.html"],
+        [".backup/2026/index.html"],
+      ]) {
+        await expect(publish({ files })).rejects.toMatchObject({ status: 400 });
+      }
       await expect(
         publish({ license: "all-rights-reserved" }),
       ).rejects.toMatchObject({
@@ -484,16 +494,14 @@ integration("board", () => {
       put("alice/retro/new.css", "text/css");
       expect(
         await publishTemplateVersion(alice, templateId, {
-          folder: undefined,
-          exclude: [],
+          files: ["retro/index.html", "retro/new.css"],
           changelog: "CSS 추가",
           collections: [],
         }),
       ).toBe(2);
       await expect(
         publishTemplateVersion(bob, templateId, {
-          folder: undefined,
-          exclude: [],
+          files: ["retro/index.html"],
           changelog: null,
           collections: [],
         }),

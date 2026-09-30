@@ -215,8 +215,24 @@ async function serveTemplate(target: TargetTemplate) {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
+  // The page to open: the root's index.html, or else the shallowest one, or
+  // else the first HTML file. Versions published before templates were
+  // rooted at their files' own folder can hold only hello-world/index.html.
+  const paths = [...files.keys()].sort(
+    (a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b),
+  );
+  const entry =
+    paths.find(
+      (path) => path === "index.html" || path.endsWith("/index.html"),
+    ) ??
+    paths.find((path) => /\.x?html?$/.test(path)) ??
+    "";
   return {
-    url: `http://127.0.0.1:${port}/`,
+    url: `http://127.0.0.1:${port}/${entry
+      .replace(/(^|\/)index\.html$/, "$1")
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/")}`,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }

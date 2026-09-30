@@ -13,10 +13,7 @@ import {
   type PostKind,
 } from "@/lib/board/constants";
 import { boardRequest } from "../_components/api";
-import {
-  FolderPicker,
-  type FolderSelection,
-} from "../_components/FolderPicker";
+import { FolderPicker, commonFolder } from "../_components/FolderPicker";
 
 function slugFrom(folder: string): string {
   const last = folder.split("/").filter(Boolean).pop() ?? "";
@@ -38,17 +35,17 @@ export function NewPostForm({
   const [kind, setKind] = useState<PostKind>(initialKind);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [selection, setSelection] = useState<FolderSelection>({
-    folder: "",
-    exclude: [],
-  });
+  const [selection, setSelection] = useState<string[]>([]);
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
   const [license, setLicense] = useState<License>("cc-by-4.0");
   const [chosenCollections, setChosenCollections] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
-  const effectiveSlug = slugEdited ? slug : slugFrom(selection.folder) || slug;
+  // Filled in from the checked files' top folder until the person edits it.
+  const effectiveSlug = slugEdited
+    ? slug
+    : slugFrom(commonFolder(selection)) || slug;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -62,8 +59,7 @@ export function NewPostForm({
               body,
               slug: effectiveSlug,
               license,
-              folder: selection.folder,
-              exclude: selection.exclude,
+              files: selection,
               collections: chosenCollections,
             }
           : { kind, title, body };
@@ -133,7 +129,7 @@ export function NewPostForm({
 
           <div className="space-y-2">
             <label htmlFor="template-slug" className="text-sm font-bold">
-              템플릿 이름 (주소용)
+              템플릿 이름
             </label>
             <input
               id="template-slug"
@@ -149,8 +145,9 @@ export function NewPostForm({
               className="h-11 w-full border border-border bg-background px-3 text-sm"
             />
             <p className="text-xs text-muted-foreground">
-              영문 소문자, 숫자, 하이픈(-). 적용하는 사람의 기본 폴더 이름이
-              돼요.
+              고른 파일의 최상위 폴더 이름으로 채워져요. 다른 사람이 새 폴더에
+              적용할 때 기본 폴더 이름이 되고, 「내 아이디/이름」으로 표시돼요.
+              영문 소문자, 숫자, 하이픈(-)만 쓸 수 있어요.
             </p>
           </div>
 

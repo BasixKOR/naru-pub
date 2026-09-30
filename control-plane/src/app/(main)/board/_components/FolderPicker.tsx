@@ -1,54 +1,50 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import type { FileNode } from "@/lib/fileUtils";
 
-export interface FolderSelection {
-  // "" is the whole site; otherwise "a/b" with no slashes at either end.
-  folder: string;
-  // Paths relative to the folder; a directory ends with "/".
-  exclude: string[];
-}
-
-function flattenDirectories(nodes: FileNode[], into: string[] = []): string[] {
-  for (const node of nodes) {
-    if (!node.isDirectory) continue;
-    if (node.path === ".backup" || node.path.startsWith(".backup/")) continue;
-    into.push(node.path);
-    flattenDirectories(node.children ?? [], into);
-  }
-  return into;
-}
-
-function findNode(nodes: FileNode[], path: string): FileNode | null {
-  for (const node of nodes) {
-    if (node.path === path) return node;
-    if (node.isDirectory && path.startsWith(`${node.path}/`)) {
-      return findNode(node.children ?? [], path);
+// The deepest folder holding every path, as "a/b", or "" when they sit in
+// different places. The server narrows a template to the same folder.
+export function commonFolder(paths: string[]): string {
+  if (paths.length === 0) return "";
+  let common = paths[0].split("/").slice(0, -1);
+  for (const path of paths.slice(1)) {
+    const directories = path.split("/").slice(0, -1);
+    let shared = 0;
+    while (
+      shared < common.length &&
+      shared < directories.length &&
+      common[shared] === directories[shared]
+    ) {
+      shared++;
     }
+    common = common.slice(0, shared);
   }
-  return null;
+  return common.join("/");
 }
 
-function countFiles(node: FileNode): number {
-  if (!node.isDirectory) return 1;
-  return (node.children ?? []).reduce(
-    (sum, child) => sum + countFiles(child),
-    0,
-  );
+function filesUnder(node: FileNode): string[] {
+  if (!node.isDirectory) return [node.path];
+  return (node.children ?? []).flatMap(filesUnder);
 }
 
-// Picks one folder of the person's site and lets them leave out files or
-// subfolders inside it. The server applies the same rules again.
+function isBackup(node: FileNode) {
+  return node.path === ".backup" || node.path.startsWith(".backup/");
+}
+
+// The person's whole site as a tree, nothing checked: they check the files
+// or folders to share. The value is the checked files' paths.
 export function FolderPicker({
   value,
   onChange,
 }: {
-  value: FolderSelection;
-  onChange: (value: FolderSelection) => void;
+  value: string[];
+  onChange: (value: string[]) => void;
 }) {
   const [tree, setTree] = useState<FileNode[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -56,72 +52,114 @@ export function FolderPicker({
       .then((response) => response.json())
       .then((data) => {
         if (cancelled) return;
-        if (data.success) setTree(data.files);
-        else setError(data.message ?? "파일 목록을 불러올 수 없습니다.");
+        if (data.success) {
+          const nodes: FileNode[] = data.files.filter(
+            (node: FileNode) => !isBackup(node),
+          );
+          setTree(nodes);
+          // Open the folders that hold what is already checked.
+          const open = new Set<string>();
+          for (const path of value) {
+            const parts = path.split("/").slice(0, -1);
+            for (let i = 1; i <= parts.length; i++) {
+              open.add(parts.slice(0, i).join("/"));
+            }
+          }
+          setExpanded(open);
+        } else {
+          setError(data.message ?? "파일 목록을 불러올 수 없습니다.");
+        }
       })
       .catch(() => !cancelled && setError("파일 목록을 불러올 수 없습니다."));
     return () => {
       cancelled = true;
     };
+    // The initial selection only decides which folders start open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const directories = useMemo(
-    () => (tree ? flattenDirectories(tree) : []),
-    [tree],
-  );
-  const children = useMemo(() => {
-    if (!tree) return [];
-    if (!value.folder) return tree;
-    return findNode(tree, value.folder)?.children ?? [];
-  }, [tree, value.folder]);
+  const selected = useMemo(() => new Set(value), [value]);
+  const root = commonFolder(value);
 
-  const excluded = new Set(value.exclude);
-  const prefix = value.folder ? `${value.folder}/` : "";
-
-  function relative(node: FileNode) {
-    const path = node.path.slice(prefix.length);
-    return node.isDirectory ? `${path}/` : path;
+  function setFiles(paths: string[], checked: boolean) {
+    const next = new Set(selected);
+    for (const path of paths) {
+      if (checked) next.add(path);
+      else next.delete(path);
+    }
+    onChange([...next].sort());
   }
 
-  function toggle(node: FileNode) {
-    const path = relative(node);
-    const next = new Set(excluded);
-    if (next.has(path)) next.delete(path);
-    else next.add(path);
-    onChange({ ...value, exclude: [...next] });
+  function toggleOpen(path: string) {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
   }
 
   function renderNodes(nodes: FileNode[], depth: number): React.ReactNode {
     return nodes
-      .filter(
-        (node) => !(depth === 0 && !value.folder && node.path === ".backup"),
-      )
+      .filter((node) => !isBackup(node))
       .map((node) => {
-        const path = relative(node);
-        const isExcluded = excluded.has(path);
+        const files = filesUnder(node);
+        const count = files.filter((path) => selected.has(path)).length;
+        const checked = files.length > 0 && count === files.length;
+        const partial = count > 0 && !checked;
+        const open = expanded.has(node.path);
         return (
           <li key={node.path}>
-            <label
-              className={`flex h-9 items-center gap-2 border-b border-border/60 pr-3 text-sm ${isExcluded ? "text-muted-foreground" : "text-foreground"}`}
-              style={{ paddingLeft: `${0.75 + depth * 1.25}rem` }}
+            <div
+              className="flex h-9 items-center gap-1 border-b border-border/60 pr-3 text-sm"
+              style={{ paddingLeft: `${0.25 + depth * 1.25}rem` }}
             >
-              <input
-                type="checkbox"
-                checked={!isExcluded}
-                onChange={() => toggle(node)}
-                className="h-4 w-4 accent-primary"
-              />
-              <span className="truncate">
-                {node.name}
-                {node.isDirectory ? "/" : ""}
-              </span>
-              {node.isDirectory && (
-                <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                  {isExcluded ? "제외함" : `파일 ${countFiles(node)}개`}
-                </span>
+              {node.isDirectory ? (
+                <button
+                  type="button"
+                  onClick={() => toggleOpen(node.path)}
+                  aria-label={
+                    open ? `${node.name} 접기` : `${node.name} 펼치기`
+                  }
+                  aria-expanded={open}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
+                >
+                  {open ? (
+                    <ChevronDown size={14} />
+                  ) : (
+                    <ChevronRight size={14} />
+                  )}
+                </button>
+              ) : (
+                <span className="w-8 shrink-0" />
               )}
-            </label>
-            {node.isDirectory && !isExcluded && node.children?.length ? (
+              <label className="flex min-w-0 flex-1 items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  ref={(input) => {
+                    if (input) input.indeterminate = partial;
+                  }}
+                  disabled={files.length === 0}
+                  onChange={() => setFiles(files, !checked)}
+                  className="h-4 w-4 accent-primary"
+                />
+                <span
+                  className={`truncate ${count > 0 ? "text-foreground" : "text-muted-foreground"}`}
+                >
+                  {node.name}
+                  {node.isDirectory ? "/" : ""}
+                </span>
+                {node.isDirectory && (
+                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                    {count > 0
+                      ? `${count}/${files.length}`
+                      : `파일 ${files.length}개`}
+                  </span>
+                )}
+              </label>
+            </div>
+            {node.isDirectory && open && node.children?.length ? (
               <ul>{renderNodes(node.children, depth + 1)}</ul>
             ) : null}
           </li>
@@ -145,39 +183,25 @@ export function FolderPicker({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="space-y-2">
-        <label htmlFor="template-folder" className="text-sm font-bold">
-          공유할 폴더
-        </label>
-        <select
-          id="template-folder"
-          value={value.folder}
-          onChange={(event) =>
-            onChange({ folder: event.target.value, exclude: [] })
-          }
-          className="h-11 w-full border border-border bg-background px-3 text-sm"
-        >
-          <option value="">/ (사이트 전체)</option>
-          {directories.map((directory) => (
-            <option key={directory} value={directory}>
-              /{directory}/
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="max-h-80 overflow-y-auto border border-border">
-        {children.length === 0 ? (
+    <div className="space-y-2">
+      <span className="text-sm font-bold">템플릿으로 공유할 파일</span>
+      <p className="text-xs text-muted-foreground">
+        공유할 파일이나 폴더를 체크해 주세요. 비공개 초안이나 개인 정보가 든
+        파일은 빼 주세요.
+      </p>
+      <div className="max-h-96 overflow-y-auto border border-border">
+        {tree.length === 0 ? (
           <p className="p-3 text-sm text-muted-foreground">
-            이 폴더에 파일이 없어요.
+            내 사이트에 파일이 없어요.
           </p>
         ) : (
-          <ul>{renderNodes(children, 0)}</ul>
+          <ul>{renderNodes(tree, 0)}</ul>
         )}
       </div>
       <p className="text-xs text-muted-foreground">
-        체크를 풀면 템플릿에서 빠져요. 비공개 초안이나 개인 정보가 든 파일은 빼
-        주세요. /.backup/ 폴더는 항상 빠져요.
+        {value.length === 0
+          ? "아직 고른 파일이 없어요."
+          : `파일 ${value.length}개 · 템플릿의 최상위 폴더: /${root ? `${root}/` : ""}`}
       </p>
     </div>
   );

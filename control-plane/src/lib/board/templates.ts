@@ -97,69 +97,39 @@ export function commonDirectory(paths: string[]): string {
   return common.length > 0 ? `${common.join("/")}/` : "";
 }
 
-// The files a folder of the author's site would publish: everything under it
-// except the excluded paths and the backups applying templates leaves behind.
-//
-// When every file sits inside one subfolder, that subfolder becomes the
-// template's root. Otherwise a template shared from the whole site, holding
-// only hello-world/index.html, would be applied into a new folder as
-// hello-world/hello-world/index.html. The returned folder is the root used.
+// The files the author checked, relative to their home directory. The
+// template's root is the deepest folder holding all of them, so checking
+// hello-world/index.html shares index.html under the root hello-world/.
+// Applying it into a new folder then gives that folder's index.html, not
+// hello-world/hello-world/index.html. The returned folder is that root.
 export async function collectSourceFiles(
   loginName: string,
-  folderInput: string,
-  exclude: string[],
+  paths: string[],
 ): Promise<{ folder: string; files: TemplateSourceFile[] }> {
-  let folder = folderInput;
   const home = `${getUserHomeDirectory(loginName)}/`;
-  const prefix = `${home}${folder}`;
-  const excluded = exclude.map((entry) => {
-    const path = collapseSlashes(entry).replace(/^\/+/, "");
-    try {
-      assertNoPathTraversal(path);
-    } catch (error: any) {
-      throw new BoardError(400, error.message);
-    }
-    return path;
-  });
-
+  const wanted = new Set(paths);
   const files: TemplateSourceFile[] = [];
-  for (const object of await storage.listObjects(prefix)) {
-    const path = object.key.slice(prefix.length);
-    if (!path || path.endsWith("/")) continue;
-    if (
-      path === BACKUP_DIRECTORY ||
-      path.startsWith(`${BACKUP_DIRECTORY}/`) ||
-      excluded.some(
-        (entry) =>
-          path === entry ||
-          path.startsWith(entry.endsWith("/") ? entry : `${entry}/`),
-      )
-    ) {
-      continue;
-    }
+  for (const object of await storage.listObjects(home)) {
+    const path = object.key.slice(home.length);
+    if (!wanted.has(path)) continue;
+    wanted.delete(path);
     const contentType = contentTypeFor(path);
     if (!contentType) {
       throw new BoardError(
         400,
-        `템플릿에 넣을 수 없는 파일 형식입니다: ${folder}${path}`,
+        `템플릿에 넣을 수 없는 파일 형식입니다: ${path}`,
       );
     }
     files.push({ path, key: object.key, size: object.size, contentType });
   }
-
-  if (files.length === 0) {
-    throw new BoardError(400, "공유할 파일이 없어요.");
-  }
-  const narrowed = commonDirectory(files.map((file) => file.path));
-  if (narrowed) {
-    folder = `${folder}${narrowed}`;
-    for (const file of files) file.path = file.path.slice(narrowed.length);
-  }
-  if (files.length > TEMPLATE_MAX_FILES) {
+  if (wanted.size > 0) {
     throw new BoardError(
       400,
-      `템플릿에는 파일을 ${TEMPLATE_MAX_FILES}개까지 넣을 수 있어요. (지금 ${files.length}개)`,
+      `파일을 찾을 수 없어요: ${[...wanted].slice(0, 3).join(", ")}`,
     );
+  }
+  if (files.length === 0) {
+    throw new BoardError(400, "공유할 파일을 골라 주세요.");
   }
   const total = files.reduce((sum, file) => sum + file.size, 0);
   if (total > TEMPLATE_MAX_BYTES) {
@@ -168,7 +138,45 @@ export async function collectSourceFiles(
       `템플릿은 ${formatBytes(TEMPLATE_MAX_BYTES)}까지 공유할 수 있어요. (지금 ${formatBytes(total)})`,
     );
   }
+
+  const folder = commonDirectory(files.map((file) => file.path));
+  for (const file of files) file.path = file.path.slice(folder.length);
+  files.sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
   return { folder, files };
+}
+
+// The checked files as the request sent them: paths relative to the home
+// directory, outside the backups applying templates leaves behind.
+function validateSelection(value: unknown): string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new BoardError(400, "공유할 파일을 골라 주세요.");
+  }
+  const paths = [...new Set(value as string[])].map((entry) =>
+    collapseSlashes(entry).replace(/^\/+/, ""),
+  );
+  if (paths.length === 0)
+    throw new BoardError(400, "공유할 파일을 골라 주세요.");
+  if (paths.length > TEMPLATE_MAX_FILES) {
+    throw new BoardError(
+      400,
+      `템플릿에는 파일을 ${TEMPLATE_MAX_FILES}개까지 넣을 수 있어요. (지금 ${paths.length}개)`,
+    );
+  }
+  for (const path of paths) {
+    try {
+      assertNoPathTraversal(path);
+    } catch (error: any) {
+      throw new BoardError(400, error.message);
+    }
+    if (
+      !path ||
+      path.endsWith("/") ||
+      path.startsWith(`${BACKUP_DIRECTORY}/`)
+    ) {
+      throw new BoardError(400, `템플릿에 넣을 수 없는 경로입니다: ${path}`);
+    }
+  }
+  return paths;
 }
 
 // The author's own collections, by name, to be created empty for whoever
@@ -223,18 +231,6 @@ function validateChangelog(value: unknown): string | null {
   return changelog || null;
 }
 
-function validateExclude(value: unknown): string[] {
-  if (value === undefined || value === null) return [];
-  if (
-    !Array.isArray(value) ||
-    value.length > 500 ||
-    value.some((item) => typeof item !== "string")
-  ) {
-    throw new BoardError(400, "제외할 파일 목록이 올바르지 않습니다.");
-  }
-  return value as string[];
-}
-
 // Copies every file into the version's prefix. On a failure the partial copy
 // is removed and the error rethrown, so the caller's transaction can roll
 // back with nothing left in the bucket.
@@ -261,8 +257,7 @@ export interface PublishTemplateInput {
   body: unknown;
   slug: unknown;
   license: unknown;
-  folder: unknown;
-  exclude: unknown;
+  files: unknown;
   collections: unknown;
 }
 
@@ -278,8 +273,7 @@ export async function publishTemplatePost(
     throw new BoardError(400, "라이선스를 골라 주세요.");
   }
   const license: License = input.license;
-  const folder = normalizeFolder(input.folder);
-  const exclude = validateExclude(input.exclude);
+  const selection = validateSelection(input.files);
   await assertCanPost(user.id);
 
   const taken = await db
@@ -295,8 +289,7 @@ export async function publishTemplatePost(
   const collections = await resolveCollections(user.id, input.collections);
   const { folder: root, files } = await collectSourceFiles(
     user.loginName,
-    folder,
-    exclude,
+    selection,
   );
   const size = files.reduce((sum, file) => sum + file.size, 0);
 
@@ -368,8 +361,7 @@ export async function publishTemplateVersion(
   user: User,
   templateId: string,
   input: {
-    folder: unknown;
-    exclude: unknown;
+    files: unknown;
     changelog: unknown;
     collections: unknown;
   },
@@ -378,17 +370,12 @@ export async function publishTemplateVersion(
   if (template.user_id !== user.id) {
     throw new BoardError(403, "내 템플릿만 새 버전을 올릴 수 있어요.");
   }
-  const folder =
-    input.folder === undefined
-      ? (template.source_path ?? "")
-      : normalizeFolder(input.folder);
-  const exclude = validateExclude(input.exclude);
+  const selection = validateSelection(input.files);
   const changelog = validateChangelog(input.changelog);
   const collections = await resolveCollections(user.id, input.collections);
   const { folder: root, files } = await collectSourceFiles(
     user.loginName,
-    folder,
-    exclude,
+    selection,
   );
   const size = files.reduce((sum, file) => sum + file.size, 0);
 

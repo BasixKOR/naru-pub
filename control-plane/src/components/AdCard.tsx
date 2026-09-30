@@ -33,20 +33,20 @@ export function AdCard({
   buttonHref,
 }: AdCardProps) {
   return (
-    <Card className="w-full bg-card border-2 border-border ">
+    <Card className="w-full bg-card border-2 border-border flex flex-col">
       <CardHeader className="bg-secondary border-b border-border pb-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <CardTitle className="text-foreground text-xl font-bold flex items-center gap-2">
-              {icon} {title}
-            </CardTitle>
-          </div>
+        {/* The label sits under the title, so side by side the three
+            headers stay the same height however long the title is. */}
+        <div className="flex flex-col items-start gap-2">
+          <CardTitle className="text-foreground text-xl font-bold flex items-center gap-2">
+            {icon} {title}
+          </CardTitle>
           <span className="text-xs bg-muted text-muted-foreground border border-border px-2 py-1 rounded">
             {label}
           </span>
         </div>
       </CardHeader>
-      <CardContent className="flex flex-col sm:flex-row items-center gap-4 p-6">
+      <CardContent className="flex flex-1 flex-col items-center gap-4 p-6">
         <div className="flex-shrink-0">
           <div className="p-2 bg-card border border-border rounded">
             <Image
@@ -58,7 +58,7 @@ export function AdCard({
             />
           </div>
         </div>
-        <div className="flex-1 text-center sm:text-left">
+        <div className="text-center">
           <div className="flex flex-col gap-4">
             <p className="text-sm font-medium text-muted-foreground break-keep">
               {description}

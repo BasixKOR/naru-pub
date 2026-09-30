@@ -316,7 +316,7 @@ export default async function Home() {
           </Card>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="grid gap-6 lg:grid-cols-3">
           <AdCard
             icon="🥒"
             title="오이카페"
@@ -338,17 +338,6 @@ export default async function Home() {
             subtitle="자신의 글을 메일링과 연합우주를 통해 발행하세요!"
             buttonText="글 쓰러 가기 →"
             buttonHref="https://typo.blue"
-          />
-          <AdCard
-            icon="🐓"
-            title="커뮹!"
-            label="동맹 사이트 광고"
-            imageSrc="/ad/8eb6bc2c4a2b73696ad1788fb98a6d59c8a3c21a15ddd418b1bf38800c65f317.png"
-            imageAlt="커뮹! 캐릭터"
-            description="마스토돈 스타일의 커뮤 플랫폼, 커뮹!"
-            subtitle="편리한 총괄, 간편한 러닝! 커뮤 뛰러 오세요!"
-            buttonText="커뮤 뛰러 가기 →"
-            buttonHref="https://commu.ng"
           />
           <AdCard
             icon="👀"

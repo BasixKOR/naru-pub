@@ -12,6 +12,7 @@ import { dispatchActorDelete } from "@/lib/federation";
 import { deleteCustomDomainsForUser } from "@/lib/customDomains";
 import { verify } from "@node-rs/argon2";
 import { deleteUserMedia } from "@/lib/site-data/media";
+import { deleteUserTemplateObjects } from "@/lib/board/templates";
 
 export async function POST(request: NextRequest) {
   try {
@@ -100,6 +101,8 @@ export async function POST(request: NextRequest) {
     }
 
     await deleteUserMedia(user.id);
+    // Template snapshots live outside the home directory.
+    await deleteUserTemplateObjects(user.id);
 
     // Federate the account deletion before the row (and its keys/followers)
     // cascade away. Failure here must not block deletion.

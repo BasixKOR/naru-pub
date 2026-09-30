@@ -18,6 +18,7 @@ import {
   Note,
   Person,
   PUBLIC_COLLECTION,
+  Tombstone,
   Undo,
   Update,
 } from "@fedify/fedify/vocab";
@@ -650,4 +651,134 @@ export async function dispatchActorDelete(
   });
 
   await ctx.sendActivity(senderKeyPairs, recipients, deleteActivity);
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * Announce a new template post to the author's followers as a Create(Note)
+ * linking to the post on the board. The note is kept in `activities`, so it
+ * shows in the outbox, and its IRI on the post so deleting the post can
+ * retract it.
+ */
+export async function dispatchTemplatePost(postId: string): Promise<void> {
+  const post = await db
+    .selectFrom("board_posts as p")
+    .innerJoin("users as u", "u.id", "p.user_id")
+    .select(["p.id", "p.title", "p.body", "p.user_id", "u.login_name"])
+    .where("p.id", "=", postId)
+    .where("p.kind", "=", "template")
+    .where("p.deleted_at", "is", null)
+    .where("p.federated_note_iri", "is", null)
+    .executeTakeFirst();
+  if (!post) return;
+
+  const identifier = post.login_name;
+  const baseUrl = new URL(process.env.BASE_URL ?? "http://localhost:3000");
+  const ctx = federation.createContext(baseUrl, undefined);
+  const postUrl = new URL(`/board/${post.id}`, baseUrl);
+  const actorUri = ctx.getActorUri(identifier);
+  const followersUri = ctx.getFollowersUri(identifier);
+  const noteId = ctx.getObjectUri(Note, { identifier, id: randomUUID() });
+  const activityId = ctx.getObjectUri(Create, {
+    identifier,
+    id: randomUUID(),
+  });
+  const now = Temporal.Now.instant();
+
+  const summary = post.body.replace(/\s+/g, " ").trim();
+  const excerpt = summary.length > 300 ? `${summary.slice(0, 300)}…` : summary;
+  const content =
+    `<p>새 템플릿을 공유했어요: <a href="${postUrl.href}">${escapeHtml(post.title)}</a></p>` +
+    (excerpt ? `<p>${escapeHtml(excerpt)}</p>` : "");
+
+  const note = new Note({
+    id: noteId,
+    attribution: actorUri,
+    name: post.title,
+    content,
+    url: postUrl,
+    published: now,
+    to: PUBLIC_COLLECTION,
+    cc: followersUri,
+  });
+  const create = new Create({
+    id: activityId,
+    actor: actorUri,
+    object: note,
+    published: now,
+    to: PUBLIC_COLLECTION,
+    cc: followersUri,
+  });
+  const payload = await create.toJsonLd({ contextLoader: ctx.contextLoader });
+
+  await db.transaction().execute(async (tx) => {
+    await tx
+      .insertInto("activities")
+      .values({
+        id: activityId.href,
+        user_id: post.user_id,
+        type: "Create",
+        payload,
+        object_iri: noteId.href,
+      })
+      .execute();
+    await tx
+      .updateTable("board_posts")
+      .set({ federated_note_iri: noteId.href })
+      .where("id", "=", post.id)
+      .execute();
+  });
+
+  try {
+    await ctx.sendActivity({ identifier }, "followers", create);
+  } catch (err) {
+    console.error("[federation] dispatchTemplatePost failed", err);
+  }
+}
+
+/**
+ * Retract a template post's note: a Delete(Tombstone) to the author's
+ * followers, and the Create dropped from the outbox.
+ */
+export async function dispatchNoteDelete(
+  userId: number,
+  noteIri: string,
+): Promise<void> {
+  const user = await db
+    .selectFrom("users")
+    .select("login_name")
+    .where("id", "=", userId)
+    .executeTakeFirst();
+  if (!user) return;
+
+  await db
+    .deleteFrom("activities")
+    .where("user_id", "=", userId)
+    .where("object_iri", "=", noteIri)
+    .execute();
+
+  const identifier = user.login_name;
+  const baseUrl = new URL(process.env.BASE_URL ?? "http://localhost:3000");
+  const ctx = federation.createContext(baseUrl, undefined);
+  const deleteActivity = new Delete({
+    id: new URL(`/users/${identifier}/activities/${randomUUID()}`, baseUrl),
+    actor: ctx.getActorUri(identifier),
+    object: new Tombstone({ id: new URL(noteIri) }),
+    published: Temporal.Now.instant(),
+    to: PUBLIC_COLLECTION,
+    cc: ctx.getFollowersUri(identifier),
+  });
+
+  try {
+    await ctx.sendActivity({ identifier }, "followers", deleteActivity);
+  } catch (err) {
+    console.error("[federation] dispatchNoteDelete failed", err);
+  }
 }

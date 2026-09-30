@@ -7,6 +7,10 @@ export type Generated<T> =
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
+// node-postgres returns bigint (int8) columns as strings, since they can exceed
+// Number.MAX_SAFE_INTEGER.
+export type Int8 = ColumnType<string, string | number, string | number>;
+
 export interface EmailVerificationTokens {
   created_at: Generated<Timestamp>;
   email: string;
@@ -306,7 +310,126 @@ export interface SupporterFeatureUses {
   last_used_at: Generated<Timestamp>;
 }
 
+export interface BoardPosts {
+  id: Generated<Int8>;
+  user_id: number;
+  kind: "site" | "template" | "question" | "chat";
+  title: string;
+  body: Generated<string>;
+  reply_count: Generated<number>;
+  like_count: Generated<number>;
+  last_reply_at: Timestamp | null;
+  last_reply_user_id: number | null;
+  activity_at: Generated<Timestamp>;
+  solved_reply_id: Int8 | null;
+  federated_note_iri: string | null;
+  created_at: Generated<Timestamp>;
+  edited_at: Timestamp | null;
+  deleted_at: Timestamp | null;
+}
+
+export interface BoardReplies {
+  id: Generated<Int8>;
+  post_id: Int8;
+  parent_id: Int8 | null;
+  user_id: number;
+  depth: number;
+  // Written only by the raw insert in lib/board/replies.ts.
+  path: ColumnType<string[], never, never>;
+  body: string;
+  like_count: Generated<number>;
+  created_at: Generated<Timestamp>;
+  edited_at: Timestamp | null;
+  deleted_at: Timestamp | null;
+}
+
+export interface BoardPostLikes {
+  post_id: Int8;
+  user_id: number;
+  created_at: Generated<Timestamp>;
+}
+
+export interface BoardReplyLikes {
+  reply_id: Int8;
+  user_id: number;
+  created_at: Generated<Timestamp>;
+}
+
+export interface BoardNotifications {
+  id: Generated<Int8>;
+  user_id: number;
+  reply_id: Int8;
+  reason: "reply_to_post" | "reply_to_reply";
+  read_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+}
+
+export interface BoardTemplates {
+  id: Generated<Int8>;
+  post_id: Int8;
+  user_id: number;
+  slug: string;
+  license: "cc-by-4.0" | "cc-by-sa-4.0" | "cc0-1.0";
+  remix_allowed: Generated<boolean>;
+  remixed_from_version_id: Int8 | null;
+  latest_version_id: Int8 | null;
+  apply_count: Generated<number>;
+  remix_count: Generated<number>;
+}
+
+export interface BoardTemplateCollection {
+  name: string;
+  read_access: string;
+  write_access: string;
+}
+
+export interface BoardTemplateVersions {
+  id: Generated<Int8>;
+  template_id: Int8;
+  version: number;
+  source_path: string;
+  file_count: number;
+  size_bytes: Int8;
+  data_collections: ColumnType<
+    BoardTemplateCollection[],
+    string | undefined,
+    string
+  >;
+  changelog: string | null;
+  preview_rendered_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+}
+
+export interface BoardTemplateFiles {
+  version_id: Int8;
+  path: string;
+  size_bytes: Int8;
+  content_type: string;
+}
+
+export interface BoardTemplateApplications {
+  id: Generated<Int8>;
+  version_id: Int8 | null;
+  user_id: number;
+  target_path: string;
+  backup_path: string | null;
+  written_paths: string[];
+  overwritten_paths: string[];
+  created_collections: Generated<string[]>;
+  created_at: Generated<Timestamp>;
+  undone_at: Timestamp | null;
+}
+
 export interface DB {
+  board_notifications: BoardNotifications;
+  board_post_likes: BoardPostLikes;
+  board_posts: BoardPosts;
+  board_replies: BoardReplies;
+  board_reply_likes: BoardReplyLikes;
+  board_template_applications: BoardTemplateApplications;
+  board_template_files: BoardTemplateFiles;
+  board_template_versions: BoardTemplateVersions;
+  board_templates: BoardTemplates;
   site_data_clients: SiteDataClients;
   site_data_access_tokens: SiteDataAccessTokens;
   site_data_auth_codes: SiteDataAuthCodes;

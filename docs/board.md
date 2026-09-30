@@ -1,0 +1,123 @@
+# Board (게시판)
+
+A message board with threaded replies at `/board`, where people share their
+sites and templates. A template is a snapshot of a folder from someone's site
+that anyone can apply to their own site in one step. The home page (`/`) shows
+the six newest **template** posts; other kinds of post stay on the board.
+
+Code: `control-plane/src/lib/board/` (logic), `src/app/(main)/board/` (pages),
+`src/app/(main)/api/board/` (JSON routes). Schema: migration
+`1790738983442_add_board`.
+
+## Behaviour
+
+- **Four kinds of post**: `site` (사이트 자랑), `template`, `question`, `chat`
+  (잡담). A `site` post shows the author's current site screenshot. A
+  `template` post carries files.
+- **Plain text.** Posts and replies are never parsed as HTML or Markdown. A
+  blank line starts a new paragraph, and web addresses become links
+  (`BoardText`).
+- **Writing needs a verified email.** Reading doesn't, and neither does
+  applying a template, since that only writes to your own site.
+- **Replies nest five levels deep** (`depth` 0–4). A reply to a reply at the
+  last level is attached as that reply's sibling, but the person being
+  answered is still notified.
+- **Deletes are soft.** A deleted reply that still has live replies under it
+  stays in the tree as "[삭제된 답글]". Otherwise it disappears.
+- **Moderation**: authors edit and delete their own posts and replies. Admins
+  (`PAYMENT_OPERATOR_USERS`, the same people who run `/admin`) can delete
+  anyone's. Nobody else can.
+- **Hourly limits** per user: 10 posts, 60 replies, 20 template applications.
+  They are counted from the rows' `created_at`, so no counter table is needed.
+- **Notifications**: a new reply notifies the post's author and the author of
+  the reply it answers, at most once each, and never the person writing it.
+  Opening the thread marks them read. They are listed at `/board/notifications`.
+- **Fediverse**: publishing a template post sends a Create(Note) to the
+  author's followers, linking to the post, and adds it to their outbox
+  (`dispatchTemplatePost`). Deleting the post sends Delete(Tombstone) and
+  removes the note from the outbox. Replies from the fediverse are not
+  received.
+
+## Templates
+
+- **A template is one folder**, or the whole site, minus any files or
+  subfolders the author leaves out. `/.backup/` is always left out. Only file
+  types the upload route accepts are allowed. The limits are 200 files and
+  20 MiB, so publishing and applying each fit in one request of R2 copies.
+- **Publishing takes a snapshot.** The files are copied to
+  `_templates/<template_id>/v<version>/` in the site bucket. Login names match
+  `^[a-z0-9]+(-[a-z0-9]+)*$`, so no one's site can collide with that prefix.
+  Later edits to the author's site don't change the template. "새 버전
+  올리기" (publish a new version) on the edit page takes another snapshot.
+- **Licenses**: CC BY 4.0, CC BY-SA 4.0 or CC0 1.0. All three allow copying,
+  which is what applying does.
+- **Collections**: an author can attach some of their own site-data
+  collections. Only each collection's name and permissions travel with the
+  template, never its documents. Applying creates them empty, but only for
+  someone with the database feature. A name the person already uses is left
+  alone.
+- **Applying** is two calls:
+  1. `apply/plan` reports which files would be created or overwritten, and
+     writes nothing.
+  2. `apply` works the plan out again on the server. With backup on (the
+     default), it first copies each file it will overwrite into
+     `.backup/<Seoul time>/`. Then it copies the template's files in, creates
+     the collections, and records the application.
+- **Undo** (in the dialog, or at `/board/applications`):
+  - Files the application created are deleted.
+  - Files it overwrote are restored from the backup. With no backup, they are
+    left as the template wrote them.
+  - Collections and the backup folder are kept.
+- **Remixing**: when `remix_allowed` is set, anyone can publish their own
+  template that credits the source version. The source's `remix_count`
+  counts these.
+- **`apply_count`** counts distinct people, not applications.
+- **Previews**: the screenshot job (`update-screenshots`) renders up to ten
+  unrendered versions per run from the author's live folder, which is the
+  same content at publish time. It uploads them to the screenshots bucket as
+  `_templates/<id>/v<n>.png`. A version that still has no preview after a day
+  is no longer tried. The "원작자 사이트에서 보기" link (view on the author's
+  site) opens the author's live folder, which may have changed since.
+- **Deletion**: deleting a template post removes its R2 files and previews.
+  The database rows stay, so people who applied it keep their history and can
+  still undo. Deleting an account also removes that user's `_templates/`
+  objects.
+
+## Routes
+
+| page                                  | what                                             |
+| ------------------------------------- | ------------------------------------------------ |
+| `/board`                              | list; `?kind=`, `?sort=activity\|new\|applied`, `?page=` |
+| `/board/new`                          | compose; `?kind=`, `?remix=<versionId>`          |
+| `/board/[postId]`                     | post, template panel and apply dialog, reply tree |
+| `/board/[postId]/edit`                | edit; publish a new template version             |
+| `/board/[postId]/replies/[replyId]`   | a reply and everything under it (permalink)      |
+| `/board/notifications`                | my reply notifications                           |
+| `/board/applications`                 | templates I applied, with undo                   |
+
+Every API route takes JSON only, including DELETE, and refuses cross-origin
+requests (`readJson`):
+
+- `POST /api/board/posts`
+- `PATCH`/`DELETE /api/board/posts/[id]`
+- `POST /api/board/posts/[id]/replies`, `PUT`/`DELETE …/like`, `POST …/solve`
+- `PATCH`/`DELETE /api/board/replies/[id]`, `PUT`/`DELETE …/like`
+- `POST /api/board/templates/[id]/versions`
+- `POST /api/board/template-versions/[id]/apply/plan`, `POST …/apply`
+- `POST /api/board/template-applications/[id]/undo`
+- `POST /api/board/notifications/read`
+
+## Tests
+
+`pnpm test:board` runs `src/lib/board/__tests__` against a throwaway
+PostgreSQL cluster migrated to the latest schema. R2 is replaced by an
+in-memory bucket in these tests.
+
+## Not built yet
+
+- A live preview of the exact snapshot. It would need a separate preview
+  address handled by the Rust proxy, so a template's HTML never runs on the
+  control plane's origin.
+- Per-thread subscriptions, reports, and a moderator list separate from the
+  payment operators.
+- Receiving replies from the fediverse.

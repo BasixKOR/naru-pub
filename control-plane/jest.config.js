@@ -29,13 +29,14 @@ const customJestConfig = {
   moduleFileExtensions: ["ts", "tsx", "js", "jsx"],
 
   // Ignore patterns. tests/ holds node:test suites run by `pnpm test:node`,
-  // and the site database suites need real PostgreSQL under
-  // jest.data.config.cjs, so neither belongs in this jsdom run.
+  // and the site database and board suites need real PostgreSQL under
+  // jest.data.config.cjs, so none of them belongs in this jsdom run.
   testPathIgnorePatterns: [
     "<rootDir>/.next/",
     "<rootDir>/node_modules/",
     "<rootDir>/tests/",
     "<rootDir>/src/lib/site-data/",
+    "<rootDir>/src/lib/board/__tests__/",
   ],
 
   // Mock static assets and modules

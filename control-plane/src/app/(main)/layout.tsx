@@ -41,10 +41,10 @@ export default async function RootLayout({
           <div className="bg-background h-screen flex flex-col">
             <nav className="bg-card border-b border-border">
               <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex items-center justify-between h-16">
-                  <div className="flex items-center">
+                <div className="flex items-center justify-between gap-2 h-16">
+                  <div className="flex shrink-0 items-center">
                     <Link href="/" className="flex items-center gap-3 group">
-                      <h1 className="text-2xl font-bold text-foreground group-hover:text-primary transition-colors duration-200">
+                      <h1 className="whitespace-nowrap text-2xl font-bold text-foreground group-hover:text-primary transition-colors duration-200">
                         나루
                       </h1>
                       <Image
@@ -60,12 +60,20 @@ export default async function RootLayout({
                     </Link>
                   </div>
 
-                  <div className="flex items-center space-x-1">
+                  {/* Scrolls sideways on a phone rather than running into
+                      the logo once every menu is showing. */}
+                  <div className="flex min-w-0 items-center space-x-1 overflow-x-auto">
+                    <Link
+                      href="/board"
+                      className="text-muted-foreground hover:text-foreground hover:bg-accent whitespace-nowrap px-2 sm:px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+                    >
+                      게시판
+                    </Link>
                     {user ? (
                       <>
                         <Link
                           href="/files"
-                          className="text-muted-foreground hover:text-foreground hover:bg-accent px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+                          className="text-muted-foreground hover:text-foreground hover:bg-accent whitespace-nowrap px-2 sm:px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200"
                         >
                           파일
                         </Link>
@@ -88,7 +96,7 @@ export default async function RootLayout({
                       <>
                         <Link
                           href="/login"
-                          className="text-muted-foreground hover:text-foreground hover:bg-accent px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+                          className="text-muted-foreground hover:text-foreground hover:bg-accent whitespace-nowrap px-2 sm:px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200"
                         >
                           로그인
                         </Link>

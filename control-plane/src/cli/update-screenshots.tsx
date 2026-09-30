@@ -1,8 +1,14 @@
 import { parseArgs } from "node:util";
+import { sql } from "kysely";
 import { db } from "@/lib/database";
 import { dispatchActorUpdate } from "@/lib/federation";
 import { s3Client } from "@/lib/s3";
-import { getHomepageUrl, getRenderedSiteUrl } from "@/lib/site-urls";
+import { templatePreviewKey } from "@/lib/board/preview";
+import {
+  getHomepageUrl,
+  getPublicAssetUrl,
+  getRenderedSiteUrl,
+} from "@/lib/site-urls";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { Browser, chromium } from "playwright";
 
@@ -26,6 +32,41 @@ import { Browser, chromium } from "playwright";
 const DEFAULT_CONCURRENCY = 2;
 
 type TargetUser = { id: number; login_name: string };
+
+// Board templates waiting for a preview. The preview is the author's folder as
+// published, rendered from their live site: at publish time it is the same
+// content. A render that keeps failing stops being retried after a day.
+const TEMPLATE_PREVIEW_WINDOW = sql<Date>`now() - interval '1 day'`;
+const TEMPLATE_PREVIEWS_PER_RUN = 10;
+
+type TargetTemplate = {
+  version_id: string;
+  template_id: string;
+  version: number;
+  source_path: string;
+  login_name: string;
+};
+
+async function selectTemplateTargets(): Promise<TargetTemplate[]> {
+  return await db
+    .selectFrom("board_template_versions as v")
+    .innerJoin("board_templates as t", "t.id", "v.template_id")
+    .innerJoin("board_posts as p", "p.id", "t.post_id")
+    .innerJoin("users as u", "u.id", "t.user_id")
+    .select([
+      "v.id as version_id",
+      "v.template_id",
+      "v.version",
+      "v.source_path",
+      "u.login_name",
+    ])
+    .where("v.preview_rendered_at", "is", null)
+    .where("v.created_at", ">", TEMPLATE_PREVIEW_WINDOW)
+    .where("p.deleted_at", "is", null)
+    .orderBy("v.created_at", "asc")
+    .limit(TEMPLATE_PREVIEWS_PER_RUN)
+    .execute();
+}
 
 async function selectTargets(
   loginName: string | undefined,
@@ -128,6 +169,36 @@ async function renderUser(browser: Browser, user: TargetUser): Promise<void> {
   await dispatchActorUpdate(user.id);
 }
 
+async function renderTemplate(
+  browser: Browser,
+  target: TargetTemplate,
+): Promise<void> {
+  const url = getPublicAssetUrl(target.login_name, target.source_path);
+  const screenshot = await takeScreenshot(browser, url);
+  if (screenshot.length === 0) {
+    console.log(
+      `Skipping template ${target.template_id}: screenshot is 0 bytes`,
+    );
+    return;
+  }
+  await s3Client.send(
+    new PutObjectCommand({
+      Bucket: process.env.S3_BUCKET_NAME_SCREENSHOTS!,
+      Key: templatePreviewKey(target.template_id, target.version),
+      Body: screenshot,
+      ContentType: "image/png",
+    }),
+  );
+  await db
+    .updateTable("board_template_versions")
+    .set({ preview_rendered_at: new Date() })
+    .where("id", "=", target.version_id)
+    .execute();
+  console.log(
+    `Uploaded preview for template ${target.template_id} v${target.version}`,
+  );
+}
+
 async function main() {
   const { values } = parseArgs({
     options: {
@@ -142,6 +213,8 @@ async function main() {
     : DEFAULT_CONCURRENCY;
 
   const targets = await selectTargets(values.user, values.force ?? false);
+  // A run for one user renders only that user.
+  const templateTargets = values.user ? [] : await selectTemplateTargets();
 
   if (values.user && targets.length === 0) {
     console.error(
@@ -152,7 +225,7 @@ async function main() {
   }
 
   console.log(
-    `[update-screenshots] ${targets.length} target(s), concurrency=${concurrency}`,
+    `[update-screenshots] ${targets.length} target(s), ${templateTargets.length} template(s), concurrency=${concurrency}`,
   );
 
   let browser: Browser | null = null;
@@ -178,6 +251,16 @@ async function main() {
 
     const workerCount = Math.min(concurrency, targets.length);
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+    for (const target of templateTargets) {
+      try {
+        await renderTemplate(launched, target);
+      } catch (error) {
+        console.error(
+          `Failed to render template ${target.template_id}: ${error}`,
+        );
+      }
+    }
   } finally {
     if (browser) await browser.close();
   }

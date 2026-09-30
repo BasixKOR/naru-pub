@@ -1,0 +1,116 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { MAX_CHANGELOG_LENGTH } from "@/lib/board/constants";
+import { boardRequest } from "../../_components/api";
+import {
+  FolderPicker,
+  type FolderSelection,
+} from "../../_components/FolderPicker";
+
+export function NewVersionForm({
+  templateId,
+  postId,
+  initialFolder,
+  collections,
+  initialCollections,
+}: {
+  templateId: string;
+  postId: string;
+  initialFolder: string;
+  collections: string[];
+  initialCollections: string[];
+}) {
+  const router = useRouter();
+  const [selection, setSelection] = useState<FolderSelection>({
+    folder: initialFolder,
+    exclude: [],
+  });
+  const [changelog, setChangelog] = useState("");
+  const [chosen, setChosen] = useState<string[]>(
+    initialCollections.filter((name) => collections.includes(name)),
+  );
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const { version } = await boardRequest<{ version: number }>(
+        `/api/board/templates/${templateId}/versions`,
+        "POST",
+        {
+          folder: selection.folder,
+          exclude: selection.exclude,
+          changelog,
+          collections: chosen,
+        },
+      );
+      toast.success(`v${version}을(를) 올렸어요.`);
+      router.push(`/board/${postId}`);
+      router.refresh();
+    } catch (error: any) {
+      toast.error(error.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <FolderPicker value={selection} onChange={setSelection} />
+      {collections.length > 0 && (
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-bold">
+            함께 쓸 데이터베이스 컬렉션
+          </legend>
+          <div className="flex flex-wrap gap-2">
+            {collections.map((name) => (
+              <label
+                key={name}
+                className="flex h-10 items-center gap-2 border border-border px-3 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  checked={chosen.includes(name)}
+                  onChange={(event) =>
+                    setChosen((current) =>
+                      event.target.checked
+                        ? [...current, name]
+                        : current.filter((c) => c !== name),
+                    )
+                  }
+                  className="h-4 w-4 accent-primary"
+                />
+                <code>{name}</code>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
+      <div className="space-y-2">
+        <label htmlFor="changelog" className="text-sm font-bold">
+          바뀐 점
+        </label>
+        <textarea
+          id="changelog"
+          value={changelog}
+          onChange={(event) => setChangelog(event.target.value)}
+          maxLength={MAX_CHANGELOG_LENGTH}
+          rows={3}
+          className="w-full resize-y border border-border bg-background px-3 py-2 text-sm"
+        />
+      </div>
+      <div className="flex justify-end">
+        <button
+          type="submit"
+          disabled={busy}
+          className="h-12 bg-primary px-6 text-sm font-bold text-primary-foreground disabled:opacity-50"
+        >
+          {busy ? "파일을 복사하는 중…" : "새 버전 올리기"}
+        </button>
+      </div>
+    </form>
+  );
+}

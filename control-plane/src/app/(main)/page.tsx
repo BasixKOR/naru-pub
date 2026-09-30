@@ -174,7 +174,10 @@ export default async function Home() {
         </Card>
 
         <div className="flex flex-col gap-8 lg:flex-row lg:items-stretch">
-          <Card className="bg-card border-2 border-border shadow-lg min-w-0 flex-1">
+          {/* Beside 지표 this card is as tall as the taller of the two. The
+              template rows share any extra height; each preview's frame grows
+              into it with the picture centered, never cropped or squeezed. */}
+          <Card className="bg-card border-2 border-border shadow-lg min-w-0 flex-1 flex flex-col">
             <CardHeader className="bg-secondary border-b-2 border-border">
               <div className="flex items-center justify-between gap-4">
                 <CardTitle className="text-foreground text-xl font-bold flex items-center gap-2">
@@ -188,7 +191,7 @@ export default async function Home() {
                 </Link>
               </div>
             </CardHeader>
-            <CardContent className="p-6">
+            <CardContent className="p-6 flex-1 flex flex-col">
               {templates.length === 0 ? (
                 <p className="text-muted-foreground text-sm">
                   아직 공유된 템플릿이 없어요.{" "}
@@ -200,7 +203,7 @@ export default async function Home() {
                   </Link>
                 </p>
               ) : (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 lg:auto-rows-fr">
                   {templates.map((post) => (
                     <article
                       key={post.id}
@@ -210,11 +213,13 @@ export default async function Home() {
                         href={`/board/${post.id}`}
                         tabIndex={-1}
                         aria-hidden="true"
+                        className="block lg:flex-1"
                       >
                         <Thumbnail
                           url={postThumbnailUrl(post)}
                           alt=""
                           className="border-0 border-b"
+                          fill
                         />
                       </Link>
                       <div className="p-3 space-y-1">

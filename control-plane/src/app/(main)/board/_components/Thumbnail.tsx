@@ -25,28 +25,34 @@ export function Thumbnail({
   url,
   alt,
   className,
+  fill = false,
 }: {
   url: string | null;
   alt: string;
   className?: string;
+  // On wide screens, grow to the container's height. The 4:3 picture keeps
+  // its shape and is centered in the extra space, so nothing is cropped.
+  fill?: boolean;
 }) {
   return (
     <div
-      className={`relative aspect-[4/3] overflow-hidden border border-border bg-muted ${className ?? ""}`}
+      className={`flex items-center overflow-hidden border border-border bg-muted ${fill ? "lg:h-full" : ""} ${className ?? ""}`}
     >
-      {url ? (
-        <Image
-          src={url}
-          alt={alt}
-          fill
-          sizes="(max-width: 640px) 100vw, 320px"
-          className="object-cover object-top"
-        />
-      ) : (
-        <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
-          미리보기 준비 중
-        </div>
-      )}
+      <div className="relative aspect-[4/3] w-full">
+        {url ? (
+          <Image
+            src={url}
+            alt={alt}
+            fill
+            sizes="(max-width: 640px) 100vw, 320px"
+            className="object-cover object-top"
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+            미리보기 준비 중
+          </div>
+        )}
+      </div>
     </div>
   );
 }

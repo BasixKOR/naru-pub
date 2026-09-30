@@ -34,28 +34,33 @@ function Sparkline({ values, label }: { values: number[]; label: string }) {
     return `${x.toFixed(2)},${y.toFixed(2)}`;
   });
 
+  // The chart is absolutely placed in its box, so it adds nothing to the
+  // tile's natural height: the box is 24px unless a stretched tile gives it
+  // more room.
   return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      preserveAspectRatio="none"
-      className="text-primary mt-2 h-6 w-full"
-      role="img"
-      aria-label={label}
-    >
-      <polygon
-        points={`0,${height} ${points.join(" ")} ${width},${height}`}
-        fill="currentColor"
-        fillOpacity="0.12"
-      />
-      <polyline
-        points={points.join(" ")}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        vectorEffect="non-scaling-stroke"
-      />
-    </svg>
+    <div className="relative mt-2 h-6 w-full lg:h-auto lg:min-h-6 lg:flex-1">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        className="absolute inset-0 h-full w-full text-primary"
+        role="img"
+        aria-label={label}
+      >
+        <polygon
+          points={`0,${height} ${points.join(" ")} ${width},${height}`}
+          fill="currentColor"
+          fillOpacity="0.12"
+        />
+        <polyline
+          points={points.join(" ")}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+    </div>
   );
 }
 
@@ -246,15 +251,18 @@ export default async function Home() {
             </CardContent>
           </Card>
 
-          <Card className="bg-card border-2 border-border shadow-lg lg:w-80 lg:shrink-0">
+          <Card className="bg-card border-2 border-border shadow-lg lg:w-80 lg:shrink-0 flex flex-col">
             <CardHeader className="bg-secondary border-b-2 border-border">
               <CardTitle className="text-foreground text-xl font-bold flex items-center gap-2">
                 <BarChart3 size={20} /> 지표
               </CardTitle>
             </CardHeader>
-            <CardContent className="p-6 space-y-4">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-1">
-                <div className="bg-background border border-border rounded p-3">
+            <CardContent className="p-6 flex flex-1 flex-col gap-4">
+              {/* Beside 새 템플릿 this card is as tall as the taller of the two:
+                  the tiles share that height and their sparklines grow into
+                  it. */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:flex-1 lg:grid-cols-1 lg:auto-rows-fr">
+                <div className="bg-background border border-border rounded p-3 flex flex-col">
                   <div className="text-2xl font-bold text-foreground tabular-nums">
                     {stats.userCount.toLocaleString("ko-KR")}명
                   </div>
@@ -266,7 +274,7 @@ export default async function Home() {
                     label="월별 누적 사용자"
                   />
                 </div>
-                <div className="bg-background border border-border rounded p-3">
+                <div className="bg-background border border-border rounded p-3 flex flex-col">
                   <div className="text-2xl font-bold text-foreground tabular-nums">
                     {stats.totalViews.toLocaleString("ko-KR")}
                   </div>
@@ -278,7 +286,7 @@ export default async function Home() {
                     label="최근 30일 페이지뷰"
                   />
                 </div>
-                <div className="bg-background border border-border rounded p-3">
+                <div className="bg-background border border-border rounded p-3 flex flex-col">
                   <div className="text-2xl font-bold text-foreground tabular-nums">
                     {stats.totalEdits.toLocaleString("ko-KR")}
                   </div>
